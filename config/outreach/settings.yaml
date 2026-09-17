@@ -1,6 +1,6 @@
 # Outreach settings. Credentials never live here: set GTM_SMTP_USER and GTM_SMTP_PASSWORD
 # (Gmail address + App Password). Without them every send is a dry run to data/outbox/.
-sender_name: "Your Name"
+sender_name: "Qualifyr Team"
 reply_to: null                 # defaults to the sending address
 smtp_host: smtp.gmail.com
 smtp_port: 587

@@ -13,6 +13,10 @@ on:
         description: Write .eml files instead of sending
         type: boolean
         default: false
+      ignore_window:
+        description: Send outside 09-18 PKT (supervised runs only)
+        type: boolean
+        default: false
   schedule:
     - cron: "0 5 * * 1-5"   # weekdays 05:00 UTC = 10:00 PKT, inside the send window
 
@@ -31,6 +35,7 @@ jobs:
       CAMPAIGN_ID: ${{ github.event.inputs.campaign_id || 'retail-isb-001' }}
       LIMIT: ${{ github.event.inputs.limit || '' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      IGNORE_WINDOW: ${{ github.event.inputs.ignore_window || 'false' }}
       # Gmail address + App Password. Absent -> the engine dry-runs and sends nothing.
       GTM_SMTP_USER: ${{ secrets.GTM_SMTP_USER }}
       GTM_SMTP_PASSWORD: ${{ secrets.GTM_SMTP_PASSWORD }}
@@ -68,6 +73,7 @@ jobs:
           args=""
           [ -n "$LIMIT" ] && args="$args --limit $LIMIT"
           [ "$DRY_RUN" = "true" ] && args="$args --dry-run"
+          [ "$IGNORE_WINDOW" = "true" ] && args="$args --ignore-window"
           python -m gtm_engine.cli outreach send "$CAMPAIGN_ID" $args
           python -m gtm_engine.cli outreach status "$CAMPAIGN_ID"
 
