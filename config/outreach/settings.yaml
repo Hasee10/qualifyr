@@ -15,4 +15,4 @@ skip_weekends: true
 
 followup_1_after_days: 3
 followup_2_after_days: 4       # after follow-up 1
-require_approval: false        # true -> only leads marked approved enter the queue
+require_approval: true         # every email is reviewed (and optionally edited) in the UI before it is sent

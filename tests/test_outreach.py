@@ -17,7 +17,7 @@ MON_10AM_PKT = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)  # Monday 10:00 
 @pytest.fixture
 def osettings() -> OutreachSettings:
     return OutreachSettings(sender_name="Haseeb", daily_limit=3, delay_between_sends_s=0,
-                            followup_1_after_days=3, followup_2_after_days=4)
+                            followup_1_after_days=3, followup_2_after_days=4, require_approval=False)
 
 
 @pytest.fixture
@@ -278,3 +278,47 @@ def test_bounce_previously_misread_as_reply_is_corrected(db, campaign, osettings
     report = apply_inbound(db, "test-retail", [bounce], ledger)
     assert report.bounced == 1
     assert db.get_lead(zara.lead_id).sequence_status == SequenceStatus.BOUNCED
+
+
+# --- human approval ----------------------------------------------------------------------
+
+def test_approval_gate_blocks_until_draft_approved(db, campaign, osettings, templates, tmp_path):
+    from gtm_engine.outreach.sequencer import prepare_drafts
+    osettings.require_approval = True
+    ledger = Ledger(tmp_path / "ledger.json")
+    enqueue(db, "test-retail", osettings, ledger)
+    sender = FakeSender()
+
+    # Nothing goes out without an approved draft
+    r = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
+    assert r.sent == 0 and r.skipped == 2 and sender.sent == []
+
+    queue = prepare_drafts(db, campaign, osettings, templates, now=MON_10AM_PKT)
+    assert [(q["step"], q["draft"]["status"]) for q in queue] == [("email_1", "pending"), ("email_1", "pending")]
+    zara = next(q for q in queue if q["lead"].company_name == "Zara Fabrics")
+
+    # Human edits the body and approves; the edited text is what gets sent
+    db.upsert_draft(zara["lead"].lead_id, "email_1", "Custom subject", "Hi Ahmed, edited by a human.", status="approved", edited=True)
+    r = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
+    assert r.sent == 1 and r.skipped == 1
+    assert sender.sent[0].subject == "Custom subject" and "edited by a human" in sender.sent[0].body
+    assert db.get_draft(zara["lead"].lead_id, "email_1")["status"] == "sent"
+
+    # Follow-up needs its own approval: 3 days later a new pending draft appears, nothing is sent
+    day3 = MON_10AM_PKT + timedelta(days=3)
+    r = send_due(db, campaign, osettings, templates, sender, ledger, now=day3, sleep=lambda s: None)
+    assert r.sent == 0
+    queue = prepare_drafts(db, campaign, osettings, templates, now=day3)
+    assert any(q["step"] == "followup_1" and q["lead"].company_name == "Zara Fabrics" for q in queue)
+
+
+def test_rejected_draft_is_never_sent(db, campaign, osettings, templates, tmp_path):
+    from gtm_engine.outreach.sequencer import prepare_drafts
+    osettings.require_approval = True
+    ledger = Ledger(tmp_path / "ledger.json")
+    enqueue(db, "test-retail", osettings, ledger)
+    for q in prepare_drafts(db, campaign, osettings, templates, now=MON_10AM_PKT):
+        db.set_draft_status(q["lead"].lead_id, q["step"], "rejected")
+    sender = FakeSender()
+    r = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
+    assert r.sent == 0 and sender.sent == []

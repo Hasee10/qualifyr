@@ -74,6 +74,18 @@ CREATE TABLE IF NOT EXISTS suppressions (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS drafts (
+    lead_id TEXT NOT NULL,
+    step TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL,               -- pending | approved | rejected | sent
+    edited INTEGER NOT NULL DEFAULT 0,  -- 1 when a human changed the rendered text
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    PRIMARY KEY (lead_id, step)
+);
+
 CREATE TABLE IF NOT EXISTS outreach_events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id TEXT NOT NULL,
@@ -256,6 +268,35 @@ class Database:
         return self.conn.execute(
             f"SELECT 1 FROM suppressions WHERE value IN ({placeholders}) LIMIT 1", vals
         ).fetchone() is not None
+
+    # -- drafts (human approval) ----------------------------------------------
+
+    def get_draft(self, lead_id: str, step: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM drafts WHERE lead_id = ? AND step = ?", (lead_id, step)).fetchone()
+        return dict(row) if row else None
+
+    def upsert_draft(self, lead_id: str, step: str, subject: str, body: str, *,
+                     status: str = "pending", edited: bool = False) -> dict:
+        existing = self.get_draft(lead_id, step)
+        created = existing["created_at"] if existing else utcnow().isoformat()
+        approved_at = utcnow().isoformat() if status == "approved" else (existing or {}).get("approved_at")
+        self.conn.execute(
+            "INSERT OR REPLACE INTO drafts (lead_id, step, subject, body, status, edited, created_at, approved_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (lead_id, step, subject, body, status, int(edited), created, approved_at),
+        )
+        self.conn.commit()
+        return self.get_draft(lead_id, step)
+
+    def set_draft_status(self, lead_id: str, step: str, status: str) -> None:
+        self.conn.execute(
+            "UPDATE drafts SET status = ?, approved_at = COALESCE(approved_at, ?) WHERE lead_id = ? AND step = ?",
+            (status, utcnow().isoformat() if status == "approved" else None, lead_id, step),
+        )
+        self.conn.commit()
+
+    def drafts_by_status(self, status: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM drafts WHERE status = ? ORDER BY created_at", (status,))]
 
     # -- outreach events -----------------------------------------------------
 

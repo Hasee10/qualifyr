@@ -27,7 +27,7 @@ class OutreachSettings(BaseModel):
     skip_weekends: bool = True
     followup_1_after_days: int = 3
     followup_2_after_days: int = 4
-    require_approval: bool = False
+    require_approval: bool = True
 
     @property
     def smtp_user(self) -> str | None:

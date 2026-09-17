@@ -59,8 +59,6 @@ def eligible(lead: Lead, settings: OutreachSettings) -> tuple[bool, str]:
         return False, "not outreach-ready"
     if not lead.contact_email or lead.email_status not in (EmailStatus.MX_VALID, EmailStatus.GENERIC):
         return False, "no validated email"
-    if settings.require_approval and not lead.approved:
-        return False, "awaiting approval"
     if lead.sequence_status != SequenceStatus.NOT_QUEUED:
         return False, f"already {lead.sequence_status.value}"
     return True, "ok"
@@ -178,9 +176,23 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
             report.skipped += 1
             continue
 
-        rendered = render(step, lead, campaign, settings, templates)
+        draft = db.get_draft(lead.lead_id, step)
+        if settings.require_approval:
+            if not draft or draft["status"] != "approved":
+                report.skipped += 1
+                report.details.append(f"{lead.company_name}: {step} awaiting human approval")
+                continue
+            subject, body = draft["subject"], draft["body"]
+        elif draft and draft["status"] == "approved":
+            subject, body = draft["subject"], draft["body"]
+        elif draft and draft["status"] == "rejected":
+            report.skipped += 1
+            continue
+        else:
+            rendered = render(step, lead, campaign, settings, templates)
+            subject, body = rendered.subject, rendered.body
         result = sender.send(OutgoingEmail(
-            to=email, subject=rendered.subject, body=rendered.body,
+            to=email, subject=subject, body=body,
             in_reply_to=lead.thread_message_id if step != "email_1" else None,
             lead_id=lead.lead_id, step=step,
         ))
@@ -197,6 +209,8 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
             continue
 
         consecutive_failures = 0
+        if draft:
+            db.set_draft_status(lead.lead_id, step, "sent")
         ledger.record_sent(email, step, result.message_id, lead.lead_id, now)
         _advance(db, lead, step, next_status, result.message_id, settings, now)
         db.add_event(lead.lead_id, "sent", step=step, detail=result.message_id)
@@ -221,3 +235,18 @@ def _advance(db: Database, lead: Lead, step: str, next_status: SequenceStatus, m
     lead.sequence_status = next_status
     lead.next_contact_at = _next_contact(lead.sequence_status, now, settings)
     db.update_lead(lead)
+
+
+def prepare_drafts(db: Database, campaign: CampaignConfig, settings: OutreachSettings, templates: Templates,
+                   now: datetime | None = None) -> list[dict]:
+    """Render a pending draft for every due lead that has none yet, and return the review
+    queue: one row per due (lead, step) with the current draft and its status."""
+    queue: list[dict] = []
+    for lead in due_leads(db, campaign.campaign_id, now):
+        step, _ = NEXT_STEP[lead.sequence_status]
+        draft = db.get_draft(lead.lead_id, step)
+        if draft is None:
+            rendered = render(step, lead, campaign, settings, templates)
+            draft = db.upsert_draft(lead.lead_id, step, rendered.subject, rendered.body)
+        queue.append({"lead": lead, "step": step, "draft": draft})
+    return queue
