@@ -28,6 +28,26 @@ Other commands:
 .venv/Scripts/python -m pytest
 ```
 
+## Outreach
+
+```bash
+.venv/Scripts/python -m gtm_engine.cli outreach preview retail-isb-001          # see the 3 emails for top leads
+.venv/Scripts/python -m gtm_engine.cli outreach send retail-isb-001 --dry-run   # writes .eml files to data/outbox/
+.venv/Scripts/python -m gtm_engine.cli outreach send retail-isb-001             # real send (needs credentials)
+.venv/Scripts/python -m gtm_engine.cli outreach status retail-isb-001
+.venv/Scripts/python -m gtm_engine.cli suppress someone@company.pk
+```
+
+Credentials come only from the environment (`GTM_SMTP_USER`, `GTM_SMTP_PASSWORD` = Gmail address +
+App Password). Without them every send is a dry run. Sequence: Email 1 → +3 days Follow-up 1 →
++4 days Follow-up 2, threaded; stops on reply, bounce, "STOP", or suppression. Daily cap, 45 s
+spacing and a 09:00–18:00 Asia/Karachi weekday window live in `config/outreach/settings.yaml`;
+copy in `config/outreach/templates.yaml`. Every send is recorded in
+`leads/<campaign>/outreach_ledger.json`, which CI commits, so an address never receives the same
+step twice even if the runner's database is lost.
+
+GitHub Actions: `Outreach` runs weekdays at 10:00 PKT (secrets `GTM_SMTP_USER` / `GTM_SMTP_PASSWORD`).
+
 ## How a lead is produced
 
 ```
@@ -59,7 +79,8 @@ gtm_engine/
   scoring/        scoring.py
   export/         csv_export.py
   storage/        database.py (SQLite)
-  outreach/       (M9, not yet built)
+  outreach/       templates, sequencer (queue + state machine), sender (Gmail/dry-run),
+                  reply_state (IMAP), ledger (durable send log committed to leads/)
   api/            FastAPI skeleton
   pipeline.py     orchestration
   cli.py
@@ -81,5 +102,5 @@ data/             sqlite db + exports (gitignored)
 | M6 Validation (domains, MX, dedupe, suppression) | done |
 | M7 Scoring with reasons | done |
 | M8 Export UI | CLI + API done; web UI pending template |
-| M9 Outreach | not started |
+| M9 Outreach (Gmail SMTP, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
 | M10 Hardening | in progress |
