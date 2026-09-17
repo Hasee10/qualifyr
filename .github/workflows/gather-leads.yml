@@ -1,0 +1,88 @@
+name: Gather leads
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: Campaign YAML path
+        default: config/campaigns/example_retail_islamabad.yaml
+      max_companies:
+        description: Companies to process this run
+        default: "60"
+      commit_results:
+        description: Commit CSVs into leads/ (otherwise artifacts only)
+        type: boolean
+        default: true
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC (08:00 PKT)
+
+concurrency:
+  group: gather-leads
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  gather:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CAMPAIGN: ${{ github.event.inputs.campaign || 'config/campaigns/example_retail_islamabad.yaml' }}
+      MAX_COMPANIES: ${{ github.event.inputs.max_companies || '60' }}
+      COMMIT_RESULTS: ${{ github.event.inputs.commit_results || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[api]"
+
+      # The SQLite DB carries dedupe state and suppressions across runs. Cache keys are
+      # immutable, so save under a fresh key every run and restore the newest.
+      - name: Restore engine database
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/gtm.sqlite
+            data/geocode_cache.json
+          key: gtm-db-${{ github.run_id }}
+          restore-keys: gtm-db-
+
+      - name: Run campaign
+        run: python -m gtm_engine.cli run "$CAMPAIGN" --max-companies "$MAX_COMPANIES"
+
+      - name: Save engine database
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/gtm.sqlite
+            data/geocode_cache.json
+          key: gtm-db-${{ github.run_id }}
+
+      - name: Upload CSVs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-${{ github.run_number }}
+          path: data/exports/*.csv
+          retention-days: 90
+
+      - name: Commit results into leads/
+        if: env.COMMIT_RESULTS == 'true'
+        run: |
+          campaign_id=$(python -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['campaign_id'])" "$CAMPAIGN")
+          mkdir -p "leads/$campaign_id"
+          cp data/exports/*_qualified.csv "leads/$campaign_id/"
+          cp data/exports/*_all.csv "leads/$campaign_id/"
+          # Keep a stable "latest" pointer so downstream tools have a fixed path.
+          cp "$(ls -t data/exports/*_qualified.csv | head -1)" "leads/$campaign_id/latest_qualified.csv"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add leads
+          git diff --cached --quiet && echo "no new leads" && exit 0
+          git commit -m "leads: $campaign_id run ${{ github.run_number }} [skip ci]"
+          git push
