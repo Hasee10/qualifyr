@@ -178,6 +178,17 @@ class Database:
         )
         self.conn.commit()
 
+    def update_lead(self, lead: Lead) -> None:
+        """Update a lead's state without touching run_id/company_key (outreach stages)."""
+        self.conn.execute(
+            "UPDATE leads SET company_type = ?, total_score = ?, priority = ?, outreach_ready = ?, "
+            "sequence_status = ?, contact_email = ?, data_json = ?, updated_at = ? WHERE lead_id = ?",
+            (lead.company_type.value, lead.total_score, lead.priority.value, int(lead.outreach_ready),
+             lead.sequence_status.value, lead.contact_email, lead.model_dump_json(),
+             utcnow().isoformat(), lead.lead_id),
+        )
+        self.conn.commit()
+
     def get_lead(self, lead_id: str) -> Lead | None:
         row = self.conn.execute("SELECT data_json FROM leads WHERE lead_id = ?", (lead_id,)).fetchone()
         return Lead.model_validate_json(row["data_json"]) if row else None
@@ -202,6 +213,24 @@ class Database:
         sql += " ORDER BY total_score DESC"
         rows = self.conn.execute(sql, params).fetchall()
         return [Lead.model_validate_json(r["data_json"]) for r in rows]
+
+    def leads_by_status(self, campaign_id: str, statuses: list[str]) -> list[Lead]:
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self.conn.execute(
+            f"SELECT data_json FROM leads WHERE campaign_id = ? AND sequence_status IN ({placeholders}) "
+            "ORDER BY total_score DESC", [campaign_id, *statuses]
+        ).fetchall()
+        return [Lead.model_validate_json(r["data_json"]) for r in rows]
+
+    def campaign_config(self, campaign_id: str) -> dict | None:
+        row = self.conn.execute("SELECT config_json FROM campaigns WHERE campaign_id = ?", (campaign_id,)).fetchone()
+        return json.loads(row["config_json"]) if row else None
+
+    def events_today(self, event_type: str, day_prefix: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM outreach_events WHERE event_type = ? AND created_at LIKE ?",
+            (event_type, day_prefix + "%"),
+        ).fetchone()[0]
 
     def lead_for_company(self, campaign_id: str, company_key: str) -> Lead | None:
         row = self.conn.execute(

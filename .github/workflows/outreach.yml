@@ -1,0 +1,101 @@
+name: Outreach
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Campaign id (must have been gathered before)
+        default: retail-isb-001
+      limit:
+        description: Max emails this run (blank = daily cap)
+        default: ""
+      dry_run:
+        description: Write .eml files instead of sending
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 5 * * 1-5"   # weekdays 05:00 UTC = 10:00 PKT, inside the send window
+
+concurrency:
+  group: outreach
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CAMPAIGN_ID: ${{ github.event.inputs.campaign_id || 'retail-isb-001' }}
+      LIMIT: ${{ github.event.inputs.limit || '' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      # Gmail address + App Password. Absent -> the engine dry-runs and sends nothing.
+      GTM_SMTP_USER: ${{ secrets.GTM_SMTP_USER }}
+      GTM_SMTP_PASSWORD: ${{ secrets.GTM_SMTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[api]"
+
+      - name: Restore engine database
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/gtm.sqlite
+            data/geocode_cache.json
+          key: gtm-db-${{ github.run_id }}
+          restore-keys: gtm-db-
+
+      - name: Ensure the campaign exists in the database
+        run: |
+          if [ ! -f data/gtm.sqlite ] || ! python -c "
+          import sys; from gtm_engine.storage.database import Database
+          sys.exit(0 if Database('data/gtm.sqlite').campaign_config('$CAMPAIGN_ID') else 1)"; then
+            echo "database missing or campaign not gathered yet; gathering first"
+            cfg=$(grep -l "campaign_id: *$CAMPAIGN_ID" config/campaigns/*.yaml | head -1)
+            python -m gtm_engine.cli run "$cfg" --max-companies 60
+          fi
+
+      - name: Sync replies and send due emails
+        run: |
+          args=""
+          [ -n "$LIMIT" ] && args="$args --limit $LIMIT"
+          [ "$DRY_RUN" = "true" ] && args="$args --dry-run"
+          python -m gtm_engine.cli outreach send "$CAMPAIGN_ID" $args
+          python -m gtm_engine.cli outreach status "$CAMPAIGN_ID"
+
+      - name: Save engine database
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/gtm.sqlite
+            data/geocode_cache.json
+          key: gtm-db-${{ github.run_id }}
+
+      - name: Upload dry-run outbox
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outbox-${{ github.run_number }}
+          path: data/outbox/*.eml
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Commit send ledger
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add leads/*/outreach_ledger.json 2>/dev/null || true
+          git diff --cached --quiet && echo "ledger unchanged" && exit 0
+          git commit -m "outreach: $CAMPAIGN_ID ledger run ${{ github.run_number }} [skip ci]"
+          git pull --rebase origin main
+          git push

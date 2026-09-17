@@ -11,6 +11,7 @@ from pathlib import Path
 from gtm_engine.config import load_campaign, load_defaults, load_settings
 from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.models import CompanyType
+from gtm_engine.outreach.cli import add_outreach_parser
 from gtm_engine.pipeline import Pipeline
 from gtm_engine.scraping.fetcher import HttpFetcher
 from gtm_engine.storage.database import Database
@@ -115,6 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
     runs = sub.add_parser("runs", help="list past runs")
     runs.add_argument("--campaign-id", default=None)
     runs.set_defaults(func=_runs)
+
+    add_outreach_parser(sub)
     return p
 
 

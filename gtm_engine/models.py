@@ -170,6 +170,11 @@ class Lead(BaseModel):
     priority: Priority = Priority.REJECT
     technologies: list[str] = Field(default_factory=list)
     evidence: dict = Field(default_factory=dict)
+    # Outreach state (not in the CSV schema, kept in the DB and the ledger)
+    approved: bool = False
+    next_contact_at: datetime | None = None
+    thread_message_id: str | None = None   # Message-ID of email 1; follow-ups reply to it
+    last_sent_at: datetime | None = None
 
 
 CSV_COLUMNS: list[str] = [
