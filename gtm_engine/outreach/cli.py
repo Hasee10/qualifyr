@@ -12,7 +12,7 @@ from gtm_engine.config.loader import PROJECT_ROOT
 from gtm_engine.models import SequenceStatus
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
-from gtm_engine.outreach.reply_state import sync_replies
+from gtm_engine.outreach.reply_state import sync_replies, verify_sent
 from gtm_engine.outreach.sender import make_sender
 from gtm_engine.outreach.sequencer import due_leads, enqueue, send_due
 from gtm_engine.outreach.templates import render
@@ -133,6 +133,20 @@ def cmd_preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    osettings = load_outreach_settings()
+    results = verify_sent(osettings, Ledger(ledger_path(args.campaign_id)))
+    if not results:
+        print("nothing to verify (no credentials or empty ledger)")
+        return 0
+    missing = 0
+    for addr, step, found in results:
+        print(f"  {'FOUND  ' if found else 'MISSING'} {step:<11} {addr}")
+        missing += 0 if found else 1
+    print(f"{len(results) - missing}/{len(results)} ledger entries confirmed in Gmail Sent folder")
+    return 0 if missing == 0 else 1
+
+
 def add_outreach_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("outreach", help="queue, send and track the email sequence")
     s = p.add_subparsers(dest="outreach_command", required=True)
@@ -164,6 +178,10 @@ def add_outreach_parser(sub: argparse._SubParsersAction) -> None:
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--revoke", action="store_true")
     ap.set_defaults(func=cmd_approve)
+
+    vf = s.add_parser("verify", help="confirm ledger Message-IDs exist in the Gmail Sent folder")
+    vf.add_argument("campaign_id")
+    vf.set_defaults(func=cmd_verify)
 
     pv = s.add_parser("preview", help="render the 3 emails for the top leads without sending")
     pv.add_argument("campaign_id")

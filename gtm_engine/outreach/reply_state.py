@@ -142,3 +142,25 @@ def apply_inbound(db: Database, campaign_id: str, messages: list[InboundMessage]
 
 def sync_replies(db: Database, campaign_id: str, settings: OutreachSettings, ledger: Ledger | None = None) -> SyncReport:
     return apply_inbound(db, campaign_id, fetch_recent(settings), ledger)
+
+
+def verify_sent(settings: OutreachSettings, ledger: Ledger, folder: str = '"[Gmail]/Sent Mail"') -> list[tuple[str, str, bool]]:
+    """Confirm each ledger Message-ID exists in the mailbox's Sent folder.
+    Returns (email, step, found)."""
+    results: list[tuple[str, str, bool]] = []
+    if not settings.credentials_present:
+        return results
+    with imaplib.IMAP4_SSL(settings.imap_host) as conn:
+        conn.login(settings.smtp_user, settings.smtp_password)
+        status, _ = conn.select(folder, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"cannot open {folder}")
+        for addr, steps in ledger.data["sent"].items():
+            for step, rec in steps.items():
+                mid = rec.get("message_id")
+                if not mid:
+                    results.append((addr, step, False))
+                    continue
+                st, data = conn.search(None, "HEADER", "Message-ID", mid)
+                results.append((addr, step, st == "OK" and bool(data and data[0])))
+    return results

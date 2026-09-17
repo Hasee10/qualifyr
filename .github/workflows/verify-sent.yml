@@ -1,0 +1,22 @@
+name: Verify sent
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        default: retail-isb-001
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GTM_SMTP_USER: ${{ secrets.GTM_SMTP_USER }}
+      GTM_SMTP_PASSWORD: ${{ secrets.GTM_SMTP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m gtm_engine.cli outreach verify "${{ github.event.inputs.campaign_id }}"
