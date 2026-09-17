@@ -1,0 +1,40 @@
+{
+ "sent": {
+  "customercare.pk@bata.com": {
+   "email_1": {
+    "at": "2026-09-17T14:09:09.892889+00:00",
+    "lead_id": "lead_3f2a1ed3f3ff",
+    "message_id": "<178965414992.2350.4377718217495041669@gmail.com>"
+   }
+  },
+  "customercare@servis.com": {
+   "email_1": {
+    "at": "2026-09-17T14:09:09.892889+00:00",
+    "lead_id": "lead_e7b06a1e89f3",
+    "message_id": "<178965424172.2350.6616996843611354387@gmail.com>"
+   }
+  },
+  "feedback@csd.gov.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:09:09.892889+00:00",
+    "lead_id": "lead_1b2863558fc2",
+    "message_id": "<178965428725.2350.6764064871424751401@gmail.com>"
+   }
+  },
+  "info@mcc.com.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:09:09.892889+00:00",
+    "lead_id": "lead_b77c5eb2b322",
+    "message_id": "<178965433279.2350.4451190116176614660@gmail.com>"
+   }
+  },
+  "info@pehchanmall.com.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:09:09.892889+00:00",
+    "lead_id": "lead_a938d5e43055",
+    "message_id": "<178965419621.2350.11121804327079328644@gmail.com>"
+   }
+  }
+ },
+ "stopped": {}
+}
