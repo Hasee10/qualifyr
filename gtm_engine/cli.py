@@ -13,7 +13,7 @@ from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.models import CompanyType
 from gtm_engine.outreach.cli import add_outreach_parser
 from gtm_engine.pipeline import Pipeline
-from gtm_engine.scraping.fetcher import HttpFetcher
+from gtm_engine.scraping.browser import build_fetcher
 from gtm_engine.storage.database import Database
 
 
@@ -39,9 +39,11 @@ async def _run(args: argparse.Namespace) -> int:
     if args.max_companies:
         campaign.max_companies = args.max_companies
     db = Database(settings.db_path)
-    async with HttpFetcher(settings) as fetcher:
+    async with build_fetcher(settings) as fetcher:
         pipeline = Pipeline(settings, defaults, db, fetcher)
         result = await pipeline.run(campaign, progress=_progress)
+    if getattr(fetcher, "fallbacks", 0):
+        print(f"  browser fallback rendered {fetcher.fallbacks} page(s)")
 
     s = result.stats
     print(f"\nrun {result.run_id} finished")

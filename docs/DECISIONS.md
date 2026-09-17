@@ -4,6 +4,7 @@ Record of technical and product decisions, newest first.
 
 | Date | Decision | Why |
 |------|----------|-----|
+| 2026-09-18 | No Node.js in the engine; JS-only sites handled by an optional Python `PlaywrightFetcher` behind the existing `Fetcher` protocol, off by default | Node already serves the UI; a second runtime in the pipeline adds a serialisation boundary, a second test suite and CI install for zero lead-quality gain. 0 of ~60 live sites needed JS so far — turn on `enable_browser_fallback` when data says otherwise |
 | 2026-09-17 | Overture Maps (DuckDB over public S3 parquet) added as primary discovery source; Dukotah/leadgen not adopted, only its mirror-fallback, inline name/title patterns and chain-exclusion ideas borrowed (MIT) | Islamabad trial: 24,969 places vs 665 in OSM, 12,792 with websites; leadgen itself targets US agencies with no buyer gate or outreach |
 | 2026-09-17 | robots.txt is enforced for website crawling only, not for API endpoints (Overpass, search) | overpass-api.de disallows `/api/` for crawlers, but it is an API meant for programmatic queries; robots.txt governs crawlers |
 | 2026-09-17 | A vendor term in the company *name* is decisive (VENDOR) regardless of buyer terms elsewhere | "Retail Growth Consultancy" mentions retail constantly; vendors serving our target industry are the main false-positive class |

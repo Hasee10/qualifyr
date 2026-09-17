@@ -117,6 +117,9 @@ class EngineSettings(BaseModel):
     max_retries: int = 2
     concurrency: int = 4
     respect_robots: bool = True
+    # Render JS-only sites with headless Chromium when static HTTP returns an empty shell.
+    # Needs the `browser` extra; off by default because no target site has needed it yet.
+    enable_browser_fallback: bool = False
     overpass_url: str = "https://overpass-api.de/api/interpreter"
     # Tried in order when the primary returns an error or rate-limits (shared public instances).
     overpass_mirrors: list[str] = Field(default_factory=lambda: [

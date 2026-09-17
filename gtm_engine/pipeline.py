@@ -22,7 +22,7 @@ from gtm_engine.models import (
 )
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
 from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lead
-from gtm_engine.scraping.fetcher import HttpFetcher
+from gtm_engine.scraping.fetcher import Fetcher, HttpFetcher
 from gtm_engine.scraping.site_crawler import SiteCrawler, SiteSnapshot
 from gtm_engine.storage.database import Database
 from gtm_engine.validation.dedupe import dedupe_companies
@@ -86,7 +86,7 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 
 class Pipeline:
     def __init__(self, settings: EngineSettings, defaults: DefaultRules, db: Database,
-                 fetcher: HttpFetcher, mx: MXChecker | None = None):
+                 fetcher: Fetcher, mx: MXChecker | None = None):
         self.settings = settings
         self.defaults = defaults
         self.db = db

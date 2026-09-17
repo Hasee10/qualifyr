@@ -7,6 +7,7 @@ per_host_delay_s: 2.0
 max_retries: 2
 concurrency: 4
 respect_robots: true
+enable_browser_fallback: false   # pip install -e ".[browser]" && playwright install chromium
 overpass_url: https://overpass-api.de/api/interpreter
 overpass_timeout_s: 90
 enable_search_fallback: true

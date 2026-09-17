@@ -76,7 +76,7 @@ Every stage is configuration-driven:
 | `config/defaults/vendor_rules.yaml` | global negative keywords and vendor self-description phrases |
 | `config/defaults/roles.yaml` | buyer role whitelist, sell-side role blacklist, generic mailboxes |
 | `config/defaults/signals.yaml` | buying/pain signal phrases and technology markers |
-| `config/engine.yaml` | rate limits, timeouts, concurrency, robots, DB path (env `GTM_*` overrides) |
+| `config/engine.yaml` | rate limits, timeouts, concurrency, robots, browser fallback, DB path (env `GTM_*` overrides) |
 
 ## Layout
 
@@ -85,7 +85,8 @@ gtm_engine/
   config/         schema + YAML loader
   discovery/      overture.py (Overture Maps via DuckDB), osm.py (Overpass + mirrors),
                   geocode.py (Nominatim), csv_seed.py, search.py (website finder)
-  scraping/       fetcher.py (polite HTTP), site_crawler.py, parsers.py
+  scraping/       fetcher.py (polite HTTP, charset sniffing), browser.py (optional Playwright
+                  fallback for JS-only sites), site_crawler.py, parsers.py
   qualification/  buyer_classifier.py  ← the gate
   enrichment/     contacts.py, signals.py
   validation/     domains.py, emails.py, dedupe.py

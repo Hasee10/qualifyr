@@ -118,3 +118,61 @@ def test_inline_decision_maker_patterns():
     assert ("Ahmed Raza", "CEO") in page.team
     assert ("Sana Malik", "Managing Director") in page.team
     assert all("Support" not in n for n, _ in page.team)
+
+
+# --- browser fallback --------------------------------------------------------------------
+
+from gtm_engine.scraping.browser import FallbackFetcher, looks_like_js_shell
+from gtm_engine.scraping.fetcher import FetchResult
+
+JS_SHELL = '<!doctype html><html><head><title>App</title><script src="/app.js"></script></head><body><div id="root"></div></body></html>'
+RENDERED = "<html><body>" + "<p>Zara Fabrics is a clothing retailer with six outlets in Islamabad.</p>" * 6 + "</body></html>"
+
+
+class FakeBrowser:
+    name = "fake-browser"
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def get(self, url: str, **_) -> FetchResult:
+        self.calls.append(url)
+        return FetchResult(url, url, 200, RENDERED, "text/html; rendered=fake")
+
+    async def close(self) -> None:
+        pass
+
+
+def test_js_shell_detection():
+    assert looks_like_js_shell(JS_SHELL)
+    assert looks_like_js_shell("")
+    assert not looks_like_js_shell(RENDERED)
+
+
+@respx.mock
+async def test_fallback_renders_only_js_shells(settings):
+    respx.get("https://spa.pk/").mock(return_value=httpx.Response(200, text=JS_SHELL, headers={"content-type": "text/html"}))
+    respx.get("https://static.pk/").mock(return_value=httpx.Response(200, text=RENDERED, headers={"content-type": "text/html"}))
+    respx.get("https://api.test/x").mock(return_value=httpx.Response(200, text="{}", headers={"content-type": "application/json"}))
+    browser = FakeBrowser()
+    async with FallbackFetcher(HttpFetcher(settings), browser, settings) as f:
+        spa = await f.get("https://spa.pk/")
+        static = await f.get("https://static.pk/")
+        api = await f.get("https://api.test/x", api=True)
+    assert "rendered=fake" in spa.content_type and "clothing retailer" in spa.text
+    assert "rendered" not in static.content_type
+    assert api.text == "{}"
+    assert browser.calls == ["https://spa.pk/"]
+    assert f.fallbacks == 1
+
+
+@respx.mock
+async def test_fallback_not_used_when_robots_blocks(settings):
+    settings.respect_robots = True
+    respx.get("https://private.pk/robots.txt").mock(return_value=httpx.Response(200, text="User-agent: *\nDisallow: /\n", headers={"content-type": "text/plain"}))
+    browser = FakeBrowser()
+    async with FallbackFetcher(HttpFetcher(settings), browser, settings) as f:
+        res = await f.get("https://private.pk/")
+    assert res.error == "robots_disallowed" and browser.calls == []
+
+

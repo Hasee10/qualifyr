@@ -28,7 +28,7 @@ from gtm_engine.outreach.sender import make_sender
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
 from gtm_engine.pipeline import Pipeline
-from gtm_engine.scraping.fetcher import HttpFetcher
+from gtm_engine.scraping.browser import build_fetcher
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ async def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     async def job() -> None:
         db = _db()
         try:
-            async with HttpFetcher(_settings) as fetcher:
+            async with build_fetcher(_settings) as fetcher:
                 def on_progress(stage: str, done: int, total: int, message: str) -> None:
                     ticket.update(stage=stage, done=done, total=total, message=message)
                 result = await Pipeline(_settings, _defaults, db, fetcher).run(campaign, progress=on_progress)

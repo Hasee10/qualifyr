@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -19,6 +20,32 @@ from gtm_engine.config.schema import EngineSettings
 log = logging.getLogger(__name__)
 
 _RETRYABLE = {408, 425, 429, 500, 502, 503, 504}
+_META_CHARSET_RE = re.compile(rb"<meta[^>]+charset=[\"']?\s*([a-zA-Z0-9_-]+)", re.I)
+_XML_DECL_RE = re.compile(rb"<\?xml[^>]+encoding=[\"']([a-zA-Z0-9_-]+)", re.I)
+
+
+def decode_body(raw: bytes, content_type: str) -> str:
+    """Header charset -> <meta charset> / XML declaration -> UTF-8 BOM -> utf-8 -> cp1252.
+    Sites in Pakistan often omit the header and only declare the charset in HTML, which
+    httpx alone would decode as UTF-8 and garble."""
+    candidates: list[str] = []
+    m = re.search(r"charset=([\w-]+)", content_type or "", re.I)
+    if m:
+        candidates.append(m.group(1))
+    head = raw[:4096]
+    for pat in (_META_CHARSET_RE, _XML_DECL_RE):
+        mm = pat.search(head)
+        if mm:
+            candidates.append(mm.group(1).decode("ascii", "ignore"))
+    if raw.startswith(b"\xef\xbb\xbf"):
+        candidates.append("utf-8-sig")
+    candidates += ["utf-8", "cp1252"]
+    for enc in candidates:
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 @dataclass
@@ -40,7 +67,7 @@ class FetchResult:
 
 
 class Fetcher(Protocol):
-    async def get(self, url: str) -> FetchResult: ...
+    async def get(self, url: str, **kwargs) -> FetchResult: ...
     async def close(self) -> None: ...
 
 
@@ -136,7 +163,9 @@ class HttpFetcher:
                         err = None
                 if resp is not None and resp.status_code not in _RETRYABLE:
                     ctype = resp.headers.get("content-type", "")
-                    body = resp.text if ("text" in ctype or "json" in ctype or "xml" in ctype) else ""
+                    textual = ("text" in ctype or "json" in ctype or "xml" in ctype
+                               or (not ctype and resp.content[:64].lstrip().lower().startswith((b"<!doctype", b"<html", b"{"))))
+                    body = decode_body(resp.content, ctype) if textual else ""
                     return FetchResult(url, str(resp.url), resp.status_code, body, ctype)
                 attempt += 1
                 if attempt > self.settings.max_retries:
