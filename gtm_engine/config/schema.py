@@ -11,8 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 class GeographyConfig(BaseModel):
     countries: list[str] = Field(default_factory=lambda: ["Pakistan"])
     cities: list[str] = Field(default_factory=list)
-    # Overpass area name overrides when the city label differs from the OSM admin name.
-    osm_area_overrides: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("countries", "cities")
     @classmethod

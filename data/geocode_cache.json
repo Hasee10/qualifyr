@@ -1,0 +1,14 @@
+{
+ "islamabad|pakistan": {
+  "south": 33.5338118,
+  "west": 72.9051511,
+  "north": 33.8538118,
+  "east": 73.2251511
+ },
+ "rawalpindi|pakistan": {
+  "south": 33.4315446,
+  "west": 72.893721,
+  "north": 33.7515446,
+  "east": 73.213721
+ }
+}

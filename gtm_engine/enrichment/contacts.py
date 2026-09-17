@@ -6,7 +6,24 @@ from __future__ import annotations
 from gtm_engine.config.schema import CampaignConfig, DefaultRules
 from gtm_engine.models import Contact, EmailStatus
 from gtm_engine.scraping.site_crawler import SiteSnapshot
-from gtm_engine.validation.emails import is_generic_mailbox
+from gtm_engine.validation.domains import domain_label
+from gtm_engine.validation.emails import FREEMAIL_DOMAINS, is_generic_mailbox
+
+
+def usable_emails(visible: list[str], company_domain: str | None, source_only: list[str] = ()) -> list[str]:
+    """Own-domain addresses first (same registered label counts: bata.com for bata.com.pk),
+    then freemail seen in visible text (common for SMEs). Anything else is dropped: on a
+    company site third-party addresses are web-developer credits, plugin authors, font
+    licences. Freemail found only in raw HTML is never trusted for the same reason."""
+    label = domain_label(company_domain) if company_domain else None
+
+    def is_own(e: str) -> bool:
+        d = e.split("@", 1)[1]
+        return bool(company_domain) and (d == company_domain or (label is not None and domain_label(d) == label))
+
+    own = [e for e in visible if is_own(e)] + [e for e in source_only if is_own(e)]
+    free = [e for e in visible if e.split("@", 1)[1] in FREEMAIL_DOMAINS]
+    return own + [e for e in free if e not in own]
 
 
 def role_rank(role: str, campaign: CampaignConfig, defaults: DefaultRules) -> int:
@@ -38,10 +55,11 @@ def _match_personal_email(name: str, emails: list[str], generic: list[str]) -> s
     return None
 
 
-def choose_contact(snapshot: SiteSnapshot, campaign: CampaignConfig, defaults: DefaultRules) -> Contact:
+def choose_contact(snapshot: SiteSnapshot, campaign: CampaignConfig, defaults: DefaultRules,
+                   company_domain: str | None = None) -> Contact:
     """Return the best contact. If no named decision-maker is public, fall back to the
     company's business mailbox so the lead stays actionable (flagged as generic)."""
-    emails = snapshot.emails
+    emails = usable_emails(snapshot.emails, company_domain, snapshot.source_emails) if company_domain else snapshot.emails
     best: tuple[int, str, str] | None = None
     for name, role in snapshot.team:
         rank = role_rank(role, campaign, defaults)

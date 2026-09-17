@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from typing import AsyncIterator
 
 from gtm_engine.config.schema import CampaignConfig, EngineSettings
+from gtm_engine.discovery.geocode import BBox, Geocoder
 from gtm_engine.models import DiscoveredCompany
 from gtm_engine.scraping.fetcher import HttpFetcher
 
@@ -30,15 +31,11 @@ def tag_filter(category: str) -> str:
     return f'["{key}"="{value}"]'
 
 
-def build_query(city: str, categories: list[str], timeout_s: int, area_name: str | None = None) -> str:
-    area = area_name or city
-    filters = "".join(f'  nwr{tag_filter(c)}["name"](area.searchArea);\n' for c in categories)
-    return (
-        f"[out:json][timeout:{timeout_s}];\n"
-        f'area["name"="{area}"]["boundary"="administrative"]->.searchArea;\n'
-        f"(\n{filters});\n"
-        "out center tags;"
-    )
+def build_query(bbox: BBox, categories: list[str], timeout_s: int) -> str:
+    """Bounding-box query. Admin-area names are inconsistent across OSM (there is no
+    relation named exactly "Rawalpindi"), so cities are geocoded to a box first."""
+    filters = "".join(f'  nwr{tag_filter(c)}["name"]({bbox.overpass()});\n' for c in categories)
+    return f"[out:json][timeout:{timeout_s}];\n(\n{filters});\nout center tags;"
 
 
 def _first(tags: dict, keys: tuple[str, ...]) -> str | None:
@@ -71,14 +68,14 @@ def element_to_company(el: dict, city: str, country: str, category_label: str | 
         name=name.strip(),
         website=_first(tags, _WEBSITE_KEYS),
         country=country,
-        city=tags.get("addr:city") or city,
+        city=city,  # the city we searched; OSM addr:city is often in Urdu/Arabic script
         address=_address(tags),
         phone=_first(tags, _PHONE_KEYS),
         email=_first(tags, _EMAIL_KEYS),
         category=category or category_label,
         source="osm",
         source_url=f"https://www.openstreetmap.org/{osm_type}/{osm_id}" if osm_type and osm_id else None,
-        extra={"osm_tags": tags, "brand": tags.get("brand"), "lat": el.get("lat") or (el.get("center") or {}).get("lat"),
+        extra={"osm_tags": tags, "brand": tags.get("brand"), "addr_city": tags.get("addr:city"), "lat": el.get("lat") or (el.get("center") or {}).get("lat"),
                "lon": el.get("lon") or (el.get("center") or {}).get("lon")},
     )
 
@@ -86,9 +83,10 @@ def element_to_company(el: dict, city: str, country: str, category_label: str | 
 class OSMDiscovery:
     name = "osm"
 
-    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings):
+    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings, geocoder: Geocoder | None = None):
         self.fetcher = fetcher
         self.settings = settings
+        self.geocoder = geocoder or Geocoder(fetcher, settings.db_path.parent / "geocode_cache.json")
 
     async def discover(self, campaign: CampaignConfig) -> AsyncIterator[DiscoveredCompany]:
         if not campaign.osm_categories:
@@ -96,8 +94,11 @@ class OSMDiscovery:
             return
         country = campaign.geography.countries[0] if campaign.geography.countries else None
         for city in campaign.geography.cities:
-            area = campaign.geography.osm_area_overrides.get(city)
-            query = build_query(city, campaign.osm_categories, self.settings.overpass_timeout_s, area)
+            bbox = await self.geocoder.bbox(city, country)
+            if bbox is None:
+                log.warning("osm: could not geocode %s; skipping", city)
+                continue
+            query = build_query(bbox, campaign.osm_categories, self.settings.overpass_timeout_s)
             elements = await self._run_query(query)
             log.info("osm: %s -> %d elements", city, len(elements))
             for el in elements:

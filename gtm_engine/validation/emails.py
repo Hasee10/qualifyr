@@ -18,6 +18,10 @@ EMAIL_RE = re.compile(
 
 # File extensions that regularly show up as "email-like" tokens in HTML (e.g. image@2x.png).
 _JUNK_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js")
+FREEMAIL_DOMAINS = {
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com", "icloud.com",
+    "protonmail.com", "proton.me", "ymail.com", "msn.com", "aol.com",
+}
 _JUNK_DOMAINS = {"example.com", "email.com", "domain.com", "yourdomain.com", "sentry.io", "wixpress.com"}
 
 

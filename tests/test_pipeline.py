@@ -8,6 +8,7 @@ import httpx
 import respx
 
 from conftest import fixture
+from gtm_engine.discovery.geocode import NOMINATIM_URL
 from gtm_engine.export.csv_export import write_csv
 from gtm_engine.models import CSV_COLUMNS, CompanyType, Priority, SequenceStatus
 from gtm_engine.pipeline import Pipeline
@@ -25,6 +26,8 @@ def _html(body: str) -> httpx.Response:
 
 
 def _mock_world(settings):
+    respx.get(url__startswith=NOMINATIM_URL).mock(
+        return_value=httpx.Response(200, json=[{"boundingbox": ["33.5", "33.8", "72.8", "73.2"]}]))
     respx.get(url__startswith=settings.overpass_url).mock(
         return_value=httpx.Response(200, json=json.loads(fixture("overpass_islamabad.json"))))
     respx.get("https://www.zarafabrics.pk/").mock(return_value=_html(fixture("retailer_home.html")))
@@ -109,4 +112,32 @@ async def test_rerun_updates_lead_in_place_and_respects_suppression(campaign, se
     assert z1.outreach_ready and not z2.outreach_ready
     assert z2.sequence_status == SequenceStatus.SUPPRESSED
     assert len(db.list_leads(campaign.campaign_id)) == len(second.leads)  # no duplicate rows
+    db.close()
+
+
+@respx.mock
+async def test_search_found_domain_that_duplicates_earlier_company_is_skipped(campaign, settings, defaults):
+    """'Super Store' has no OSM website; search resolves it to the same domain as 'Superstore'."""
+    settings.enable_search_fallback = True
+    respx.get(url__startswith="https://html.duckduckgo.com/html/").mock(return_value=httpx.Response(
+        200, text='<a class="result__a" href="https://www.zarafabrics.pk/">Zara Fabrics</a>'))
+    _mock_world(settings)  # registers the 404 catch-all, so it must come after the search mock
+    campaign.geography.cities = ["Islamabad"]
+    campaign.osm_categories = []
+    campaign.seed_csv = None
+    db = Database(settings.db_path)
+    from gtm_engine.models import DiscoveredCompany
+
+    async def fake_discover(_campaign, _progress=None):
+        return [
+            DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk", city="Islamabad", country="Pakistan", source="osm"),
+            DiscoveredCompany(name="Zara Fabrics Store", city="Islamabad", country="Pakistan", source="osm"),
+        ]
+
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
+        pipeline.discover = fake_discover
+        result = await pipeline.run(campaign)
+    assert result.stats.duplicates == 1
+    assert [l.company_name for l in result.leads] == ["Zara Fabrics"]
     db.close()

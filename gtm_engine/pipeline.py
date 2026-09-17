@@ -46,6 +46,7 @@ class RunStats:
     qualified: int = 0
     outreach_ready: int = 0
     suppressed: int = 0
+    duplicates: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -111,7 +112,10 @@ class Pipeline:
     # -- single company ----------------------------------------------------------
 
     async def process_company(self, company: DiscoveredCompany, campaign: CampaignConfig,
-                              classifier: BuyerClassifier, run_id: str, stats: RunStats) -> Lead:
+                              classifier: BuyerClassifier, run_id: str, stats: RunStats,
+                              seen_keys: set[str] | None = None) -> Lead | None:
+        """Returns None when the company turns out to duplicate one already processed
+        in this run (its website, found by search, belongs to an earlier company)."""
         website = company.website
         if not website:
             website = await self.website_finder.find(company.name, company.city, company.country)
@@ -120,6 +124,12 @@ class Pipeline:
                                                      "source": f"{company.source}+search"})
         domain = company.domain or canonical_domain(website)
         key = company_key(domain, company.name, company.city)
+        if seen_keys is not None:
+            if key in seen_keys:
+                stats.duplicates += 1
+                log.info("skipping %s: %s already processed this run", company.name, key)
+                return None
+            seen_keys.add(key)
         self.db.upsert_company(key, campaign.campaign_id, company.name, domain=domain, website=website,
                                country=company.country, city=company.city, source=company.source,
                                source_url=company.source_url, raw=company.model_dump(mode="json"))
@@ -146,9 +156,9 @@ class Pipeline:
             category=company.category,
         )
         cls = classifier.classify(bundle)
-        quality = assess_quality(snapshot)
+        quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
-        contact = choose_contact(snapshot, campaign, self.defaults) if snapshot.reachable else Contact(
+        contact = choose_contact(snapshot, campaign, self.defaults, domain) if snapshot.reachable else Contact(
             email=company.email, phone=company.phone,
             email_status=EmailStatus.UNVERIFIED if company.email else EmailStatus.NONE,
             evidence="from discovery source only",
@@ -235,11 +245,17 @@ class Pipeline:
             classifier = BuyerClassifier(campaign, self.defaults)
             leads: list[Lead] = []
             sem = asyncio.Semaphore(self.settings.concurrency)
+            # Keys of companies with a known domain are reserved up front so a search-found
+            # domain for a later, domain-less company cannot collide with them.
+            seen_keys: set[str] = {company_key(c.domain, c.name, c.city) for c in companies if c.domain}
 
             async def worker(c: DiscoveredCompany) -> None:
                 async with sem:
                     try:
-                        lead = await self.process_company(c, campaign, classifier, run_id, stats)
+                        lead = await self.process_company(c, campaign, classifier, run_id, stats,
+                                                          seen_keys if not c.domain else None)
+                        if lead is None:
+                            return
                         leads.append(lead)
                         _tally(stats, lead)
                     except Exception:  # noqa: BLE001 - one company must not kill the batch

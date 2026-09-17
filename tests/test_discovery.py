@@ -4,6 +4,7 @@ import httpx
 import respx
 
 from conftest import fixture
+from gtm_engine.discovery.geocode import NOMINATIM_URL, BBox, Geocoder
 from gtm_engine.discovery.osm import OSMDiscovery, build_query, element_to_company, tag_filter
 from gtm_engine.discovery.search import WebsiteFinder, name_matches, parse_results
 from gtm_engine.scraping.fetcher import HttpFetcher
@@ -15,11 +16,10 @@ def test_tag_filter():
     assert tag_filter("amenity") == '["amenity"]'
 
 
-def test_build_query_uses_area_and_categories():
-    q = build_query("Islamabad", ["shop=clothes", "shop=*"], 60)
-    assert 'area["name"="Islamabad"]["boundary"="administrative"]' in q
-    assert 'nwr["shop"="clothes"]["name"](area.searchArea);' in q
-    assert 'nwr["shop"]["name"](area.searchArea);' in q
+def test_build_query_uses_bbox_and_categories():
+    q = build_query(BBox(33.5, 72.8, 33.8, 73.2), ["shop=clothes", "shop=*"], 60)
+    assert 'nwr["shop"="clothes"]["name"](33.5,72.8,33.8,73.2);' in q
+    assert 'nwr["shop"]["name"](33.5,72.8,33.8,73.2);' in q
     assert "[timeout:60]" in q
     assert "out center tags" in q
 
@@ -39,8 +39,26 @@ def test_element_without_name_is_dropped():
     assert element_to_company({"type": "node", "id": 5, "tags": {"shop": "clothes"}}, "X", "PK", None) is None
 
 
+def _mock_nominatim():
+    return respx.get(url__startswith=NOMINATIM_URL).mock(
+        return_value=httpx.Response(200, json=[{"boundingbox": ["33.5", "33.8", "72.8", "73.2"]}]))
+
+
+@respx.mock
+async def test_geocoder_caches_to_disk(settings, tmp_path):
+    route = _mock_nominatim()
+    cache = tmp_path / "geo.json"
+    async with HttpFetcher(settings) as fetcher:
+        g = Geocoder(fetcher, cache)
+        box = await g.bbox("Islamabad", "Pakistan")
+        assert box == BBox(33.5, 72.8, 33.8, 73.2)
+        assert await Geocoder(HttpFetcher(settings), cache).bbox("Islamabad", "Pakistan") == box
+    assert route.call_count == 1
+
+
 @respx.mock
 async def test_osm_discovery_yields_companies(campaign, settings):
+    _mock_nominatim()
     respx.get(url__startswith=settings.overpass_url).mock(
         return_value=httpx.Response(200, json=json.loads(fixture("overpass_islamabad.json")))
     )
@@ -54,6 +72,7 @@ async def test_osm_discovery_yields_companies(campaign, settings):
 
 @respx.mock
 async def test_osm_failure_is_empty_not_exception(campaign, settings):
+    _mock_nominatim()
     respx.get(url__startswith=settings.overpass_url).mock(return_value=httpx.Response(504))
     async with HttpFetcher(settings) as fetcher:
         found = [c async for c in OSMDiscovery(fetcher, settings).discover(campaign)]
@@ -97,3 +116,15 @@ async def test_website_finder_skips_directories(campaign, settings):
 async def test_website_finder_disabled(settings):
     async with HttpFetcher(settings) as fetcher:
         assert await WebsiteFinder(fetcher, settings).find("Khaadi", None, None) is None
+
+
+def test_osm_city_is_the_searched_city_not_urdu_tag():
+    el = {"type": "node", "id": 9, "tags": {"name": "Bata", "shop": "shoes", "addr:city": "راولپنڈی"}}
+    c = element_to_company(el, "Rawalpindi", "Pakistan", None)
+    assert c.city == "Rawalpindi" and c.extra["addr_city"] == "راولپنڈی"
+
+
+def test_name_matches_label_inside_name():
+    assert name_matches("ElectricStorePk Electric Store", "electricstore.pk", None)
+    assert not name_matches("XS Mobile", "whatmobile.com.pk", "WhatMobile - phone prices")
+    assert not name_matches("Food 24 Hours", "archivesouthasia.com", None)

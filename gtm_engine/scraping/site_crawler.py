@@ -45,6 +45,15 @@ class SiteSnapshot:
         return out
 
     @property
+    def source_emails(self) -> list[str]:
+        out: list[str] = []
+        for p in self.pages.values():
+            for e in p.source_emails:
+                if e not in out and e not in self.emails:
+                    out.append(e)
+        return out
+
+    @property
     def phones(self) -> list[str]:
         out: list[str] = []
         for p in self.pages.values():

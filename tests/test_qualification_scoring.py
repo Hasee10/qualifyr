@@ -172,3 +172,36 @@ def test_weights_rescale(campaign):
     campaign.weights.icp_fit, campaign.weights.buying_signals = 40, 20
     score = score_lead(_good_inputs(), campaign)
     assert score.icp_fit <= 40 and score.buying_signals <= 20
+
+
+def test_third_party_emails_are_not_the_company_email(campaign, defaults):
+    from gtm_engine.enrichment.contacts import usable_emails
+    emails = ["team@serpnames.com", "sharif.intl@gmail.com", "info@sharifinternational.net"]
+    assert usable_emails(emails, "sharifinternational.net") == ["info@sharifinternational.net", "sharif.intl@gmail.com"]
+    assert usable_emails(["team@serpnames.com"], "sharifinternational.net") == []
+    snap = _snapshot()
+    snap.pages.pop("about")
+    contact = choose_contact(snap, campaign, defaults, company_domain="other.pk")
+    assert contact.email is None and contact.email_status == EmailStatus.NONE
+
+
+def test_freemail_only_from_visible_text_and_same_label_domain():
+    from gtm_engine.enrichment.contacts import usable_emails
+    # font-licence gmail hidden in HTML source is never used; parent-brand domain is
+    assert usable_emails([], "ismbuilders.com", source_only=["impallari@gmail.com"]) == []
+    assert usable_emails(["owner@gmail.com"], "ismbuilders.com") == ["owner@gmail.com"]
+    assert usable_emails(["customercare.pk@bata.com"], "bata.com.pk") == ["customercare.pk@bata.com"]
+    assert usable_emails([], "bata.com.pk", source_only=["x@bata.com"]) == ["x@bata.com"]
+
+
+def test_wrong_website_is_held_for_review(campaign):
+    from gtm_engine.enrichment.signals import assess_quality
+    snap = _snapshot()  # Zara Fabrics pages
+    q = assess_quality(snap, "XS Mobile", "zarafabrics.pk")
+    assert q.website_mismatch and any("belong" in n for n in q.notes)
+    inputs = _good_inputs()
+    inputs.quality = q
+    score = score_lead(inputs, campaign)
+    assert score.priority == Priority.REVIEW
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not assess_quality(snap, "Zara Fabrics", "zarafabrics.pk").website_mismatch

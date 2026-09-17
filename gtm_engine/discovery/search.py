@@ -49,16 +49,27 @@ def name_matches(company_name: str, domain: str, title: str | None) -> bool:
     if not toks:
         return False
     label = domain.split(".")[0]
-    if "".join(sorted(toks)) in label or "".join(toks) in label:
+    distinctive = {t for t in toks if t not in _GENERIC_TOKENS}
+    ordered = [t for t in normalize_name(company_name).split() if t in toks]  # name order, deterministic
+    squashed_name = re.sub(r"[^a-z0-9]", "", company_name.lower())
+
+    # 1. The whole name is the label: "csd" -> csd.gov.pk, "savemart" -> savemartonline.pk
+    joined = "".join(ordered)
+    if label == joined or (joined in label and (distinctive or len(joined) >= 8)):
         return True
-    distinctive = [t for t in toks if t not in _GENERIC_TOKENS]
-    longest = max(distinctive, key=len) if distinctive else None
-    if longest and len(longest) >= 5 and longest in label:
+    # 2. The label sits inside the name: "electricstore" in "ElectricStorePk Electric Store".
+    #    A generic label ("electronics", "mobile") proves nothing on its own.
+    if len(label) >= 5 and label not in _GENERIC_TOKENS and label in squashed_name:
+        if not distinctive or any(d in label for d in distinctive):
+            return True
+    # 3. A distinctive token of the name is in the label: "fatah" in alfatah.pk
+    if any(len(t) >= 5 and t in label for t in distinctive):
         return True
+    # 4. The homepage title carries (nearly) the whole name, including a distinctive part.
     if title:
         overlap = toks & _tokens(title)
         needed = len(toks) - (1 if len(toks) > 2 else 0)
-        if len(overlap) >= max(1, needed) and (not distinctive or overlap & set(distinctive)):
+        if len(overlap) >= max(1, needed) and (not distinctive or overlap & distinctive):
             return True
     return False
 

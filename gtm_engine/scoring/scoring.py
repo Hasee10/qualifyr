@@ -137,6 +137,9 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     if cls.company_type == CompanyType.UNKNOWN and priority in (Priority.HIGH, Priority.QUALIFIED):
         priority = Priority.REVIEW
         reasons.append("held for review: buyer status unconfirmed")
+    if q.website_mismatch and priority in (Priority.HIGH, Priority.QUALIFIED):
+        priority = Priority.REVIEW
+        reasons.append("held for review: website may belong to a different company")
 
     return ScoreBreakdown(
         icp_fit=icp_pts, company_quality=cq_pts, buyer_evidence=be_pts,

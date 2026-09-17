@@ -46,7 +46,7 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"\nrun {result.run_id} finished")
     print(f"  discovered {s.discovered} -> {s.after_dedupe} unique; processed {s.processed}")
     print(f"  BUYER {s.buyer} | VENDOR {s.vendor} | UNKNOWN {s.unknown}")
-    print(f"  qualified {s.qualified} | outreach-ready {s.outreach_ready} | no website {s.no_website} | unreachable {s.unreachable} | errors {s.errors}")
+    print(f"  qualified {s.qualified} | outreach-ready {s.outreach_ready} | no website {s.no_website} | unreachable {s.unreachable} | duplicates {s.duplicates} | errors {s.errors}")
 
     qualified = [l for l in result.leads if l.company_type == CompanyType.BUYER and l.total_score >= campaign.min_score]
     out_q = write_csv(qualified, export_path(settings.export_dir, campaign.campaign_id, result.run_id, True))

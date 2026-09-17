@@ -100,3 +100,12 @@ async def test_fetcher_honours_robots(settings):
     async with HttpFetcher(settings) as fetcher:
         res = await fetcher.get("https://private.pk/")
     assert res.error == "robots_disallowed" and page.call_count == 0
+
+
+def test_team_extractor_ignores_product_headings():
+    html = """<div><h3>BIRTHDAY ITEMS</h3><p>Biscuits &amp; Cookies</p></div>
+    <div><h3>Almond Gifts</h3><p>Premium pack</p></div>
+    <div><h3>Ahmed Raza</h3><p>Chief Operating Officer</p></div>
+    <div><h3>Sara Khan</h3><p>COO</p></div>"""
+    page = parse_page("https://x.pk/", html)
+    assert page.team == [("Ahmed Raza", "Chief Operating Officer"), ("Sara Khan", "COO")]

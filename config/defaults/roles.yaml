@@ -87,3 +87,38 @@ generic_email_prefixes:
   - webmaster
   - mail
   - team
+  - customercare
+  - customer.care
+  - customer-care
+  - customerservice
+  - customer.service
+  - customer-service
+  - care
+  - cs
+  - contactus
+  - contact-us
+  - help
+  - helpdesk
+  - feedback
+  - orders
+  - order
+  - shop
+  - store
+  - online
+  - onlinestore
+  - ecommerce
+  - complaints
+  - query
+  - queries
+  - reception
+  - pr
+  - media
+  - press
+  - accounts
+  - billing
+  - finance
+  - newsletter
+  - privacy
+  - legal
+  - donotreply
+  - do-not-reply

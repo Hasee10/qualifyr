@@ -31,7 +31,17 @@ def detect_signals(snapshot: SiteSnapshot, defaults: DefaultRules) -> Signals:
     return Signals(buying=buying, pain=pain, technologies=technologies)
 
 
-def assess_quality(snapshot: SiteSnapshot) -> CompanyQuality:
+def website_belongs_to(company_name: str, domain: str | None, snapshot: SiteSnapshot) -> bool:
+    """Discovery sources sometimes carry a wrong website (a directory, an old tenant).
+    A domain or homepage title that does not reflect the company name is suspicious."""
+    from gtm_engine.discovery.search import name_matches  # local import: avoids a cycle
+    if not domain or not snapshot.reachable:
+        return True  # nothing to compare; unreachable sites are already penalised
+    home = snapshot.pages.get("home")
+    return name_matches(company_name, domain, home.title if home else None)
+
+
+def assess_quality(snapshot: SiteSnapshot, company_name: str | None = None, domain: str | None = None) -> CompanyQuality:
     q = CompanyQuality(
         reachable=snapshot.reachable,
         https=snapshot.https,
@@ -52,6 +62,9 @@ def assess_quality(snapshot: SiteSnapshot) -> CompanyQuality:
     home = snapshot.pages.get("home")
     if home and len(home.text) < 200:
         q.notes.append("very thin homepage content")
+    if company_name and not website_belongs_to(company_name, domain, snapshot):
+        q.website_mismatch = True
+        q.notes.append("website does not appear to belong to this company")
     return q
 
 

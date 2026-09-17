@@ -49,7 +49,8 @@ class ParsedPage:
     title: str | None
     description: str | None
     text: str
-    emails: list[str] = field(default_factory=list)
+    emails: list[str] = field(default_factory=list)          # visible text or mailto:
+    source_emails: list[str] = field(default_factory=list)   # only in raw HTML (scripts, licences, credits)
     phones: list[str] = field(default_factory=list)
     social: dict[str, str] = field(default_factory=dict)
     internal_links: dict[str, str] = field(default_factory=dict)  # kind -> absolute url
@@ -124,17 +125,30 @@ _ROLE_WORDS = (
     "coo", "cfo", "cto", "vp", "vice", "executive", "specialist", "coordinator", "engineer",
     "analyst", "associate", "consultant", "supervisor", "accountant", "secretary", "sales",
 )
+_ROLE_RE = re.compile(r"(?<![a-z])(?:" + "|".join(re.escape(w) for w in _ROLE_WORDS) + r")(?![a-z])")
+# Capitalised phrases that are headings/products, never people.
+_NOT_NAME_WORDS = {
+    "items", "item", "products", "product", "collection", "collections", "sale", "offer", "offers",
+    "new", "shop", "store", "cart", "menu", "home", "about", "contact", "category", "categories",
+    "brand", "brands", "price", "free", "delivery", "order", "orders", "login", "register", "search",
+    "best", "top", "latest", "featured", "arrivals", "deals", "gift", "gifts", "pack", "packs",
+    "welcome", "our", "team", "services", "service", "solutions", "read", "more", "view", "all",
+    "privacy", "policy", "terms", "faq", "faqs", "blog", "news", "careers", "subscribe",
+}
 _NAME_RE = re.compile(r"^(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Engr\.?|Prof\.?|Syed|Muhammad|Mohammad)?\s*[A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){0,4}$")
 
 
 def _looks_like_name(s: str) -> bool:
     s = s.strip()
-    return 3 <= len(s) <= 60 and bool(_NAME_RE.match(s)) and not any(w in s.lower() for w in _ROLE_WORDS)
+    if not (3 <= len(s) <= 60 and _NAME_RE.match(s)):
+        return False
+    words = {w.lower().strip(".,'") for w in s.split()}
+    return not (words & _NOT_NAME_WORDS) and not _ROLE_RE.search(s.lower())
 
 
 def _looks_like_role(s: str) -> bool:
     s = s.strip().lower()
-    return 2 <= len(s) <= 80 and any(w in s.split() or w in s for w in _ROLE_WORDS)
+    return 2 <= len(s) <= 80 and not any(ch.isdigit() for ch in s) and _ROLE_RE.search(s) is not None
 
 
 def extract_team(soup: BeautifulSoup) -> list[tuple[str, str]]:
@@ -172,9 +186,11 @@ def parse_page(url: str, html: str) -> ParsedPage:
     # mailto: links are the most reliable email source; scan them before the visible text.
     mailto = [a["href"][7:].split("?")[0] for a in soup.find_all("a", href=True) if a["href"].lower().startswith("mailto:")]
     text = visible_text(soup)
-    emails = extract_emails(" ".join(mailto) + " " + text + " " + (html or ""))
+    emails = extract_emails(" ".join(mailto) + " " + text)
+    source_emails = [e for e in extract_emails(html or "") if e not in emails]
     phones = extract_phones(text)
     return ParsedPage(
         url=url, title=title, description=description, text=text[:20000],
-        emails=emails, phones=phones, social=social, internal_links=links, team=team,
+        emails=emails, source_emails=source_emails, phones=phones, social=social,
+        internal_links=links, team=team,
     )

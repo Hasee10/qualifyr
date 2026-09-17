@@ -105,3 +105,17 @@ def test_dedupe_by_domain_and_name_city():
     assert merged.phone == "051" and merged.email == "info@zarafabrics.pk"
     assert "csv_seed" in merged.source
     assert out[2].website is None  # social link is not a website
+
+
+# --- regressions from the first live run -------------------------------------------
+
+def test_hosted_platform_keeps_subdomain():
+    assert canonical_domain("https://malik-hitech.business.site/") == "malik-hitech.business.site"
+    assert canonical_domain("https://shop.myshopify.com") == "shop.myshopify.com"
+    assert canonical_domain("https://business.site") is None
+    assert canonical_domain("https://www.wixsite.com") is None
+
+
+def test_customer_care_is_generic(defaults):
+    for e in ("customercare@bata.com", "contactus@outfitters.com.pk", "feedback@csd.gov.pk", "orders@x.pk"):
+        assert is_generic_mailbox(e, defaults.generic_email_prefixes), e

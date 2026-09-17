@@ -18,6 +18,13 @@ SOCIAL_HOSTS = {
     "daraz.pk", "olx.com.pk", "google.com", "goo.gl", "maps.app.goo.gl",
 }
 
+# Free hosted-page platforms: the subdomain *is* the business, the registered domain is not.
+HOSTED_PLATFORMS = {
+    "business.site", "wixsite.com", "myshopify.com", "blogspot.com", "wordpress.com",
+    "weebly.com", "godaddysites.com", "webnode.page", "webnode.com", "site123.me",
+    "square.site", "carrd.co", "strikingly.com", "yolasite.com", "webs.com",
+}
+
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
@@ -50,9 +57,25 @@ def canonical_domain(raw: str | None) -> str | None:
     if not ext.domain or not ext.suffix:
         return None
     domain = f"{ext.domain}.{ext.suffix}".lower()
-    if domain in SOCIAL_HOSTS or not _DOMAIN_RE.match(domain):
+    if domain in SOCIAL_HOSTS:
+        return None
+    if domain in HOSTED_PLATFORMS:
+        if not ext.subdomain or ext.subdomain == "www":
+            return None  # the platform itself, not a business
+        domain = f"{ext.subdomain.removeprefix('www.')}.{domain}".lower()
+    if not _DOMAIN_RE.match(domain):
         return None
     return domain
+
+
+def domain_label(domain: str | None) -> str | None:
+    """'bata.com.pk' -> 'bata'; 'malik-hi-tech.business.site' -> 'malik-hi-tech'."""
+    if not domain:
+        return None
+    ext = _extract(domain)
+    if f"{ext.domain}.{ext.suffix}" in HOSTED_PLATFORMS:
+        return ext.subdomain.split(".")[-1] or None
+    return ext.domain or None
 
 
 def is_social_url(raw: str | None) -> bool:

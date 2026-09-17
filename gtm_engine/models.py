@@ -114,6 +114,7 @@ class CompanyQuality(BaseModel):
     has_public_email: bool = False
     has_phone: bool = False
     page_count: int = 0
+    website_mismatch: bool = False
     notes: list[str] = Field(default_factory=list)
 
 
