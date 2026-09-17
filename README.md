@@ -28,6 +28,18 @@ Other commands:
 .venv/Scripts/python -m pytest
 ```
 
+## Web UI
+
+```bash
+.venv/Scripts/python -m uvicorn gtm_engine.api.main:app --reload   # API :8000
+cd web && npm install && npm run dev                              # UI  :3000
+```
+
+Four pages: **Dashboard** (counts, score distribution, top buyers), **Campaigns** (run discovery
+with live progress, download CSV), **Leads** (filter by type/score, open a lead to see every
+reason and its activity, suppress), **Outreach** (the approval queue: each due email is rendered,
+you edit subject/body, approve or reject, then send; plus sequence and activity views).
+
 ## Outreach
 
 ```bash
@@ -39,7 +51,7 @@ Other commands:
 ```
 
 Credentials come only from the environment (`GTM_SMTP_USER`, `GTM_SMTP_PASSWORD` = Gmail address +
-App Password). Without them every send is a dry run. Sequence: Email 1 → +3 days Follow-up 1 →
+App Password). Without them every send is a dry run. **Every email requires human approval** (`require_approval: true`): it is drafted, shown in the UI, edited if you like, and sent only after you approve it — follow-ups come back for their own approval. Sequence: Email 1 → +3 days Follow-up 1 →
 +4 days Follow-up 2, threaded; stops on reply, bounce, "STOP", or suppression. Daily cap, 45 s
 spacing and a 09:00–18:00 Asia/Karachi weekday window live in `config/outreach/settings.yaml`;
 copy in `config/outreach/templates.yaml`. Every send is recorded in
@@ -82,7 +94,8 @@ gtm_engine/
   storage/        database.py (SQLite)
   outreach/       templates, sequencer (queue + state machine), sender (Gmail/dry-run),
                   reply_state (IMAP), ledger (durable send log committed to leads/)
-  api/            FastAPI skeleton
+  api/            FastAPI backend for the web UI
+web/              Next.js 16 + shadcn UI (see web/README.md)
   pipeline.py     orchestration
   cli.py
 config/           campaigns, defaults, engine settings
@@ -102,6 +115,6 @@ data/             sqlite db + exports (gitignored)
 | M5 Enrichment (contacts, signals, quality) | done |
 | M6 Validation (domains, MX, dedupe, suppression) | done |
 | M7 Scoring with reasons | done |
-| M8 Export UI | CLI + API done; web UI pending template |
+| M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
 | M9 Outreach (Gmail SMTP, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
 | M10 Hardening | in progress |
