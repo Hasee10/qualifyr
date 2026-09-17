@@ -123,7 +123,7 @@ def apply_inbound(db: Database, campaign_id: str, messages: list[InboundMessage]
                 lead = bounce_threads.get(m.in_reply_to)
             if lead is None:
                 lead = next((l for mid, l in bounce_threads.items() if mid in m.references), None)
-            if lead is not None and lead.sequence_status != SequenceStatus.BOUNCED:
+            if lead is not None and lead.sequence_status not in (SequenceStatus.BOUNCED, SequenceStatus.UNSUBSCRIBED):
                 stop_lead(db, lead, SequenceStatus.BOUNCED, "bounce notification", ledger)
                 report.bounced += 1
                 report.details.append(f"{lead.company_name}: bounced")
