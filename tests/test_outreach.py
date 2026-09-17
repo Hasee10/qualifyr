@@ -249,3 +249,32 @@ def test_inbound_reply_stop_and_bounce(db, campaign, osettings, templates, tmp_p
     # Neither gets any further email
     r = send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT + timedelta(days=3), sleep=lambda s: None)
     assert r.sent == 0
+
+
+def test_bounce_quoting_our_thread_is_bounce_not_reply(db, campaign, osettings, templates, tmp_path):
+    ledger = Ledger(tmp_path / "ledger.json")
+    enqueue(db, "test-retail", osettings, ledger)
+    send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
+    zara = next(l for l in db.list_leads("test-retail") if l.company_name == "Zara Fabrics")
+    bounce = InboundMessage(from_addr="mailer-daemon@googlemail.com", subject="Delivery Status Notification (Failure)",
+                            body="Your message wasn't delivered to ahmed@zarafabrics.pk because the address couldn't be found",
+                            in_reply_to=zara.thread_message_id, references=zara.thread_message_id)
+    report = apply_inbound(db, "test-retail", [bounce], ledger)
+    assert (report.replied, report.bounced) == (0, 1)
+    zara = db.get_lead(zara.lead_id)
+    assert zara.sequence_status == SequenceStatus.BOUNCED and db.is_suppressed("ahmed@zarafabrics.pk")
+
+
+def test_bounce_previously_misread_as_reply_is_corrected(db, campaign, osettings, templates, tmp_path):
+    ledger = Ledger(tmp_path / "ledger.json")
+    enqueue(db, "test-retail", osettings, ledger)
+    send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
+    zara = next(l for l in db.list_leads("test-retail") if l.company_name == "Zara Fabrics")
+    zara.sequence_status = SequenceStatus.REPLIED
+    zara.reply_status = "replied: Delivery Status Notification (Failure)"
+    db.update_lead(zara)
+    bounce = InboundMessage(from_addr="mailer-daemon@googlemail.com", subject="Delivery Status Notification (Failure)",
+                            body="ahmed@zarafabrics.pk could not be found", references=zara.thread_message_id)
+    report = apply_inbound(db, "test-retail", [bounce], ledger)
+    assert report.bounced == 1
+    assert db.get_lead(zara.lead_id).sequence_status == SequenceStatus.BOUNCED

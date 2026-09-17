@@ -63,6 +63,11 @@ def _text_body(msg: email.message.Message) -> str:
     return payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
 
 
+def _is_bounce(m: InboundMessage) -> bool:
+    haystack = f"{m.from_addr} {m.subject}".lower()
+    return any(s in haystack for s in _BOUNCE_SENDERS) or "undeliverable" in haystack
+
+
 def parse_message(raw: bytes) -> InboundMessage:
     msg = email.message_from_bytes(raw)
     return InboundMessage(
@@ -100,27 +105,37 @@ def apply_inbound(db: Database, campaign_id: str, messages: list[InboundMessage]
     active: list[Lead] = db.leads_by_status(campaign_id, [s.value for s in ACTIVE])
     by_email = {l.contact_email.lower(): l for l in active if l.contact_email}
     by_thread = {l.thread_message_id: l for l in active if l.thread_message_id}
+    # A bounce notice quotes our thread, so it must be recognised before thread matching.
+    # Leads already stopped as REPLIED are re-checked here in case a bounce was mistaken
+    # for a reply earlier (self-healing).
+    replied = db.leads_by_status(campaign_id, [SequenceStatus.REPLIED.value])
+    bounce_candidates = {**{l.contact_email.lower(): l for l in replied if l.contact_email}, **by_email}
+    bounce_threads = {**{l.thread_message_id: l for l in replied if l.thread_message_id}, **by_thread}
 
     for m in messages:
+        if _is_bounce(m):
+            lead = None
+            for addr in _EMAIL_RE.findall(m.body):
+                if addr.lower() in bounce_candidates:
+                    lead = bounce_candidates[addr.lower()]
+                    break
+            if lead is None and m.in_reply_to:
+                lead = bounce_threads.get(m.in_reply_to)
+            if lead is None:
+                lead = next((l for mid, l in bounce_threads.items() if mid in m.references), None)
+            if lead is not None and lead.sequence_status != SequenceStatus.BOUNCED:
+                stop_lead(db, lead, SequenceStatus.BOUNCED, "bounce notification", ledger)
+                report.bounced += 1
+                report.details.append(f"{lead.company_name}: bounced")
+                by_email.pop((lead.contact_email or "").lower(), None)
+                by_thread.pop(lead.thread_message_id, None)
+            continue
+
         lead = by_email.get(m.from_addr)
         if lead is None and m.in_reply_to:
             lead = by_thread.get(m.in_reply_to)
         if lead is None:
-            for mid in by_thread:
-                if mid in m.references:
-                    lead = by_thread[mid]
-                    break
-
-        # Bounces come from the mail system, not the lead: find our lead's address inside.
-        if lead is None and any(s in m.from_addr or s in m.subject.lower() for s in _BOUNCE_SENDERS):
-            for addr in _EMAIL_RE.findall(m.body):
-                if addr.lower() in by_email:
-                    lead = by_email[addr.lower()]
-                    stop_lead(db, lead, SequenceStatus.BOUNCED, "bounce notification", ledger)
-                    report.bounced += 1
-                    report.details.append(f"{lead.company_name}: bounced")
-                    break
-            continue
+            lead = next((l for mid, l in by_thread.items() if mid in m.references), None)
         if lead is None:
             continue
 
