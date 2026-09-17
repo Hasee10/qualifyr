@@ -97,6 +97,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     for k in [s.value for s in SequenceStatus]:
         if counts.get(k):
             print(f"  {k:<16} {counts[k]}")
+    for l in db.list_leads(args.campaign_id):
+        if l.sequence_status in (SequenceStatus.REPLIED, SequenceStatus.BOUNCED, SequenceStatus.UNSUBSCRIBED):
+            print(f"    {l.sequence_status.value:<13} {l.company_name:<30} {l.contact_email}  {l.reply_status or ''}")
     due = due_leads(db, args.campaign_id)
     print(f"due now: {len(due)}")
     for l in due[:20]:
