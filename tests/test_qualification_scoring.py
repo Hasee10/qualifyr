@@ -1,0 +1,174 @@
+from conftest import fixture
+from gtm_engine.enrichment.contacts import choose_contact, role_rank
+from gtm_engine.enrichment.signals import assess_quality, detect_signals
+from gtm_engine.models import (
+    Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Priority, Signals,
+)
+from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
+from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lead
+from gtm_engine.scraping.parsers import parse_page
+from gtm_engine.scraping.site_crawler import SiteSnapshot
+
+
+def _snapshot() -> SiteSnapshot:
+    snap = SiteSnapshot(website="https://www.zarafabrics.pk", final_url="https://www.zarafabrics.pk/", reachable=True, https=True)
+    for kind, name in (("home", "retailer_home.html"), ("about", "retailer_about.html"), ("contact", "retailer_contact.html")):
+        html = fixture(name)
+        snap.pages[kind] = parse_page(f"https://www.zarafabrics.pk/{kind}", html)
+        snap.raw_html[kind] = html
+    return snap
+
+
+def _bundle_from(snap: SiteSnapshot, name: str, category: str | None) -> TextBundle:
+    home, about = snap.pages.get("home"), snap.pages.get("about")
+    return TextBundle(name=name, title=home.title if home else None,
+                      description=home.description if home else None,
+                      about_text=about.text if about else (home.text if home else None),
+                      body_text=snap.all_text, category=category)
+
+
+# --- classifier ------------------------------------------------------------------
+
+def test_retailer_is_buyer_despite_agency_footer_credit(campaign, defaults):
+    cls = BuyerClassifier(campaign, defaults).classify(_bundle_from(_snapshot(), "Zara Fabrics", "shop=clothes"))
+    assert cls.company_type == CompanyType.BUYER
+    assert cls.confidence >= 0.7
+    assert any("buyer terms in company identity" in r for r in cls.reasons)
+    assert "digital marketing" in cls.vendor_hits  # footer credit seen but outweighed
+
+
+def test_agency_is_vendor(campaign, defaults):
+    home = parse_page("https://pixeldigital.pk/", fixture("agency_home.html"))
+    bundle = TextBundle(name="Pixel Digital", title=home.title, description=home.description,
+                        about_text=home.text, body_text=home.text, category=None)
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.VENDOR
+    assert "agency" in cls.vendor_hits and "software house" in cls.vendor_hits
+
+
+def test_thin_site_is_unknown(campaign, defaults):
+    home = parse_page("https://comingsoon-traders.pk/", fixture("thin_home.html"))
+    bundle = TextBundle(name="Comingsoon Traders", title=home.title, description=None,
+                        about_text=home.text, body_text=home.text, category=None)
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.UNKNOWN
+
+
+def test_category_match_alone_gives_buyer(campaign, defaults):
+    bundle = TextBundle(name="Nameless Boutique", title=None, description=None, about_text=None, body_text="", category="shop=clothes")
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.BUYER
+    assert 0.5 <= cls.confidence <= 1.0
+
+
+def test_vendor_term_in_name_beats_weak_buyer_body(campaign, defaults):
+    bundle = TextBundle(name="Retail Growth Consultancy", title="Consultancy for retailers", description=None,
+                        about_text="We help retail brands and stores grow.", body_text="retail store brand", category=None)
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.VENDOR
+
+
+def test_allowed_vendor_keyword_is_not_negative(campaign, defaults):
+    campaign.allowed_vendor_keywords = ["consultancy"]
+    bundle = TextBundle(name="Retail Consultancy Store", title=None, description=None, about_text=None,
+                        body_text="", category="shop=clothes")
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.BUYER
+
+
+# --- enrichment ------------------------------------------------------------------
+
+def test_role_rank_blacklists_sales(campaign, defaults):
+    assert role_rank("Sales Executive", campaign, defaults) == -1
+    assert role_rank("Founder & CEO", campaign, defaults) > role_rank("Operations Manager", campaign, defaults)
+    assert role_rank("Head of Ecommerce", campaign, defaults) > 0
+
+
+def test_choose_contact_picks_decision_maker_with_personal_email(campaign, defaults):
+    contact = choose_contact(_snapshot(), campaign, defaults)
+    assert contact.is_decision_maker
+    assert contact.name == "Ahmed Raza" and "CEO" in contact.role
+    assert contact.email == "ahmed.raza@zarafabrics.pk"
+    assert contact.profile_url == "https://www.linkedin.com/company/zara-fabrics"
+    assert "Ahmed Raza" in contact.evidence
+
+
+def test_choose_contact_falls_back_to_business_mailbox(campaign, defaults):
+    snap = _snapshot()
+    snap.pages.pop("about")
+    contact = choose_contact(snap, campaign, defaults)
+    assert not contact.is_decision_maker and contact.name is None
+    assert contact.email == "info@zarafabrics.pk"
+
+
+def test_signals_and_quality(defaults):
+    snap = _snapshot()
+    sig = detect_signals(snap, defaults)
+    assert "hiring" in sig.buying and "ecommerce_active" in sig.buying
+    assert "shopify" in sig.technologies
+    q = assess_quality(snap)
+    assert q.reachable and q.https and q.has_contact_page and q.has_about_page and q.has_public_email
+
+
+# --- scoring ----------------------------------------------------------------------
+
+def _company(**kw) -> DiscoveredCompany:
+    base = dict(name="Zara Fabrics", website="https://www.zarafabrics.pk", city="Islamabad", country="Pakistan", source="osm")
+    base.update(kw)
+    return DiscoveredCompany(**base)
+
+
+def _good_inputs(cls_type=CompanyType.BUYER, email_status=EmailStatus.MX_VALID) -> ScoreInputs:
+    return ScoreInputs(
+        company=_company(),
+        classification=Classification(company_type=cls_type, confidence=0.9, buyer_hits=["retailer", "store"]),
+        quality=CompanyQuality(reachable=True, https=True, has_contact_page=True, has_about_page=True, has_public_email=True, page_count=3),
+        contact=Contact(name="Ahmed Raza", role="CEO", email="ahmed@zarafabrics.pk", email_status=email_status,
+                        profile_url="https://linkedin.com/company/x", is_decision_maker=True),
+        signals=Signals(buying={"hiring": ["careers"], "ecommerce_active": ["shop now"]}, technologies=["shopify"]),
+    )
+
+
+def test_strong_buyer_scores_high_and_is_outreach_ready(campaign):
+    inputs = _good_inputs()
+    score = score_lead(inputs, campaign)
+    assert score.total >= 80 and score.priority == Priority.HIGH
+    assert score.total == score.icp_fit + score.company_quality + score.buyer_evidence + score.contact_quality + score.buying_signals
+    assert any("decision-maker found" in r for r in score.reasons)
+    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+
+
+def test_vendor_is_rejected_regardless_of_score(campaign):
+    inputs = _good_inputs(cls_type=CompanyType.VENDOR)
+    score = score_lead(inputs, campaign)
+    assert score.priority == Priority.REJECT
+    assert score.reasons[0].startswith("classified as VENDOR")
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+
+
+def test_unknown_never_exceeds_review(campaign):
+    inputs = _good_inputs(cls_type=CompanyType.UNKNOWN)
+    score = score_lead(inputs, campaign)
+    assert score.priority in (Priority.REVIEW, Priority.REJECT)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+
+
+def test_unverified_email_blocks_outreach(campaign):
+    inputs = _good_inputs(email_status=EmailStatus.UNVERIFIED)
+    score = score_lead(inputs, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+
+
+def test_wrong_city_loses_points(campaign):
+    good = score_lead(_good_inputs(), campaign)
+    inputs = _good_inputs()
+    inputs.company = _company(city="Karachi")
+    worse = score_lead(inputs, campaign)
+    assert worse.icp_fit < good.icp_fit
+    assert any("not in campaign list" in r for r in worse.reasons)
+
+
+def test_weights_rescale(campaign):
+    campaign.weights.icp_fit, campaign.weights.buying_signals = 40, 20
+    score = score_lead(_good_inputs(), campaign)
+    assert score.icp_fit <= 40 and score.buying_signals <= 20

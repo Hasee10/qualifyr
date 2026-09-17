@@ -1,0 +1,180 @@
+"""HTML extraction: visible text, description, emails, phones, social links, team members.
+Pure functions over HTML strings so they are trivially testable."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from urllib.parse import urljoin, urlparse
+
+from bs4 import BeautifulSoup
+
+from gtm_engine.validation.emails import extract_emails
+
+_NOISE_TAGS = ("script", "style", "noscript", "svg", "iframe", "template", "head")
+
+# Pakistan / GCC formats plus international. Requires 9-13 digits so prices don't match.
+PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?(?:92|971|966|974|968)[\s().-]*\d(?:[\s().-]*\d){8,10}|0\d{2,3}[\s().-]*\d{7,8}|0\d{3}[\s.-]?\d{7})(?!\d)"
+)
+
+SOCIAL_PATTERNS = {
+    "linkedin": re.compile(r"(?:www\.)?linkedin\.com/(?:company|in)/[^/?#\s\"']+", re.I),
+    "facebook": re.compile(r"(?:www\.)?facebook\.com/[^/?#\s\"']+", re.I),
+    "instagram": re.compile(r"(?:www\.)?instagram\.com/[^/?#\s\"']+", re.I),
+    "whatsapp": re.compile(r"(wa\.me/\d+|api\.whatsapp\.com/send\?phone=\d+)", re.I),
+}
+
+PAGE_KIND_HINTS: dict[str, tuple[str, ...]] = {
+    "about": ("about", "who-we-are", "our-story", "company", "overview", "profile"),
+    "contact": ("contact", "reach-us", "get-in-touch", "locations", "branches", "store-locator"),
+    "team": ("team", "leadership", "management", "our-people", "board", "directors", "founders"),
+    "services": ("services", "products", "solutions", "what-we-do", "collections", "shop", "catalog"),
+    "careers": ("career", "careers", "jobs", "join-us", "hiring", "vacanc"),
+}
+
+# Words in a link's own text that identify the page kind even when the URL is opaque.
+_LINK_TEXT_HINTS: dict[str, tuple[str, ...]] = {
+    "about": ("about", "who we are", "our story", "company"),
+    "contact": ("contact", "get in touch", "reach us", "visit us", "locations", "branches"),
+    "team": ("team", "leadership", "management", "our people", "directors", "founders"),
+    "services": ("services", "products", "solutions", "what we do"),
+    "careers": ("career", "jobs", "join us", "we are hiring"),
+}
+
+
+@dataclass
+class ParsedPage:
+    url: str
+    title: str | None
+    description: str | None
+    text: str
+    emails: list[str] = field(default_factory=list)
+    phones: list[str] = field(default_factory=list)
+    social: dict[str, str] = field(default_factory=dict)
+    internal_links: dict[str, str] = field(default_factory=dict)  # kind -> absolute url
+    team: list[tuple[str, str]] = field(default_factory=list)      # (name, role)
+
+
+def visible_text(soup: BeautifulSoup) -> str:
+    for tag in soup.find_all(_NOISE_TAGS):
+        tag.decompose()
+    text = soup.get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text)
+
+
+def meta_description(soup: BeautifulSoup) -> str | None:
+    for attrs in ({"name": "description"}, {"property": "og:description"}, {"name": "twitter:description"}):
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content") and tag["content"].strip():
+            return tag["content"].strip()[:500]
+    return None
+
+
+def classify_link(href: str, text: str) -> str | None:
+    path = urlparse(href).path.lower()
+    text_l = (text or "").lower().strip()
+    for kind, hints in _LINK_TEXT_HINTS.items():
+        if text_l and any(text_l == h or text_l.startswith(h) for h in hints):
+            return kind
+    for kind, hints in PAGE_KIND_HINTS.items():
+        if any(h in path for h in hints):
+            return kind
+    return None
+
+
+def internal_links(soup: BeautifulSoup, base_url: str) -> dict[str, str]:
+    base_host = urlparse(base_url).netloc.lower().removeprefix("www.")
+    found: dict[str, str] = {}
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href)
+        host = urlparse(absolute).netloc.lower().removeprefix("www.")
+        if host != base_host:
+            continue
+        kind = classify_link(absolute, a.get_text(" ", strip=True))
+        if kind and kind not in found:
+            found[kind] = absolute.split("#")[0]
+    return found
+
+
+def social_links(html: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name, pattern in SOCIAL_PATTERNS.items():
+        m = pattern.search(html)
+        if m:
+            out[name] = "https://" + m.group(0)
+    return out
+
+
+def extract_phones(text: str) -> list[str]:
+    seen: list[str] = []
+    for m in PHONE_RE.findall(text):
+        digits = re.sub(r"\D", "", m)
+        if 9 <= len(digits) <= 13 and m.strip() not in seen:
+            seen.append(m.strip())
+    return seen[:5]
+
+
+_ROLE_WORDS = (
+    "founder", "ceo", "chief", "director", "manager", "head", "president", "owner",
+    "chairman", "partner", "officer", "lead", "principal", "proprietor", "gm", "md",
+    "coo", "cfo", "cto", "vp", "vice", "executive", "specialist", "coordinator", "engineer",
+    "analyst", "associate", "consultant", "supervisor", "accountant", "secretary", "sales",
+)
+_NAME_RE = re.compile(r"^(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Engr\.?|Prof\.?|Syed|Muhammad|Mohammad)?\s*[A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){0,4}$")
+
+
+def _looks_like_name(s: str) -> bool:
+    s = s.strip()
+    return 3 <= len(s) <= 60 and bool(_NAME_RE.match(s)) and not any(w in s.lower() for w in _ROLE_WORDS)
+
+
+def _looks_like_role(s: str) -> bool:
+    s = s.strip().lower()
+    return 2 <= len(s) <= 80 and any(w in s.split() or w in s for w in _ROLE_WORDS)
+
+
+def extract_team(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    """Find (name, role) pairs from team-card style markup: a heading/strong element
+    holding a name followed by a short sibling holding a role. Deliberately strict."""
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    candidates = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "strong", "b", "p", "span", "div"])
+    for el in candidates:
+        name = el.get_text(" ", strip=True)
+        if not _looks_like_name(name):
+            continue
+        role = None
+        # Look at the next few short elements after the name for a role.
+        for sib in el.find_all_next(["p", "span", "div", "small", "em", "h4", "h5", "h6"], limit=4):
+            txt = sib.get_text(" ", strip=True)
+            if not txt or txt == name:
+                continue
+            if _looks_like_role(txt):
+                role = txt
+            break
+        if role and name not in seen:
+            seen.add(name)
+            pairs.append((name, role))
+    return pairs[:20]
+
+
+def parse_page(url: str, html: str) -> ParsedPage:
+    soup = BeautifulSoup(html or "", "lxml")
+    title = soup.title.get_text(" ", strip=True) if soup.title else None
+    description = meta_description(soup)
+    links = internal_links(soup, url)
+    team = extract_team(BeautifulSoup(html or "", "lxml"))
+    social = social_links(html or "")
+    # mailto: links are the most reliable email source; scan them before the visible text.
+    mailto = [a["href"][7:].split("?")[0] for a in soup.find_all("a", href=True) if a["href"].lower().startswith("mailto:")]
+    text = visible_text(soup)
+    emails = extract_emails(" ".join(mailto) + " " + text + " " + (html or ""))
+    phones = extract_phones(text)
+    return ParsedPage(
+        url=url, title=title, description=description, text=text[:20000],
+        emails=emails, phones=phones, social=social, internal_links=links, team=team,
+    )

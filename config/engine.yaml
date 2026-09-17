@@ -1,0 +1,15 @@
+# Runtime settings. Any key can be overridden with an env var GTM_<KEY>, e.g. GTM_DB_PATH.
+db_path: data/gtm.sqlite
+export_dir: data/exports
+user_agent: "GTMLeadEngine/0.1 (+business research; contact via site form)"
+request_timeout_s: 15
+per_host_delay_s: 2.0
+max_retries: 2
+concurrency: 4
+respect_robots: true
+overpass_url: https://overpass-api.de/api/interpreter
+overpass_timeout_s: 90
+enable_search_fallback: true
+search_delay_s: 5.0
+dns_timeout_s: 5.0
+log_level: INFO
