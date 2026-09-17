@@ -11,7 +11,7 @@ Phase 1 is local-first: Python 3.12+, SQLite, no paid APIs.
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python -m pip install -e ".[api,dev]"
+.venv/Scripts/python -m pip install -e ".[api,dev,overture]"
 .venv/Scripts/python -m gtm_engine.cli run config/campaigns/example_retail_islamabad.yaml --max-companies 20
 ```
 
@@ -71,7 +71,8 @@ Every stage is configuration-driven:
 ```
 gtm_engine/
   config/         schema + YAML loader
-  discovery/      osm.py (Overpass), csv_seed.py, search.py (website finder)
+  discovery/      overture.py (Overture Maps via DuckDB), osm.py (Overpass + mirrors),
+                  geocode.py (Nominatim), csv_seed.py, search.py (website finder)
   scraping/       fetcher.py (polite HTTP), site_crawler.py, parsers.py
   qualification/  buyer_classifier.py  ← the gate
   enrichment/     contacts.py, signals.py

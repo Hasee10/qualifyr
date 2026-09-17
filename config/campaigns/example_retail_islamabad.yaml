@@ -42,6 +42,21 @@ buyer_keywords:
 negative_keywords: []
 allowed_vendor_keywords: []
 
+# Overture Maps category substrings (primary source; ~40x OSM coverage in Pakistan).
+overture_categories:
+  - clothing
+  - fashion
+  - shoe_store
+  - electronics
+  - mobile_phone_store
+  - furniture
+  - cosmetic
+  - grocery
+  - supermarket
+  - department_store
+  - shopping_center
+  - home_goods
+
 # OpenStreetMap tags to query in each city. "shop=*" means any shop.
 osm_categories:
   - shop=clothes

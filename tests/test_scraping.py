@@ -109,3 +109,12 @@ def test_team_extractor_ignores_product_headings():
     <div><h3>Sara Khan</h3><p>COO</p></div>"""
     page = parse_page("https://x.pk/", html)
     assert page.team == [("Ahmed Raza", "Chief Operating Officer"), ("Sara Khan", "COO")]
+
+
+def test_inline_decision_maker_patterns():
+    html = """<p>Founded in 2010 by Ahmed Raza, CEO of the company, Zara Fabrics now has six outlets.
+    Our Managing Director: Sana Malik oversees operations. Contact - Support team for help.</p>"""
+    page = parse_page("https://x.pk/about", html)
+    assert ("Ahmed Raza", "CEO") in page.team
+    assert ("Sana Malik", "Managing Director") in page.team
+    assert all("Support" not in n for n, _ in page.team)

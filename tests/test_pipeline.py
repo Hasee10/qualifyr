@@ -143,3 +143,26 @@ async def test_search_found_domain_that_duplicates_earlier_company_is_skipped(ca
     assert result.stats.duplicates == 1
     assert [l.company_name for l in result.leads] == ["Zara Fabrics"]
     db.close()
+
+
+@respx.mock
+async def test_exclude_chains_drops_branded_outlets(campaign, settings, defaults):
+    _mock_world(settings)
+    campaign.geography.cities = ["Islamabad"]
+    campaign.exclude_chains = True
+    campaign.osm_categories = []
+    db = Database(settings.db_path)
+    from gtm_engine.models import DiscoveredCompany
+
+    async def fake_discover(_c, _p=None):
+        return [
+            DiscoveredCompany(name="Bata", website="https://www.zarafabrics.pk", city="Islamabad", source="osm", extra={"brand": "Bata"}),
+            DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk", city="Islamabad", source="osm"),
+        ]
+
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
+        pipeline.discover = fake_discover
+        result = await pipeline.run(campaign)
+    assert result.stats.chains_excluded == 1 and [l.company_name for l in result.leads] == ["Zara Fabrics"]
+    db.close()

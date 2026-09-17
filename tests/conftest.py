@@ -44,4 +44,5 @@ def settings(tmp_path: Path) -> EngineSettings:
         respect_robots=False,
         enable_search_fallback=False,
         overpass_url="https://overpass.test/api/interpreter",
+        overpass_mirrors=[],
     )

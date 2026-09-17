@@ -59,12 +59,17 @@ class CampaignConfig(BaseModel):
     allowed_vendor_keywords: list[str] = Field(default_factory=list)
     # OSM tag filters, e.g. ["shop=*", "shop=clothes", "amenity=clinic"].
     osm_categories: list[str] = Field(default_factory=list)
+    # Overture category substrings, e.g. ["clothing", "shoe_store", "supermarket"].
+    overture_categories: list[str] = Field(default_factory=list)
     # Optional seed list of companies/domains supplied by the user.
     seed_csv: Path | None = None
     min_score: int = 70
     max_companies: int = 150
     max_pages_per_site: int = 6
     allow_multiple_contacts_per_company: bool = False
+    # Drop branches of national/international chains (OSM `brand` tag): decisions are not
+    # made at the outlet and the only public contact is a customer-care mailbox.
+    exclude_chains: bool = False
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
     routing: RoutingThresholds = Field(default_factory=RoutingThresholds)
 
@@ -77,7 +82,7 @@ class CampaignConfig(BaseModel):
 
     @field_validator(
         "target_industries", "target_roles", "buyer_keywords", "negative_keywords",
-        "allowed_vendor_keywords", "osm_categories",
+        "allowed_vendor_keywords", "osm_categories", "overture_categories",
     )
     @classmethod
     def _lower(cls, values: list[str]) -> list[str]:
@@ -113,6 +118,11 @@ class EngineSettings(BaseModel):
     concurrency: int = 4
     respect_robots: bool = True
     overpass_url: str = "https://overpass-api.de/api/interpreter"
+    # Tried in order when the primary returns an error or rate-limits (shared public instances).
+    overpass_mirrors: list[str] = Field(default_factory=lambda: [
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ])
     overpass_timeout_s: int = 90
     enable_search_fallback: bool = True
     search_delay_s: float = 5.0

@@ -225,3 +225,12 @@ def test_wrong_website_is_held_for_review(campaign):
     assert score.priority == Priority.REVIEW
     assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
     assert not assess_quality(snap, "Zara Fabrics", "zarafabrics.pk").website_mismatch
+
+
+def test_overture_category_counts_as_campaign_match(campaign, defaults):
+    campaign.overture_categories = ["clothing", "shoe_store"]
+    bundle = TextBundle(name="Tailor and Cobbler", title="Tailor and Cobbler", description=None,
+                        about_text="Handmade shoes", body_text="handmade shoes", category="overture=shoe_store")
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.BUYER
+    assert any("matches campaign target" in r for r in cls.reasons)

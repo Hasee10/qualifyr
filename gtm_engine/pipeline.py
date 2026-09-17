@@ -12,6 +12,7 @@ from typing import Awaitable, Callable
 from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings
 from gtm_engine.discovery.csv_seed import CSVSeedDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
+from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
@@ -47,6 +48,7 @@ class RunStats:
     outreach_ready: int = 0
     suppressed: int = 0
     duplicates: int = 0
+    chains_excluded: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -96,6 +98,8 @@ class Pipeline:
 
     async def discover(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> list[DiscoveredCompany]:
         sources = []
+        if campaign.overture_categories and campaign.geography.cities:
+            sources.append(OvertureDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.cities:
             sources.append(OSMDiscovery(self.fetcher, self.settings))
         if campaign.seed_csv:
@@ -236,6 +240,10 @@ class Pipeline:
         try:
             discovered = await self.discover(campaign, progress)
             stats.discovered = len(discovered)
+            if campaign.exclude_chains:
+                before = len(discovered)
+                discovered = [c for c in discovered if not c.extra.get("brand")]
+                stats.chains_excluded = before - len(discovered)
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)

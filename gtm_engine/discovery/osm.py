@@ -107,15 +107,17 @@ class OSMDiscovery:
                     yield company
 
     async def _run_query(self, query: str) -> list[dict]:
-        url = f"{self.settings.overpass_url}?{urlencode({'data': query})}"
-        # Overpass is a shared public instance: one query at a time, generous spacing.
-        result = await self.fetcher.get(url, delay=self.settings.per_host_delay_s * 2, api=True)
-        if not result.ok:
-            log.warning("osm: overpass request failed (%s %s)", result.status_code, result.error)
-            return []
-        try:
-            payload = json.loads(result.text)
-        except json.JSONDecodeError:
-            log.warning("osm: non-JSON response from overpass")
-            return []
-        return payload.get("elements", [])
+        # Overpass instances are shared and often overloaded; fall through the mirror list.
+        for base in [self.settings.overpass_url, *self.settings.overpass_mirrors]:
+            url = f"{base}?{urlencode({'data': query})}"
+            result = await self.fetcher.get(url, delay=self.settings.per_host_delay_s * 2, api=True)
+            if not result.ok:
+                log.warning("osm: %s failed (%s %s); trying next mirror", base, result.status_code, result.error)
+                continue
+            try:
+                payload = json.loads(result.text)
+            except json.JSONDecodeError:
+                log.warning("osm: non-JSON response from %s; trying next mirror", base)
+                continue
+            return payload.get("elements", [])
+        return []

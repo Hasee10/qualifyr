@@ -39,7 +39,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -e ".[api]"
+      - run: pip install -e ".[api,overture]"
 
       # The SQLite DB carries dedupe state and suppressions across runs. Cache keys are
       # immutable, so save under a fresh key every run and restore the newest.

@@ -57,6 +57,7 @@ class BuyerClassifier:
         self.vendor_phrases = [t for t in defaults.vendor_phrases if t not in allowed]
         self.buyer_terms = list(dict.fromkeys(campaign.buyer_keywords + campaign.target_industries))
         self.osm_categories = set(campaign.osm_categories)
+        self.overture_categories = list(campaign.overture_categories)
         self.vendor_categories = {c for c in defaults.vendor_categories if c not in allowed}
 
     def classify(self, bundle: TextBundle) -> Classification:
@@ -81,6 +82,9 @@ class BuyerClassifier:
                 return Classification(company_type=CompanyType.VENDOR, confidence=0.8, reasons=reasons,
                                       buyer_hits=buyer_id + buyer_body, vendor_hits=[bundle.category] + vendor_id + vendor_body)
             category_match = bundle.category in self.osm_categories or f"{key}=*" in self.osm_categories
+            if key == "overture":
+                value = bundle.category.split("=", 1)[1].lower()
+                category_match = any(c in value for c in self.overture_categories)
             if category_match:
                 reasons.append(f"discovery category '{bundle.category}' matches campaign target")
 

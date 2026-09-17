@@ -128,3 +128,28 @@ def test_name_matches_label_inside_name():
     assert name_matches("ElectricStorePk Electric Store", "electricstore.pk", None)
     assert not name_matches("XS Mobile", "whatmobile.com.pk", "WhatMobile - phone prices")
     assert not name_matches("Food 24 Hours", "archivesouthasia.com", None)
+
+
+@respx.mock
+async def test_overpass_mirror_fallback(campaign, settings):
+    _mock_nominatim()
+    settings.overpass_mirrors = ["https://mirror.test/api/interpreter"]
+    respx.get(url__startswith=settings.overpass_url).mock(return_value=httpx.Response(504))
+    mirror = respx.get(url__startswith="https://mirror.test/").mock(
+        return_value=httpx.Response(200, json=json.loads(fixture("overpass_islamabad.json"))))
+    campaign.geography.cities = ["Islamabad"]
+    async with HttpFetcher(settings) as fetcher:
+        found = [c async for c in OSMDiscovery(fetcher, settings).discover(campaign)]
+    assert mirror.called and len(found) == 5
+
+
+def test_overture_row_mapping_and_sql():
+    from gtm_engine.discovery.overture import build_sql, row_to_company
+    sql, params = build_sql("2026-08-19.0", BBox(33.5, 72.8, 33.8, 73.2), ["clothing", "shoe_store"], 50)
+    assert "release/2026-08-19.0/theme=places" in sql and "LIMIT 50" in sql
+    assert params == ["%clothing%", "%shoe_store%"] and sql.count("LIKE ?") == 2
+    c = row_to_company({"id": "abc", "name": "Cell story", "category": "mobile_phone_store",
+                        "website": "http://www.cellstory.pk/", "email": "Info@CellStory.pk", "brand": None}, "Islamabad", "Pakistan")
+    assert c.source == "overture" and c.category == "overture=mobile_phone_store"
+    assert c.email == "info@cellstory.pk" and c.city == "Islamabad"
+    assert row_to_company({"name": ""}, "Islamabad", "Pakistan") is None

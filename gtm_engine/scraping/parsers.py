@@ -151,6 +151,31 @@ def _looks_like_role(s: str) -> bool:
     return 2 <= len(s) <= 80 and not any(ch.isdigit() for ch in s) and _ROLE_RE.search(s) is not None
 
 
+_INLINE_SEP = r"\s*(?:,|–|—|-|:|\|)\s*"
+_INLINE_TITLES = (
+    "founder & ceo", "co-founder", "cofounder", "founder", "chief executive officer", "ceo",
+    "managing director", "general manager", "chief operating officer", "coo", "director",
+    "owner", "proprietor", "chairman", "president", "head of ecommerce", "operations manager",
+    "procurement manager", "purchasing manager", "principal", "medical director",
+)
+_INLINE_TITLE_ALT = "|".join(re.escape(t) for t in sorted(_INLINE_TITLES, key=len, reverse=True))
+_INLINE_NAME = r"(?:Dr\.?\s|Mr\.?\s|Mrs\.?\s|Ms\.?\s|Engr\.?\s)?[A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,3}"
+_INLINE_NAME_TITLE = re.compile(rf"({_INLINE_NAME}){_INLINE_SEP}((?i:{_INLINE_TITLE_ALT}))(?![a-zA-Z])")
+_INLINE_TITLE_NAME = re.compile(rf"(?<![a-zA-Z])((?i:{_INLINE_TITLE_ALT})){_INLINE_SEP}({_INLINE_NAME})")
+
+
+def extract_inline_team(text: str) -> list[tuple[str, str]]:
+    """'Ahmed Raza, CEO' or 'CEO: Ahmed Raza' inside running prose (about pages)."""
+    pairs: list[tuple[str, str]] = []
+    for pat, name_first in ((_INLINE_NAME_TITLE, True), (_INLINE_TITLE_NAME, False)):
+        for m in pat.finditer(text):
+            name, role = (m.group(1), m.group(2)) if name_first else (m.group(2), m.group(1))
+            name = name.strip()
+            if _looks_like_name(name) and (name, role) not in pairs:
+                pairs.append((name, role))
+    return pairs[:10]
+
+
 def extract_team(soup: BeautifulSoup) -> list[tuple[str, str]]:
     """Find (name, role) pairs from team-card style markup: a heading/strong element
     holding a name followed by a short sibling holding a role. Deliberately strict."""
@@ -186,6 +211,9 @@ def parse_page(url: str, html: str) -> ParsedPage:
     # mailto: links are the most reliable email source; scan them before the visible text.
     mailto = [a["href"][7:].split("?")[0] for a in soup.find_all("a", href=True) if a["href"].lower().startswith("mailto:")]
     text = visible_text(soup)
+    for pair in extract_inline_team(text):
+        if pair[0] not in {n for n, _ in team}:
+            team.append(pair)
     emails = extract_emails(" ".join(mailto) + " " + text)
     source_emails = [e for e in extract_emails(html or "") if e not in emails]
     phones = extract_phones(text)
