@@ -1,5 +1,19 @@
 {
  "sent": {
+  "anjumhussain.shah@metro.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_793def73800a",
+    "message_id": "<178965457957.2384.3805854062762632682@gmail.com>"
+   }
+  },
+  "contactus@outfitters.com.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_04b8477dd32e",
+    "message_id": "<178965462609.2384.18370286232719607714@gmail.com>"
+   }
+  },
   "customercare.pk@bata.com": {
    "email_1": {
     "at": "2026-09-17T14:09:09.892889+00:00",
@@ -14,11 +28,32 @@
     "message_id": "<178965424172.2350.6616996843611354387@gmail.com>"
    }
   },
+  "electricdukan.pk@gmail.com": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_a6aa94cab1c6",
+    "message_id": "<178965471808.2384.14705032817831427414@gmail.com>"
+   }
+  },
   "feedback@csd.gov.pk": {
    "email_1": {
     "at": "2026-09-17T14:09:09.892889+00:00",
     "lead_id": "lead_1b2863558fc2",
     "message_id": "<178965428725.2350.6764064871424751401@gmail.com>"
+   }
+  },
+  "info@ghazalabukhari.com": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_0fee82da5793",
+    "message_id": "<178965481126.2384.5081268814760500491@gmail.com>"
+   }
+  },
+  "info@japanelectronics.pk": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_7887ef14a504",
+    "message_id": "<178965467237.2384.9329829222420734603@gmail.com>"
    }
   },
   "info@mcc.com.pk": {
@@ -33,6 +68,13 @@
     "at": "2026-09-17T14:09:09.892889+00:00",
     "lead_id": "lead_a938d5e43055",
     "message_id": "<178965419621.2350.11121804327079328644@gmail.com>"
+   }
+  },
+  "info@savemartonline.com": {
+   "email_1": {
+    "at": "2026-09-17T14:16:19.542857+00:00",
+    "lead_id": "lead_858d065c4931",
+    "message_id": "<178965476436.2384.11541396275637684854@gmail.com>"
    }
   }
  },
