@@ -154,6 +154,7 @@ class Pipeline:
             about_text=(about.text if about else None) or (home.text if home else None),
             body_text=snapshot.all_text,
             category=company.category,
+            site_reachable=snapshot.reachable,
         )
         cls = classifier.classify(bundle)
         quality = assess_quality(snapshot, company.name, domain)

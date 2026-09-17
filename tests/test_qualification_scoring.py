@@ -54,11 +54,31 @@ def test_thin_site_is_unknown(campaign, defaults):
     assert cls.company_type == CompanyType.UNKNOWN
 
 
-def test_category_match_alone_gives_buyer(campaign, defaults):
-    bundle = TextBundle(name="Nameless Boutique", title=None, description=None, about_text=None, body_text="", category="shop=clothes")
+def test_category_match_with_reachable_site_gives_buyer(campaign, defaults):
+    bundle = TextBundle(name="Nameless Boutique", title="Nameless Boutique", description=None, about_text="Welcome",
+                        body_text="welcome", category="shop=clothes", site_reachable=True)
     cls = BuyerClassifier(campaign, defaults).classify(bundle)
     assert cls.company_type == CompanyType.BUYER
     assert 0.5 <= cls.confidence <= 1.0
+
+
+def test_category_match_without_site_is_unknown(campaign, defaults):
+    bundle = TextBundle(name="Nameless Boutique", title=None, description=None, about_text=None, body_text="",
+                        category="shop=clothes", site_reachable=False)
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.UNKNOWN
+    assert any("insufficient evidence" in r for r in cls.reasons)
+
+
+def test_vendor_category_is_vendor_even_if_campaign_queried_it(campaign, defaults):
+    campaign.osm_categories = ["office=it"]
+    bundle = TextBundle(name="Code Ripples", title="Code Ripples", description=None, about_text="We build software",
+                        body_text="we build software for retail stores and brands", category="office=it")
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.VENDOR and "office=it" in cls.vendor_hits
+    campaign.allowed_vendor_keywords = ["office=it"]
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type != CompanyType.VENDOR
 
 
 def test_vendor_term_in_name_beats_weak_buyer_body(campaign, defaults):

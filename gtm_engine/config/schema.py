@@ -90,6 +90,8 @@ class DefaultRules(BaseModel):
     negative_keywords: list[str] = Field(default_factory=list)
     # Self-descriptions typical of service sellers ("our clients include", "hire us").
     vendor_phrases: list[str] = Field(default_factory=list)
+    # Discovery categories (OSM tags) that describe sellers of services by definition.
+    vendor_categories: list[str] = Field(default_factory=list)
     buyer_role_whitelist: list[str] = Field(default_factory=list)
     role_blacklist: list[str] = Field(default_factory=list)
     generic_email_prefixes: list[str] = Field(default_factory=list)

@@ -61,3 +61,19 @@ vendor_phrases:
   - for your business
   - grow your business
   - b2b services
+
+# OSM categories that are service vendors by definition. A campaign that really wants
+# them lists the tag in allowed_vendor_keywords (e.g. "office=it").
+vendor_categories:
+  - office=it
+  - office=advertising_agency
+  - office=consulting
+  - office=marketing
+  - office=web_design
+  - office=employment_agency
+  - office=estate_agent
+  - office=telecommunication
+  - office=outsourcing
+  - office=graphic_design
+  - shop=computer_repair
+  - craft=web_developer

@@ -73,7 +73,9 @@ async def test_full_run_matches_acceptance_criteria(campaign, settings, defaults
     assert not thin.outreach_ready  # no email -> never outreach
 
     # Unnamed Mobile Shop had only a facebook "website": no domain, search disabled -> no website
-    assert by_name["Unnamed Mobile Shop"].website is None and s.no_website == 1
+    unnamed = by_name["Unnamed Mobile Shop"]
+    assert unnamed.website is None and s.no_website == 1
+    assert unnamed.company_type == CompanyType.UNKNOWN  # category alone, nothing to verify
 
     # No duplicate domains in output
     domains = [l.domain for l in result.leads if l.domain]

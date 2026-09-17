@@ -25,6 +25,7 @@ class TextBundle:
     about_text: str | None
     body_text: str
     category: str | None = None  # discovery category, e.g. "shop=clothes"
+    site_reachable: bool = True  # False -> only the discovery record is available
 
     @property
     def identity(self) -> str:
@@ -56,6 +57,7 @@ class BuyerClassifier:
         self.vendor_phrases = [t for t in defaults.vendor_phrases if t not in allowed]
         self.buyer_terms = list(dict.fromkeys(campaign.buyer_keywords + campaign.target_industries))
         self.osm_categories = set(campaign.osm_categories)
+        self.vendor_categories = {c for c in defaults.vendor_categories if c not in allowed}
 
     def classify(self, bundle: TextBundle) -> Classification:
         identity, body = bundle.identity, bundle.body
@@ -74,9 +76,12 @@ class BuyerClassifier:
         category_match = False
         if bundle.category:
             key = bundle.category.split("=")[0]
+            if bundle.category in self.vendor_categories:
+                reasons.append(f"discovery category '{bundle.category}' is a service-vendor category")
+                return Classification(company_type=CompanyType.VENDOR, confidence=0.8, reasons=reasons,
+                                      buyer_hits=buyer_id + buyer_body, vendor_hits=[bundle.category] + vendor_id + vendor_body)
             category_match = bundle.category in self.osm_categories or f"{key}=*" in self.osm_categories
             if category_match:
-                buyer_score += W_IDENTITY
                 reasons.append(f"discovery category '{bundle.category}' matches campaign target")
 
         if vendor_name:
@@ -112,7 +117,17 @@ class BuyerClassifier:
             return Classification(company_type=CompanyType.VENDOR, confidence=0.55, reasons=reasons,
                                   buyer_hits=buyer_body, vendor_hits=vendor_body + phrase_hits)
 
+        # Name and category tags are supporting evidence. Without a reachable site there is
+        # nothing to confirm them against, so the company stays UNKNOWN (spec: insufficient
+        # evidence -> no outreach, keep for review). Vendor rules above still apply.
+        if not bundle.site_reachable:
+            reasons.append("website unavailable: discovery record alone is insufficient evidence")
+            return Classification(company_type=CompanyType.UNKNOWN, confidence=0.3, reasons=reasons,
+                                  buyer_hits=[], vendor_hits=vendor_body + phrase_hits)
+
         if buyer_id or category_match or len(buyer_body) >= 2:
+            if category_match:
+                buyer_score += W_IDENTITY
             margin = buyer_score - vendor_score
             conf = max(0.5, min(1.0, 0.5 + margin / 10))
             if vendor_body or phrase_hits:
