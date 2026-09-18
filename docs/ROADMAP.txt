@@ -1,0 +1,95 @@
+QUALIFYR — ROADMAP (all phases, in order)
+=========================================
+Everything free, local-first, deterministic. Each phase is independently
+shippable and ends with tests + a live check.
+
+Recommended order: A -> B -> C -> D -> E -> F.
+A and B first because they change outcomes for the emails already going out;
+C only once a second mailbox exists; D and E as volume grows.
+
+
+PHASE A — PROTECT THE SENDER  (~1/2 day)
+----------------------------------------
+The Gmail account is the single point of failure; one burn stops everything.
+
+* Warm-up ramp: daily cap starts at ~5 and climbs to 40 over ~3 weeks per
+  mailbox (configurable schedule in config/outreach/settings.yaml), instead of
+  40 flat from day one.
+* Send-time jitter: random spacing (e.g. 30–120 s) instead of a fixed 45 s.
+* OAuth2 Gmail sending (XOAUTH2 via smtplib, or Gmail API) so no App Password
+  sits in secrets; App Password stays as fallback.
+* Reply-rate & bounce-rate guard: auto-pause a mailbox if bounces exceed a
+  threshold in a day.
+
+
+PHASE B — BETTER CONTACTS  (~1 day)
+-----------------------------------
+Moves reply rate more than any copy change.
+
+* Reacher (check-if-email-exists) self-hosted in Docker -> email status becomes
+  deliverable / risky / invalid instead of just MX-valid; outreach gate uses it.
+* Phone type: Pakistani mobile (03xx / +92 3xx) vs landline; mobile scores
+  higher in contact quality and appears in the UI.
+* Explicit enrichment waterfall with provenance:
+  OSM tag -> Overture -> mailto -> contact page -> visible freemail,
+  recording which source gave each field (shown in the lead detail).
+
+
+PHASE C — VOLUME WITHOUT SPAM  (~1/2 day)
+-----------------------------------------
+* Multi-inbox rotation: 2–3 Gmail accounts, per-inbox daily caps and their own
+  warm-up state; the sequencer round-robins and threads follow-ups from the
+  same inbox that sent Email 1.
+* Ledger and reply sync become per-mailbox.
+
+
+PHASE D — SIGNALS & SOURCES  (1–2 days)
+---------------------------------------
+* Site-quality signals (copyright year, mobile-friendly, page weight, HTTPS)
+  into company-quality scoring.
+* Domain age via WHOIS/RDAP (free) as a "new business" signal.
+* News/RSS mention check (Google News RSS, free) as a buying signal and
+  personalisation hook.
+* SECP company search + chamber directories (ICCI / LCCI / KCCI) as new
+  DiscoverySource adapters — buyer-heavy Pakistani lists with legal names and
+  incorporation dates; Scrapy or httpx spiders per site.
+
+
+PHASE E — REPLY INTELLIGENCE  (~1/2 day)
+----------------------------------------
+* Rule-based reply classification: interested / not interested /
+  out-of-office / wrong person (with forwarded address) / unsubscribe.
+  OOO pauses and retries instead of stopping; "wrong person" surfaces the
+  referred contact for approval.
+* Tags visible in Outreach -> Activity and on the lead.
+
+
+PHASE F — SHARING & POLISH  (~1/2 day)
+--------------------------------------
+* One-way Google Sheets export of qualified leads (free tier, Sheets API) for
+  anyone who won't open the UI.
+* Static demo / landing page on GitHub Pages that emails can link to.
+* UI touches: suppression list view, per-mailbox health panel, campaign YAML
+  editor.
+
+
+ONGOING / GATED ON YOU
+----------------------
+* Your real ICP + offer -> real campaign YAML (blocks nothing above, but
+  everything sent so far is against the sample retail campaign).
+* Supabase migration when you want the UI hosted rather than local.
+* Browser fallback switch-on (enable_browser_fallback in config/engine.yaml)
+  if a campaign shows many JS-only sites — already built.
+
+
+DELIBERATELY NOT PLANNED
+------------------------
+Open/click tracking pixels, LLM reply classification, paid enrichment,
+LinkedIn automation, headless Google Maps scraping, Postal / own mail server,
+full CRM.
+
+
+STATUS
+------
+Engine M1–M9 done, web UI done, human approval required for every email.
+Say "start A" (or whichever phase) to begin.
