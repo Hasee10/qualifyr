@@ -13,4 +13,8 @@ overpass_timeout_s: 90
 enable_search_fallback: true
 search_delay_s: 5.0
 dns_timeout_s: 5.0
+# Mailbox-level verification backend: auto (Reacher URL > direct SMTP if port 25 open > Hunter key > MX-only)
+email_verification: auto
+reacher_url: null              # e.g. http://localhost:8080 for a self-hosted Reacher
+discover_decision_maker_email: true
 log_level: INFO

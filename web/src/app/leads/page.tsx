@@ -65,7 +65,8 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <Row label="Name" value={lead.contact_name} />
               <Row label="Role" value={lead.contact_role} />
               <Row label="Email" value={lead.contact_email && <span>{lead.contact_email} <EmailStatusBadge status={lead.email_status} /></span>} />
-              <Row label="Phone" value={lead.phone} />
+              <Row label="Phone" value={lead.phone && <span>{lead.phone}{lead.phone_type && <Badge variant="outline" className="ml-2">{lead.phone_type}</Badge>}</span>} />
+              <Row label="Candidate email" value={lead.candidate_email && <span>{lead.candidate_email} <Badge variant="outline">unconfirmed — not sent</Badge></span>} />
               <Row label="Profile" value={lead.linkedin_or_public_profile_url && <a className="underline" href={lead.linkedin_or_public_profile_url} target="_blank" rel="noreferrer">{lead.linkedin_or_public_profile_url}</a>} />
             </section>
             <section>
@@ -76,6 +77,12 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <Row label="Pain signals" value={lead.pain_signal} />
               <Row label="Hook" value={lead.personalization_hook} />
             </section>
+            {lead.provenance && Object.keys(lead.provenance).length > 0 && (
+              <section>
+                <h3 className="mb-1 text-sm font-semibold">Where each field came from</h3>
+                {Object.entries(lead.provenance).map(([k, v]) => <Row key={k} label={k.replace(/_/g, " ")} value={v} />)}
+              </section>
+            )}
             {lead.events && lead.events.length > 0 && (
               <section>
                 <h3 className="mb-1 text-sm font-semibold">Activity</h3>

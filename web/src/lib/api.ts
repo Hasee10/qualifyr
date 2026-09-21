@@ -37,6 +37,9 @@ export interface Lead {
   sequence_status: SequenceStatus
   priority: "high_priority" | "qualified" | "review" | "reject"
   technologies: string[]
+  phone_type: string | null
+  candidate_email: string | null
+  provenance: Record<string, string>
   email_1_sent_at: string | null
   followup_1_at: string | null
   followup_2_at: string | null

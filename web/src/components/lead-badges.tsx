@@ -26,6 +26,8 @@ export function StatusBadge({ status }: { status: SequenceStatus }) {
 }
 
 export function EmailStatusBadge({ status }: { status: string }) {
-  const variant = status === "mx_valid" ? "default" : status === "generic" ? "secondary" : "outline"
+  const variant = status === "deliverable" || status === "mx_valid" ? "default"
+    : status === "generic" ? "secondary"
+    : status === "invalid" || status === "risky" ? "destructive" : "outline"
   return <Badge variant={variant}>{status.replace("_", " ")}</Badge>
 }

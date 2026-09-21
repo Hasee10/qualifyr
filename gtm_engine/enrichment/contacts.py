@@ -6,6 +6,7 @@ from __future__ import annotations
 from gtm_engine.config.schema import CampaignConfig, DefaultRules
 from gtm_engine.models import Contact, EmailStatus
 from gtm_engine.scraping.site_crawler import SiteSnapshot
+from gtm_engine.enrichment.phones import best_phone
 from gtm_engine.validation.domains import domain_label
 from gtm_engine.validation.emails import FREEMAIL_DOMAINS, is_generic_mailbox
 
@@ -73,24 +74,41 @@ def choose_contact(snapshot: SiteSnapshot, campaign: CampaignConfig, defaults: D
     source_url = snapshot.pages["team"].url if "team" in snapshot.pages else (
         snapshot.pages["about"].url if "about" in snapshot.pages else snapshot.final_url)
 
+    phone = best_phone(snapshot.phones)
+    phone_kw = {"phone": phone.raw if phone else None, "phone_type": phone.kind if phone else None}
+
     if best:
         _, name, role = best
         personal = _match_personal_email(name, emails, defaults.generic_email_prefixes)
         fallback = next((e for e in emails), None)
+        chosen = personal or fallback
         return Contact(
-            name=name, role=role, email=personal or fallback,
-            email_status=EmailStatus.UNVERIFIED if (personal or fallback) else EmailStatus.NONE,
-            phone=snapshot.phones[0] if snapshot.phones else None,
+            name=name, role=role, email=chosen,
+            email_status=EmailStatus.UNVERIFIED if chosen else EmailStatus.NONE,
+            email_source=_email_source(chosen, snapshot, personal is not None),
             profile_url=profile, source_url=source_url, is_decision_maker=True,
-            evidence=f"'{name}' listed as '{role}' on {source_url}",
+            evidence=f"'{name}' listed as '{role}' on {source_url}", **phone_kw,
         )
 
     business_email = next((e for e in emails), None)
     return Contact(
         name=None, role=None, email=business_email,
         email_status=EmailStatus.UNVERIFIED if business_email else EmailStatus.NONE,
-        phone=snapshot.phones[0] if snapshot.phones else None,
+        email_source=_email_source(business_email, snapshot, False),
         profile_url=profile, source_url=source_url, is_decision_maker=False,
         evidence="no named decision-maker published; business mailbox only" if business_email
-                 else "no public contact found",
+                 else "no public contact found", **phone_kw,
     )
+
+
+def _email_source(email: str | None, snapshot: SiteSnapshot, matched_to_name: bool) -> str | None:
+    """Which page published this address (provenance for the reviewer)."""
+    if not email:
+        return None
+    for kind, page in snapshot.pages.items():
+        if email in page.emails:
+            how = "matches contact name" if matched_to_name else "published"
+            return f"{kind} page ({how}): {page.url}"
+        if email in page.source_emails:
+            return f"{kind} page source: {page.url}"
+    return "website"

@@ -58,7 +58,7 @@ def eligible(lead: Lead, settings: OutreachSettings) -> tuple[bool, str]:
         return False, "not a buyer"
     if not lead.outreach_ready:
         return False, "not outreach-ready"
-    if not lead.contact_email or lead.email_status not in (EmailStatus.MX_VALID, EmailStatus.GENERIC):
+    if not lead.contact_email or lead.email_status not in (EmailStatus.MX_VALID, EmailStatus.GENERIC, EmailStatus.DELIVERABLE):
         return False, "no validated email"
     if lead.sequence_status != SequenceStatus.NOT_QUEUED:
         return False, f"already {lead.sequence_status.value}"

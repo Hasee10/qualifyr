@@ -45,4 +45,5 @@ def settings(tmp_path: Path) -> EngineSettings:
         enable_search_fallback=False,
         overpass_url="https://overpass.test/api/interpreter",
         overpass_mirrors=[],
+        email_verification="off",
     )

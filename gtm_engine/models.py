@@ -30,6 +30,9 @@ class EmailStatus(StrEnum):
     UNVERIFIED = "unverified"     # syntax ok, MX not checked yet
     MX_VALID = "mx_valid"         # syntax ok and domain accepts mail
     GENERIC = "generic"           # role mailbox (info@, sales@) with valid MX
+    DELIVERABLE = "deliverable"   # mailbox confirmed by an SMTP-level verifier
+    RISKY = "risky"               # catch-all domain / verifier unsure: never for discovered addresses
+    CANDIDATE = "candidate"       # pattern-discovered, no verifier available: shown, never sent
     BOUNCED = "bounced"
 
 
@@ -90,6 +93,10 @@ class Contact(BaseModel):
     source_url: str | None = None
     is_decision_maker: bool = False
     evidence: str | None = None
+    email_source: str | None = None      # provenance: where the address came from
+    email_pattern: str | None = None     # first.last etc. when discovered
+    phone_type: str | None = None        # mobile | landline | unknown
+    candidate_email: str | None = None   # discovered but unconfirmed address, for the reviewer
 
 
 class Classification(BaseModel):
@@ -170,6 +177,10 @@ class Lead(BaseModel):
     priority: Priority = Priority.REJECT
     technologies: list[str] = Field(default_factory=list)
     evidence: dict = Field(default_factory=dict)
+    phone_type: str | None = None
+    candidate_email: str | None = None
+    # Which source produced each important field: {"contact_email": "contact page mailto", ...}
+    provenance: dict[str, str] = Field(default_factory=dict)
     # Outreach state (not in the CSV schema, kept in the DB and the ledger)
     approved: bool = False
     next_contact_at: datetime | None = None

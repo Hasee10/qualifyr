@@ -22,12 +22,15 @@ The Gmail account is the single point of failure; one burn stops everything.
   threshold in a day.
 
 
-PHASE B — BETTER CONTACTS  (~1 day)
+PHASE B — BETTER CONTACTS  (~1 day)  [DONE 2026-09-21; decision-maker email discovery pulled in from G]
 -----------------------------------
 Moves reply rate more than any copy change.
 
-* Reacher (check-if-email-exists) self-hosted in Docker -> email status becomes
-  deliverable / risky / invalid instead of just MX-valid; outreach gate uses it.
+* Pluggable mailbox verifier (validation/verifier.py): Reacher over HTTP, direct SMTP
+  where port 25 is open, Hunter free tier (50/mo), else MX-only. Email status now
+  deliverable / risky / invalid / candidate. NOTE: port 25 is blocked on this PC and on
+  GitHub runners, so confirmation needs a Reacher host with port 25 or the Hunter key;
+  until then discovered addresses stay 'candidate' and are never sent.
 * Phone type: Pakistani mobile (03xx / +92 3xx) vs landline; mobile scores
   higher in contact quality and appears in the UI.
 * Explicit enrichment waterfall with provenance:

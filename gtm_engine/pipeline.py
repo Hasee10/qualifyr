@@ -15,6 +15,8 @@ from gtm_engine.discovery.osm import OSMDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.enrichment.contacts import choose_contact
+from gtm_engine.enrichment.email_patterns import discover, infer_pattern
+from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Lead,
@@ -27,7 +29,8 @@ from gtm_engine.scraping.site_crawler import SiteCrawler, SiteSnapshot
 from gtm_engine.storage.database import Database
 from gtm_engine.validation.dedupe import dedupe_companies
 from gtm_engine.validation.domains import canonical_domain, company_key
-from gtm_engine.validation.emails import MXChecker, classify_email
+from gtm_engine.validation.emails import MXChecker, classify_email, is_generic_mailbox
+from gtm_engine.validation.verifier import EmailVerifier, MxOnlyVerifier, VerifyStatus, build_verifier
 
 log = logging.getLogger(__name__)
 
@@ -86,13 +89,20 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 
 class Pipeline:
     def __init__(self, settings: EngineSettings, defaults: DefaultRules, db: Database,
-                 fetcher: Fetcher, mx: MXChecker | None = None):
+                 fetcher: Fetcher, mx: MXChecker | None = None, verifier: EmailVerifier | None = None):
         self.settings = settings
         self.defaults = defaults
         self.db = db
         self.fetcher = fetcher
         self.mx = mx if mx is not None else MXChecker(settings.dns_timeout_s)
+        self.verifier = verifier
         self.website_finder = WebsiteFinder(fetcher, settings)
+
+    async def _verifier(self) -> EmailVerifier:
+        if self.verifier is None:
+            self.verifier = await build_verifier(self.settings.email_verification, self.settings.reacher_url)
+            log.info("email verifier: %s", self.verifier.name)
+        return self.verifier
 
     # -- discovery ---------------------------------------------------------------
 
@@ -163,13 +173,59 @@ class Pipeline:
         cls = classifier.classify(bundle)
         quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
-        contact = choose_contact(snapshot, campaign, self.defaults, domain) if snapshot.reachable else Contact(
-            email=company.email, phone=company.phone,
-            email_status=EmailStatus.UNVERIFIED if company.email else EmailStatus.NONE,
-            evidence="from discovery source only",
-        )
+        provenance: dict[str, str] = {"company": f"{company.source}: {company.source_url or 'record'}"}
+        if snapshot.reachable:
+            contact = choose_contact(snapshot, campaign, self.defaults, domain)
+            if contact.email:
+                provenance["contact_email"] = contact.email_source or "website"
+            if contact.name:
+                provenance["contact_name"] = f"team/about page: {contact.source_url}"
+            if contact.phone:
+                provenance["phone"] = "website"
+        else:
+            src_phone = classify_phone(company.phone)
+            contact = Contact(
+                email=company.email, phone=company.phone,
+                phone_type=src_phone.kind if src_phone else None,
+                email_status=EmailStatus.UNVERIFIED if company.email else EmailStatus.NONE,
+                email_source=f"{company.source} record" if company.email else None,
+                evidence="from discovery source only",
+            )
+            if company.email:
+                provenance["contact_email"] = f"{company.source} record"
+        # Discovery-source contact details fill gaps the website did not (waterfall).
+        if not contact.email and company.email:
+            contact.email = company.email
+            contact.email_source = f"{company.source} record"
+            provenance["contact_email"] = f"{company.source} record"
+        if not contact.phone and company.phone:
+            p = classify_phone(company.phone)
+            contact.phone, contact.phone_type = company.phone, (p.kind if p else None)
+            provenance["phone"] = f"{company.source} record"
+
         if cls.company_type != CompanyType.VENDOR and contact.email:
             contact.email_status = await classify_email(contact.email, self.defaults.generic_email_prefixes, self.mx)
+
+        # Decision-maker email discovery: a named person but only a generic mailbox (or none).
+        if (cls.company_type == CompanyType.BUYER and self.settings.discover_decision_maker_email
+                and contact.is_decision_maker and contact.name and domain
+                and contact.email_status in (EmailStatus.GENERIC, EmailStatus.NONE, EmailStatus.INVALID)):
+            verifier = await self._verifier()
+            known = [e for e in snapshot.emails if e.endswith("@" + domain)
+                     and not is_generic_mailbox(e, self.defaults.generic_email_prefixes)]
+            known_pattern = next((p for e in known for p in [infer_pattern(e, contact.name)] if p), None)
+            found = await discover(contact.name, domain, verifier, known_pattern=known_pattern,
+                                   generic_prefixes=self.defaults.generic_email_prefixes)
+            provenance["email_discovery"] = f"{verifier.name}: {found.reason}; tried {found.tried}"
+            if found.status == VerifyStatus.DELIVERABLE and found.email:
+                contact.email, contact.email_status = found.email, EmailStatus.DELIVERABLE
+                contact.email_pattern = found.pattern
+                contact.email_source = f"pattern {found.pattern}, confirmed by {verifier.name}"
+                provenance["contact_email"] = contact.email_source
+            elif found.email:
+                # Keep the generic mailbox as the sendable address; surface the guess for the reviewer.
+                contact.candidate_email = found.email
+                contact.email_pattern = found.pattern
 
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
@@ -202,6 +258,9 @@ class Pipeline:
             contact_email=contact.email,
             email_status=contact.email_status,
             phone=contact.phone or company.phone,
+            phone_type=contact.phone_type,
+            candidate_email=contact.candidate_email,
+            provenance=provenance,
             linkedin_or_public_profile_url=contact.profile_url,
             pain_signal=pain,
             buying_signal=buying,

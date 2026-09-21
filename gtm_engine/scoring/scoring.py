@@ -97,10 +97,15 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     if contact.is_decision_maker and contact.name:
         cp += 5
         reasons.append(f"decision-maker found: {contact.name} ({contact.role})")
-    email_pts = {EmailStatus.MX_VALID: 3, EmailStatus.UNVERIFIED: 2, EmailStatus.GENERIC: 1.5}
+    email_pts = {EmailStatus.DELIVERABLE: 4, EmailStatus.MX_VALID: 3, EmailStatus.UNVERIFIED: 2, EmailStatus.GENERIC: 1.5}
     cp += email_pts.get(contact.email_status, 0)
-    if contact.email_status == EmailStatus.GENERIC:
+    if contact.email_status == EmailStatus.DELIVERABLE:
+        reasons.append(f"decision-maker mailbox confirmed ({contact.email_pattern or 'verified'})")
+    elif contact.email_status == EmailStatus.GENERIC:
         reasons.append("only a generic business mailbox is public")
+    if contact.phone_type == "mobile":
+        cp += 1
+        reasons.append("mobile number published (owner-level contact)")
     elif contact.email_status in (EmailStatus.NONE, EmailStatus.INVALID):
         reasons.append("no usable email")
     if contact.profile_url:
@@ -155,5 +160,5 @@ def is_outreach_ready(cls: Classification, score: ScoreBreakdown, contact: Conta
         and score.total >= campaign.min_score
         and score.priority in (Priority.HIGH, Priority.QUALIFIED)
         and contact.email is not None
-        and contact.email_status in (EmailStatus.MX_VALID, EmailStatus.GENERIC)
+        and contact.email_status in (EmailStatus.MX_VALID, EmailStatus.GENERIC, EmailStatus.DELIVERABLE)
     )

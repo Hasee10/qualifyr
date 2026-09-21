@@ -130,4 +130,9 @@ class EngineSettings(BaseModel):
     enable_search_fallback: bool = True
     search_delay_s: float = 5.0
     dns_timeout_s: float = 5.0
+    # Mailbox-level email verification: auto | direct | reacher | hunter | off (see validation/verifier.py)
+    email_verification: str = "auto"
+    reacher_url: str | None = None
+    # Try first.last@ style candidates for a named decision-maker when only a generic mailbox is public.
+    discover_decision_maker_email: bool = True
     log_level: str = "INFO"

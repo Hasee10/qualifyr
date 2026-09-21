@@ -121,5 +121,6 @@ data/             sqlite db + exports (gitignored)
 | M6 Validation (domains, MX, dedupe, suppression) | done |
 | M7 Scoring with reasons | done |
 | M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
-| M9 Outreach (Gmail SMTP, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
+| M9 Outreach (Gmail SMTP/OAuth2, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
+| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) | done |
 | M10 Hardening | in progress |
