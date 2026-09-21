@@ -25,6 +25,22 @@ export function StatusBadge({ status }: { status: SequenceStatus }) {
   return <Badge variant={variant}>{STATUS_LABEL[status] ?? status}</Badge>
 }
 
+const REPLY_LABEL: Record<string, { text: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  interested: { text: "Interested", variant: "default" },
+  not_interested: { text: "Not interested", variant: "destructive" },
+  out_of_office: { text: "Out of office", variant: "secondary" },
+  wrong_person: { text: "Wrong person", variant: "secondary" },
+  unsubscribe: { text: "Unsubscribed", variant: "destructive" },
+  auto_reply: { text: "Auto-reply", variant: "outline" },
+  reply: { text: "Replied", variant: "default" },
+}
+
+export function ReplyLabelBadge({ label }: { label: string | null }) {
+  if (!label) return null
+  const cfg = REPLY_LABEL[label] ?? { text: label, variant: "outline" as const }
+  return <Badge variant={cfg.variant}>{cfg.text}</Badge>
+}
+
 export function EmailStatusBadge({ status }: { status: string }) {
   const variant = status === "deliverable" || status === "mx_valid" ? "default"
     : status === "generic" ? "secondary"

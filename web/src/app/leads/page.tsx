@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, type Lead } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
-import { EmailStatusBadge, ScoreBadge, StatusBadge, TypeBadge } from "@/components/lead-badges"
+import { EmailStatusBadge, ReplyLabelBadge, ScoreBadge, StatusBadge, TypeBadge } from "@/components/lead-badges"
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === "") return null
@@ -50,7 +50,15 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <ScoreBadge score={lead.total_score} />
               <Badge variant="outline">{lead.priority.replace("_", " ")}</Badge>
               <StatusBadge status={lead.sequence_status} />
+              <ReplyLabelBadge label={lead.reply_label} />
             </div>
+            {lead.reply_excerpt && (
+              <section>
+                <h3 className="mb-1 text-sm font-semibold">Their reply</h3>
+                <p className="rounded-lg bg-muted/50 p-3 text-sm">{lead.reply_excerpt}</p>
+                {lead.referred_contact && <Row label="Referred to" value={`${lead.referred_contact.email}${lead.referred_contact.name ? ` (${lead.referred_contact.name})` : ""} — ${lead.referred_contact.status}`} />}
+              </section>
+            )}
             <section>
               <h3 className="mb-1 text-sm font-semibold">Company</h3>
               <Row label="Website" value={lead.website && <a className="underline" href={lead.website} target="_blank" rel="noreferrer">{lead.domain} <ExternalLink className="inline size-3" /></a>} />

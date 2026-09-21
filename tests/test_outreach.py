@@ -243,7 +243,7 @@ def test_inbound_reply_stop_and_bounce(db, campaign, osettings, templates, tmp_p
     assert (report.replied, report.unsubscribed, report.bounced) == (1, 1, 0)  # mcc already stopped by STOP
     leads = {l.company_name: l for l in db.list_leads("test-retail")}
     assert leads["Zara Fabrics"].sequence_status == SequenceStatus.REPLIED
-    assert leads["Zara Fabrics"].reply_status.startswith("replied:")
+    assert leads["Zara Fabrics"].reply_label == "interested" and leads["Zara Fabrics"].reply_status.startswith("interested:")
     assert leads["Madina Cash & Carry"].sequence_status == SequenceStatus.UNSUBSCRIBED
     assert db.is_suppressed("info@mcc.com.pk")
     # Neither gets any further email

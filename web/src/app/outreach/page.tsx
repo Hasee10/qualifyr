@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, STEP_LABEL, type Draft, type Lead, type OutreachEvent, type Queue, type QueueItem, type SendReport } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
-import { ScoreBadge, StatusBadge } from "@/components/lead-badges"
+import { ReplyLabelBadge, ScoreBadge, StatusBadge } from "@/components/lead-badges"
 import { cn } from "@/lib/utils"
 
 function DraftBadge({ status }: { status: Draft["status"] }) {
@@ -246,7 +246,17 @@ export default function OutreachPage() {
                   <TableRow key={l.lead_id}>
                     <TableCell className="font-medium">{l.company_name}</TableCell>
                     <TableCell className="text-xs">{l.contact_email}</TableCell>
-                    <TableCell><StatusBadge status={l.sequence_status} />{l.reply_status && <div className="text-xs text-muted-foreground">{l.reply_status}</div>}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1"><StatusBadge status={l.sequence_status} /><ReplyLabelBadge label={l.reply_label} /></div>
+                      {l.reply_excerpt && <div className="mt-1 max-w-md text-xs text-muted-foreground">“{l.reply_excerpt.slice(0, 160)}{l.reply_excerpt.length > 160 ? "…" : ""}”</div>}
+                      {l.referred_contact && l.referred_contact.status === "pending" && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                          <span>Referred to <span className="font-mono">{l.referred_contact.email}</span>{l.referred_contact.name ? ` (${l.referred_contact.name})` : ""}</span>
+                          <Button size="xs" onClick={async () => { await api.referral(l.lead_id, true); load() }}>Start new sequence</Button>
+                          <Button size="xs" variant="outline" onClick={async () => { await api.referral(l.lead_id, false); load() }}>Dismiss</Button>
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs">{l.email_1_sent_at ? new Date(l.email_1_sent_at).toLocaleDateString() : "—"}</TableCell>
                     <TableCell className="text-xs">{l.followup_1_at ? new Date(l.followup_1_at).toLocaleDateString() : "—"}</TableCell>
                     <TableCell className="text-xs">{l.followup_2_at ? new Date(l.followup_2_at).toLocaleDateString() : "—"}</TableCell>

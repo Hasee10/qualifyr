@@ -40,6 +40,9 @@ export interface Lead {
   phone_type: string | null
   candidate_email: string | null
   news_mentions: { title: string; url: string; date: string; source: string }[]
+  reply_label: string | null
+  reply_excerpt: string | null
+  referred_contact: { name: string | null; email: string; status: string } | null
   domain_age_years: number | null
   provenance: Record<string, string>
   email_1_sent_at: string | null
@@ -190,6 +193,8 @@ export const api = {
     request<SendReport>(`/campaigns/${id}/outreach/send`, { method: "POST", body: JSON.stringify(body) }),
   sync: (id: string) => request<SendReport["sync"] & { details: string[] }>(`/campaigns/${id}/outreach/sync`, { method: "POST" }),
   activity: (id: string) => request<OutreachEvent[]>(`/campaigns/${id}/outreach/activity`),
+  referral: (leadId: string, accept: boolean) =>
+    request<{ ok: boolean }>(`/leads/${leadId}/referral`, { method: "POST", body: JSON.stringify({ accept }) }),
   sequence: (id: string) => request<Lead[]>(`/campaigns/${id}/outreach/sequence`),
 }
 

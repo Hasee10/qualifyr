@@ -193,6 +193,9 @@ class Lead(BaseModel):
     next_contact_at: datetime | None = None
     thread_message_id: str | None = None   # Message-ID of email 1; follow-ups reply to it
     mailbox: str | None = None             # address that sent email 1; follow-ups use the same one
+    reply_label: str | None = None         # interested | not_interested | out_of_office | wrong_person | unsubscribe | auto_reply | reply
+    reply_excerpt: str | None = None       # first lines of the fresh reply text, for the reviewer
+    referred_contact: dict | None = None   # {"name": ..., "email": ...} when the lead pointed us elsewhere
     last_sent_at: datetime | None = None
 
 

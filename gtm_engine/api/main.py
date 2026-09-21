@@ -19,7 +19,7 @@ from gtm_engine import __version__
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
 from gtm_engine.config.loader import CONFIG_DIR
 from gtm_engine.export.csv_export import export_path, write_csv
-from gtm_engine.models import CompanyType, SequenceStatus
+from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
 from gtm_engine.outreach.cli import ledger_path
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
@@ -225,6 +225,44 @@ def suppress(lead_id: str, req: SuppressRequest) -> dict:
     return {"ok": True}
 
 
+class ReferralAction(BaseModel):
+    accept: bool = True
+
+
+@app.post("/leads/{lead_id}/referral")
+def act_on_referral(lead_id: str, req: ReferralAction) -> dict:
+    """Accept: the referred person becomes the contact and the lead re-enters the queue
+    for a fresh Email 1 (which still needs approval). Decline: referral is dismissed."""
+    db = _db()
+    l = db.get_lead(lead_id)
+    if not l or not l.referred_contact:
+        db.close()
+        raise HTTPException(404, "no pending referral")
+    ref = dict(l.referred_contact)
+    if not req.accept:
+        ref["status"] = "declined"
+        l.referred_contact = ref
+        db.update_lead(l)
+        db.add_event(lead_id, "referral_declined", detail=ref.get("email"))
+        db.close()
+        return {"ok": True, "referred_contact": ref}
+    previous = {"name": l.contact_name, "role": l.contact_role, "email": l.contact_email}
+    l.contact_name, l.contact_role = ref.get("name"), "Referred by previous contact"
+    l.contact_email, l.email_status = ref["email"], EmailStatus.UNVERIFIED
+    l.provenance["contact_email"] = f"referred by {previous['email']} in a reply"
+    l.provenance["contact_name"] = f"referred by {previous['email']} in a reply"
+    l.sequence_status, l.thread_message_id, l.mailbox = SequenceStatus.NOT_QUEUED, None, None
+    l.email_1_sent_at = l.followup_1_at = l.followup_2_at = l.next_contact_at = None
+    l.reply_label, l.reply_status = None, None
+    l.outreach_ready = True
+    ref["status"] = "accepted"
+    l.referred_contact = ref
+    db.update_lead(l)
+    db.add_event(lead_id, "referral_accepted", detail=f"{previous['email']} -> {ref['email']}")
+    db.close()
+    return {"ok": True, "referred_contact": ref, "previous_contact": previous}
+
+
 @app.get("/campaigns/{campaign_id}/export")
 def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> FileResponse:
     db = _db()
@@ -361,7 +399,9 @@ def outreach_send(campaign_id: str, req: SendRequest) -> dict:
     if osettings.credentials_present and not req.dry_run:
         try:
             r = sync_replies(db, campaign_id, osettings, ledger)
-            sync = {"replied": r.replied, "unsubscribed": r.unsubscribed, "bounced": r.bounced, "scanned": r.scanned}
+            sync = {"replied": r.replied, "interested": r.interested, "not_interested": r.not_interested,
+                    "out_of_office": r.out_of_office, "wrong_person": r.wrong_person, "auto_reply": r.auto_reply,
+                    "unsubscribed": r.unsubscribed, "bounced": r.bounced, "scanned": r.scanned}
         except Exception as exc:  # noqa: BLE001 - a mailbox hiccup must not block a supervised send
             sync = {"error": str(exc)}
     dry = req.dry_run or not osettings.credentials_present
@@ -390,8 +430,9 @@ def outreach_sync(campaign_id: str) -> dict:
     db = _db()
     r = sync_replies(db, campaign_id, osettings, Ledger(ledger_path(campaign_id)))
     db.close()
-    return {"replied": r.replied, "unsubscribed": r.unsubscribed, "bounced": r.bounced,
-            "scanned": r.scanned, "details": r.details}
+    return {"replied": r.replied, "unsubscribed": r.unsubscribed, "bounced": r.bounced, "scanned": r.scanned,
+            "interested": r.interested, "not_interested": r.not_interested, "out_of_office": r.out_of_office,
+            "wrong_person": r.wrong_person, "auto_reply": r.auto_reply, "details": r.details}
 
 
 @app.get("/campaigns/{campaign_id}/outreach/activity")

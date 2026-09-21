@@ -69,8 +69,13 @@ PHASE D — SIGNALS & SOURCES  (1–2 days)  [DONE 2026-09-21]
   incorporation dates; Scrapy or httpx spiders per site.
 
 
-PHASE E — REPLY INTELLIGENCE  (~1/2 day)
+PHASE E — REPLY INTELLIGENCE  (~1/2 day)  [DONE 2026-09-21]
 ----------------------------------------
+* Built: outreach/reply_classifier.py (rule-based, quoted history stripped, referral
+  address/name extraction, return-date parsing). Actions: interested/reply stop; not
+  interested stops + suppresses; out-of-office postpones past the return date; auto-reply
+  ignored; wrong person stops and records a referral the reviewer can accept (new Email 1,
+  still approval-gated) or dismiss. Labels and excerpts shown in the UI.
 * Rule-based reply classification: interested / not interested /
   out-of-office / wrong person (with forwarded address) / unsubscribe.
   OOO pauses and retries instead of stopping; "wrong person" surfaces the

@@ -86,7 +86,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
     r = sync_replies(db, args.campaign_id, osettings, Ledger(ledger_path(args.campaign_id)))
     for d in r.details:
         print("  " + d)
-    print(f"{r.replied} replied, {r.unsubscribed} unsubscribed, {r.bounced} bounced ({r.scanned} scanned)")
+    print(f"{r.replied} replied ({r.interested} interested, {r.not_interested} not interested, {r.wrong_person} wrong person), "
+          f"{r.out_of_office} out of office, {r.auto_reply} auto-replies, {r.unsubscribed} unsubscribed, {r.bounced} bounced ({r.scanned} scanned)")
     db.close()
     return 0
 
@@ -102,7 +103,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"  {k:<16} {counts[k]}")
     for l in db.list_leads(args.campaign_id):
         if l.sequence_status in (SequenceStatus.REPLIED, SequenceStatus.BOUNCED, SequenceStatus.UNSUBSCRIBED):
-            print(f"    {l.sequence_status.value:<13} {l.company_name:<30} {l.contact_email}  {l.reply_status or ''}")
+            print(f"    {l.sequence_status.value:<13} {l.company_name:<30} {l.contact_email}  [{l.reply_label or '-'}] {l.reply_status or ''}")
     due = due_leads(db, args.campaign_id)
     print(f"due now: {len(due)}")
     for l in due[:20]:
