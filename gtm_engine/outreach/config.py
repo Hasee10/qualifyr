@@ -20,7 +20,17 @@ class OutreachSettings(BaseModel):
     smtp_port: int = 587
     imap_host: str = "imap.gmail.com"
     daily_limit: int = 40
-    delay_between_sends_s: float = 45.0
+    delay_between_sends_s: float = 45.0   # used only when jitter is disabled
+    # Random spacing between sends; humans do not email every 45.0 s exactly.
+    jitter_min_s: float = 30.0
+    jitter_max_s: float = 120.0
+    # Warm-up: a fresh mailbox starts small and grows to daily_limit. Day 1 = first send.
+    warmup_enabled: bool = True
+    warmup_start_per_day: int = 5
+    warmup_step_per_day: int = 2
+    # Guard: pause the mailbox for the day when bounces get out of hand.
+    max_bounce_rate: float = 0.10
+    min_sends_for_bounce_rate: int = 5
     send_window_start_hour: int = 9
     send_window_end_hour: int = 18
     timezone: str = "Asia/Karachi"
@@ -38,8 +48,28 @@ class OutreachSettings(BaseModel):
         return os.environ.get("GTM_SMTP_PASSWORD") or None
 
     @property
+    def oauth_present(self) -> bool:
+        from gtm_engine.outreach.gmail_oauth import credentials_from_env
+        return bool(self.smtp_user and credentials_from_env())
+
+    @property
     def credentials_present(self) -> bool:
-        return bool(self.smtp_user and self.smtp_password)
+        """OAuth2 (preferred) or App Password."""
+        return bool(self.smtp_user and (self.smtp_password or self.oauth_present))
+
+    @property
+    def auth_mode(self) -> str:
+        if self.oauth_present:
+            return "oauth2"
+        if self.smtp_user and self.smtp_password:
+            return "app_password"
+        return "none"
+
+    def effective_daily_cap(self, days_active: int | None) -> int:
+        """Warm-up ramp: day 1 -> warmup_start_per_day, +step each day, capped at daily_limit."""
+        if not self.warmup_enabled or days_active is None:
+            return self.daily_limit
+        return min(self.daily_limit, self.warmup_start_per_day + self.warmup_step_per_day * max(days_active - 1, 0))
 
 
 class EmailTemplate(BaseModel):

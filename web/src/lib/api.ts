@@ -142,7 +142,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; version: string; smtp_configured: boolean; require_approval: boolean }>("/health"),
+  health: () => request<{ status: string; version: string; smtp_configured: boolean; require_approval: boolean; auth_mode: string; warmup: { enabled: boolean; start: number; step: number; max: number } }>("/health"),
   campaigns: () => request<Campaign[]>("/campaigns"),
   runCampaign: (id: string, max_companies?: number) =>
     request<Progress>(`/campaigns/${id}/run`, { method: "POST", body: JSON.stringify({ max_companies }) }),

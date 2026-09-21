@@ -11,7 +11,7 @@ from gtm_engine.outreach.sequencer import due_leads, enqueue, in_send_window, se
 from gtm_engine.outreach.templates import first_name, hook_sentence, render
 from gtm_engine.storage.database import Database
 
-MON_10AM_PKT = datetime(2026, 9, 21, 5, 0, tzinfo=timezone.utc)  # Monday 10:00 Asia/Karachi
+MON_10AM_PKT = datetime(2027, 3, 1, 5, 0, tzinfo=timezone.utc)  # a Monday, 10:00 Asia/Karachi; fixed clock for the whole suite
 
 
 @pytest.fixture
@@ -126,14 +126,14 @@ def test_send_window(osettings):
 
 def test_enqueue_only_gate_passers(db, osettings, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    queued = enqueue(db, "test-retail", osettings, ledger)
+    queued = enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     assert sorted(l.company_name for l in queued) == ["Madina Cash & Carry", "Zara Fabrics"]
-    assert enqueue(db, "test-retail", osettings, ledger) == []  # idempotent
+    assert enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT) == []  # idempotent
 
 
 def test_full_sequence_with_delays_and_cap(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     sender = FakeSender()
 
     r1 = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
@@ -169,7 +169,7 @@ def test_full_sequence_with_delays_and_cap(db, campaign, osettings, templates, t
 def test_daily_cap_and_window(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
     osettings.daily_limit = 1
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     sender = FakeSender()
     r = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     assert r.sent == 1 and "daily limit" in r.stopped_reason
@@ -181,7 +181,7 @@ def test_daily_cap_and_window(db, campaign, osettings, templates, tmp_path):
 
 def test_ledger_prevents_double_send_after_db_loss(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
 
     # Simulate a fresh runner: brand-new DB with the leads re-scraped, same ledger file on disk.
@@ -192,7 +192,7 @@ def test_ledger_prevents_double_send_after_db_loss(db, campaign, osettings, temp
         l.thread_message_id = None
         fresh.save_lead(l, "run_2", l.domain)
     ledger2 = Ledger(tmp_path / "ledger.json")
-    assert enqueue(fresh, "test-retail", osettings, ledger2) == []
+    assert enqueue(fresh, "test-retail", osettings, ledger2, now=MON_10AM_PKT) == []
     zara = next(l for l in fresh.list_leads("test-retail") if l.company_name == "Zara Fabrics")
     assert zara.sequence_status == SequenceStatus.EMAIL_1_SENT
     assert zara.thread_message_id.endswith(".email_1@test>")
@@ -204,7 +204,7 @@ def test_ledger_prevents_double_send_after_db_loss(db, campaign, osettings, temp
 
 def test_bounce_on_send_stops_and_suppresses(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     sender = FakeSender(fail_for={"info@mcc.com.pk"})
     r = send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     assert r.sent == 1 and r.failed == 1
@@ -215,7 +215,7 @@ def test_bounce_on_send_stops_and_suppresses(db, campaign, osettings, templates,
 
 def test_suppression_added_mid_sequence_stops_followups(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     sender = FakeSender()
     send_due(db, campaign, osettings, templates, sender, ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     db.add_suppression("zarafabrics.pk", "domain", "asked by phone")
@@ -228,7 +228,7 @@ def test_suppression_added_mid_sequence_stops_followups(db, campaign, osettings,
 
 def test_inbound_reply_stop_and_bounce(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     zara = next(l for l in db.list_leads("test-retail") if l.company_name == "Zara Fabrics")
 
@@ -253,7 +253,7 @@ def test_inbound_reply_stop_and_bounce(db, campaign, osettings, templates, tmp_p
 
 def test_bounce_quoting_our_thread_is_bounce_not_reply(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     zara = next(l for l in db.list_leads("test-retail") if l.company_name == "Zara Fabrics")
     bounce = InboundMessage(from_addr="mailer-daemon@googlemail.com", subject="Delivery Status Notification (Failure)",
@@ -267,7 +267,7 @@ def test_bounce_quoting_our_thread_is_bounce_not_reply(db, campaign, osettings, 
 
 def test_bounce_previously_misread_as_reply_is_corrected(db, campaign, osettings, templates, tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
     zara = next(l for l in db.list_leads("test-retail") if l.company_name == "Zara Fabrics")
     zara.sequence_status = SequenceStatus.REPLIED
@@ -286,7 +286,7 @@ def test_approval_gate_blocks_until_draft_approved(db, campaign, osettings, temp
     from gtm_engine.outreach.sequencer import prepare_drafts
     osettings.require_approval = True
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     sender = FakeSender()
 
     # Nothing goes out without an approved draft
@@ -316,7 +316,7 @@ def test_rejected_draft_is_never_sent(db, campaign, osettings, templates, tmp_pa
     from gtm_engine.outreach.sequencer import prepare_drafts
     osettings.require_approval = True
     ledger = Ledger(tmp_path / "ledger.json")
-    enqueue(db, "test-retail", osettings, ledger)
+    enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     for q in prepare_drafts(db, campaign, osettings, templates, now=MON_10AM_PKT):
         db.set_draft_status(q["lead"].lead_id, q["step"], "rejected")
     sender = FakeSender()

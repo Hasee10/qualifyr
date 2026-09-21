@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 from gtm_engine.outreach.config import OutreachSettings
+from gtm_engine.outreach.gmail_oauth import AccessTokenProvider, credentials_from_env, xoauth2_b64
 
 log = logging.getLogger(__name__)
 
@@ -77,12 +78,16 @@ class DryRunSender:
 class SmtpSender:
     name = "smtp"
 
-    def __init__(self, settings: OutreachSettings):
+    def __init__(self, settings: OutreachSettings, token_provider: AccessTokenProvider | None = None):
         if not settings.credentials_present:
-            raise RuntimeError("GTM_SMTP_USER / GTM_SMTP_PASSWORD not set")
+            raise RuntimeError("set GTM_SMTP_USER plus either GTM_GMAIL_* OAuth vars or GTM_SMTP_PASSWORD")
         self.settings = settings
         self.from_addr = settings.smtp_user
         self._conn: smtplib.SMTP | None = None
+        self._tokens = token_provider
+        if self._tokens is None and settings.oauth_present:
+            self._tokens = AccessTokenProvider(*credentials_from_env())
+        self.name = "smtp-oauth2" if self._tokens else "smtp"
 
     def _connect(self) -> smtplib.SMTP:
         if self._conn is None:
@@ -90,7 +95,14 @@ class SmtpSender:
             conn.ehlo()
             conn.starttls()
             conn.ehlo()
-            conn.login(self.settings.smtp_user, self.settings.smtp_password)
+            if self._tokens is not None:
+                # XOAUTH2: no password ever leaves the environment; tokens expire hourly.
+                auth = xoauth2_b64(self.settings.smtp_user, self._tokens.token())
+                code, resp = conn.docmd("AUTH", "XOAUTH2 " + auth)
+                if code != 235:
+                    raise smtplib.SMTPAuthenticationError(code, resp)
+            else:
+                conn.login(self.settings.smtp_user, self.settings.smtp_password)
             self._conn = conn
         return self._conn
 

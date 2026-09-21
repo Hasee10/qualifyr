@@ -60,7 +60,7 @@ function SidebarContent() {
 }
 
 function BackendStatus() {
-  const [health, setHealth] = React.useState<{ smtp_configured: boolean; require_approval: boolean } | null | "down">(null)
+  const [health, setHealth] = React.useState<{ smtp_configured: boolean; require_approval: boolean; auth_mode?: string; warmup?: { enabled: boolean } } | null | "down">(null)
   React.useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth("down"))
   }, [])
@@ -71,7 +71,8 @@ function BackendStatus() {
       ) : health ? (
         <>
           <span>API connected</span>
-          <span>Sending: {health.smtp_configured ? "Gmail configured" : "dry-run (no credentials)"}</span>
+          <span>Sending: {health.smtp_configured ? `Gmail (${health.auth_mode ?? "configured"})` : "dry-run (no credentials)"}</span>
+          {health.warmup?.enabled && <span>Warm-up ramp: on</span>}
           <span>Approval: {health.require_approval ? "required" : "off"}</span>
         </>
       ) : (

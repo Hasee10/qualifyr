@@ -9,6 +9,7 @@ ledger is consulted before every send so an address never receives a step twice.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -64,7 +65,9 @@ def eligible(lead: Lead, settings: OutreachSettings) -> tuple[bool, str]:
     return True, "ok"
 
 
-def enqueue(db: Database, campaign_id: str, settings: OutreachSettings, ledger: Ledger) -> list[Lead]:
+def enqueue(db: Database, campaign_id: str, settings: OutreachSettings, ledger: Ledger,
+            now: datetime | None = None) -> list[Lead]:
+    now = now or utcnow()
     queued: list[Lead] = []
     for lead in db.list_leads(campaign_id, outreach_ready=True):
         ok, why = eligible(lead, settings)
@@ -82,7 +85,7 @@ def enqueue(db: Database, campaign_id: str, settings: OutreachSettings, ledger: 
             db.update_lead(lead)
             continue
         lead.sequence_status = SequenceStatus.QUEUED
-        lead.next_contact_at = utcnow()
+        lead.next_contact_at = now
         db.update_lead(lead)
         db.add_event(lead.lead_id, "queued")
         queued.append(lead)
@@ -151,18 +154,37 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         return report
 
     day = now.strftime("%Y-%m-%d")
+    mailbox = getattr(sender, "from_addr", None) or settings.smtp_user or "dry-run"
     already_today = max(db.events_today("sent", day), ledger.sent_on(day))
-    budget = settings.daily_limit - already_today
+
+    # Bounce guard: of the emails sent today, how many have already bounced?
+    bounced_today = sum(
+        1 for l in db.leads_by_status(campaign.campaign_id, [SequenceStatus.BOUNCED.value])
+        if l.last_sent_at and l.last_sent_at.strftime("%Y-%m-%d") == day
+    )
+    if already_today >= settings.min_sends_for_bounce_rate and bounced_today / max(already_today, 1) > settings.max_bounce_rate:
+        report.stopped_reason = (f"mailbox paused: bounce rate {bounced_today}/{already_today} exceeds "
+                                 f"{settings.max_bounce_rate:.0%}; check the list before sending more")
+        return report
+
+    # Warm-up ramp: today's cap depends on how long this mailbox has been sending.
+    days_active = ledger.days_active(mailbox, day)
+    cap = settings.effective_daily_cap(days_active if days_active is not None else 1)
+    budget = cap - already_today
     if limit is not None:
         budget = min(budget, limit)
+    def limit_reason(sent_now: int) -> str:
+        return f"daily limit reached ({already_today + sent_now}/{cap}" + (
+            f", warm-up day {days_active or 1})" if settings.warmup_enabled else ")")
+
     if budget <= 0:
-        report.stopped_reason = f"daily limit reached ({already_today}/{settings.daily_limit})"
+        report.stopped_reason = limit_reason(0)
         return report
 
     consecutive_failures = 0
     for lead in due_leads(db, campaign.campaign_id, now):
         if report.sent >= budget:
-            report.stopped_reason = "daily limit reached"
+            report.stopped_reason = limit_reason(report.sent) if limit is None or report.sent < limit else "batch limit reached"
             break
         step, next_status = NEXT_STEP[lead.sequence_status]
         email = lead.contact_email
@@ -212,12 +234,14 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         if draft:
             db.set_draft_status(lead.lead_id, step, "sent")
         ledger.record_sent(email, step, result.message_id, lead.lead_id, now)
+        ledger.note_send_day(mailbox, day)
         _advance(db, lead, step, next_status, result.message_id, settings, now)
         db.add_event(lead.lead_id, "sent", step=step, detail=result.message_id)
         report.sent += 1
         report.details.append(f"{lead.company_name} <{email}>: {step} via {sender.name}")
         if report.sent < budget:
-            sleep(settings.delay_between_sends_s)
+            sleep(random.uniform(settings.jitter_min_s, settings.jitter_max_s)
+                  if settings.jitter_max_s > 0 else settings.delay_between_sends_s)
     return report
 
 

@@ -150,6 +150,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if missing == 0 else 1
 
 
+def cmd_gmail_auth(args: argparse.Namespace) -> int:
+    from gtm_engine.outreach.gmail_oauth import interactive_setup
+    interactive_setup()
+    return 0
+
+
 def add_outreach_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("outreach", help="queue, send and track the email sequence")
     s = p.add_subparsers(dest="outreach_command", required=True)
@@ -185,6 +191,9 @@ def add_outreach_parser(sub: argparse._SubParsersAction) -> None:
     vf = s.add_parser("verify", help="confirm ledger Message-IDs exist in the Gmail Sent folder")
     vf.add_argument("campaign_id")
     vf.set_defaults(func=cmd_verify)
+
+    ga = s.add_parser("gmail-auth", help="one-time OAuth2 setup: prints the refresh token to store as a secret")
+    ga.set_defaults(func=cmd_gmail_auth)
 
     pv = s.add_parser("preview", help="render the 3 emails for the top leads without sending")
     pv.add_argument("campaign_id")

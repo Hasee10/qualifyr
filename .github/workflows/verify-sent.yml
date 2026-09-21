@@ -12,6 +12,9 @@ jobs:
     env:
       GTM_SMTP_USER: ${{ secrets.GTM_SMTP_USER }}
       GTM_SMTP_PASSWORD: ${{ secrets.GTM_SMTP_PASSWORD }}
+      GTM_GMAIL_CLIENT_ID: ${{ secrets.GTM_GMAIL_CLIENT_ID }}
+      GTM_GMAIL_CLIENT_SECRET: ${{ secrets.GTM_GMAIL_CLIENT_SECRET }}
+      GTM_GMAIL_REFRESH_TOKEN: ${{ secrets.GTM_GMAIL_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

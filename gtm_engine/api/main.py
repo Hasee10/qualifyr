@@ -77,7 +77,9 @@ def _campaign(campaign_id: str) -> CampaignConfig:
 def health() -> dict:
     o = load_outreach_settings()
     return {"status": "ok", "version": __version__, "smtp_configured": o.credentials_present,
-            "require_approval": o.require_approval}
+            "auth_mode": o.auth_mode, "require_approval": o.require_approval,
+            "warmup": {"enabled": o.warmup_enabled, "start": o.warmup_start_per_day,
+                       "step": o.warmup_step_per_day, "max": o.daily_limit}}
 
 
 @app.get("/campaigns")

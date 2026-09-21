@@ -14,6 +14,7 @@ from email.utils import parseaddr
 
 from gtm_engine.models import Lead, SequenceStatus
 from gtm_engine.outreach.config import OutreachSettings
+from gtm_engine.outreach.gmail_oauth import AccessTokenProvider, credentials_from_env, xoauth2_string
 from gtm_engine.outreach.ledger import Ledger
 from gtm_engine.outreach.sequencer import ACTIVE, stop_lead
 from gtm_engine.storage.database import Database
@@ -79,6 +80,14 @@ def parse_message(raw: bytes) -> InboundMessage:
     )
 
 
+def _imap_login(conn: imaplib.IMAP4_SSL, settings: OutreachSettings) -> None:
+    if settings.oauth_present:
+        token = AccessTokenProvider(*credentials_from_env()).token()
+        conn.authenticate("XOAUTH2", lambda _: xoauth2_string(settings.smtp_user, token).encode())
+    else:
+        conn.login(settings.smtp_user, settings.smtp_password)
+
+
 def fetch_recent(settings: OutreachSettings, since_days: int = 14) -> list[InboundMessage]:
     if not settings.credentials_present:
         log.warning("no credentials: skipping reply sync")
@@ -86,7 +95,7 @@ def fetch_recent(settings: OutreachSettings, since_days: int = 14) -> list[Inbou
     since = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
     out: list[InboundMessage] = []
     with imaplib.IMAP4_SSL(settings.imap_host) as conn:
-        conn.login(settings.smtp_user, settings.smtp_password)
+        _imap_login(conn, settings)
         conn.select("INBOX", readonly=True)
         status, data = conn.search(None, f'(SINCE "{since}")')
         if status != "OK":
@@ -166,7 +175,7 @@ def verify_sent(settings: OutreachSettings, ledger: Ledger, folder: str = '"[Gma
     if not settings.credentials_present:
         return results
     with imaplib.IMAP4_SSL(settings.imap_host) as conn:
-        conn.login(settings.smtp_user, settings.smtp_password)
+        _imap_login(conn, settings)
         status, _ = conn.select(folder, readonly=True)
         if status != "OK":
             raise RuntimeError(f"cannot open {folder}")

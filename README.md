@@ -50,8 +50,12 @@ you edit subject/body, approve or reject, then send; plus sequence and activity 
 .venv/Scripts/python -m gtm_engine.cli suppress someone@company.pk
 ```
 
-Credentials come only from the environment (`GTM_SMTP_USER`, `GTM_SMTP_PASSWORD` = Gmail address +
-App Password). Without them every send is a dry run. **Every email requires human approval** (`require_approval: true`): it is drafted, shown in the UI, edited if you like, and sent only after you approve it — follow-ups come back for their own approval. Sequence: Email 1 → +3 days Follow-up 1 →
+Credentials come only from the environment. Preferred: Gmail OAuth2 — run
+`gtm outreach gmail-auth` once and store `GTM_GMAIL_CLIENT_ID` / `GTM_GMAIL_CLIENT_SECRET` /
+`GTM_GMAIL_REFRESH_TOKEN` plus `GTM_SMTP_USER`. Fallback: `GTM_SMTP_PASSWORD` (App Password).
+Without either, every send is a dry run. Sender protection is on by default: warm-up ramp
+(5/day growing by 2/day to the cap), 30–120 s random spacing, and a bounce-rate guard that
+pauses the mailbox for the day. **Every email requires human approval** (`require_approval: true`): it is drafted, shown in the UI, edited if you like, and sent only after you approve it — follow-ups come back for their own approval. Sequence: Email 1 → +3 days Follow-up 1 →
 +4 days Follow-up 2, threaded; stops on reply, bounce, "STOP", or suppression. Daily cap, 45 s
 spacing and a 09:00–18:00 Asia/Karachi weekday window live in `config/outreach/settings.yaml`;
 copy in `config/outreach/templates.yaml`. Every send is recorded in

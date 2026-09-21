@@ -14,11 +14,12 @@ from gtm_engine.models import utcnow
 class Ledger:
     def __init__(self, path: Path):
         self.path = path
-        self.data: dict = {"sent": {}, "stopped": {}}
+        self.data: dict = {"sent": {}, "stopped": {}, "mailboxes": {}}
         if path.exists():
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
-                self.data = {"sent": loaded.get("sent", {}), "stopped": loaded.get("stopped", {})}
+                self.data = {"sent": loaded.get("sent", {}), "stopped": loaded.get("stopped", {}),
+                             "mailboxes": loaded.get("mailboxes", {})}
             except json.JSONDecodeError:
                 pass
 
@@ -32,6 +33,30 @@ class Ledger:
 
     def is_stopped(self, email: str) -> bool:
         return email.lower() in self.data["stopped"]
+
+    # -- mailbox warm-up state ----------------------------------------------
+
+    def first_send_day(self, mailbox: str) -> str | None:
+        recorded = self.data["mailboxes"].get(mailbox.lower(), {}).get("first_send_day")
+        if recorded:
+            return recorded
+        # Ledgers written before warm-up tracking existed: infer from the earliest send.
+        dates = [rec["at"][:10] for steps in self.data["sent"].values() for rec in steps.values() if rec.get("at")]
+        return min(dates) if dates else None
+
+    def note_send_day(self, mailbox: str, day: str) -> None:
+        box = self.data["mailboxes"].setdefault(mailbox.lower(), {})
+        if not box.get("first_send_day"):
+            box["first_send_day"] = day
+            self.save()
+
+    def days_active(self, mailbox: str, today: str) -> int | None:
+        """1 on the first sending day, 2 the next calendar day, ... None before any send."""
+        first = self.first_send_day(mailbox)
+        if not first:
+            return None
+        from datetime import date
+        return (date.fromisoformat(today) - date.fromisoformat(first)).days + 1
 
     def sent_on(self, day_prefix: str) -> int:
         return sum(
