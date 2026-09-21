@@ -13,7 +13,7 @@ from gtm_engine.models import SequenceStatus
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
 from gtm_engine.outreach.reply_state import sync_replies, verify_sent
-from gtm_engine.outreach.sender import make_sender
+from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes
 from gtm_engine.outreach.sequencer import due_leads, enqueue, send_due
 from gtm_engine.outreach.templates import render
 from gtm_engine.storage.database import Database
@@ -64,15 +64,18 @@ def cmd_send(args: argparse.Namespace) -> int:
     if not args.no_sync and not dry_run:
         r = sync_replies(db, args.campaign_id, osettings, ledger)
         print(f"reply sync: {r.replied} replied, {r.unsubscribed} unsubscribed, {r.bounced} bounced ({r.scanned} scanned)")
-    sender = make_sender(osettings, settings.db_path.parent / "outbox", force_dry_run=dry_run)
-    report = send_due(db, campaign, osettings, templates, sender, ledger, limit=args.limit,
+    pool = MailboxPool(load_mailboxes(), osettings, settings.db_path.parent / "outbox", dry_run=dry_run)
+    report = send_due(db, campaign, osettings, templates, pool, ledger, limit=args.limit,
                       ignore_window=args.ignore_window)
     for d in report.details:
         print("  " + d)
-    print(f"sent {report.sent}, skipped {report.skipped}, failed {report.failed} via {sender.name}"
+    for a, st in report.mailboxes.items():
+        print(f"  mailbox {a}: {st['sent_today']}/{st['cap']} today"
+              + (f", warm-up day {st['days_active']}" if st['days_active'] else "")
+              + (f", PAUSED: {st['paused_reason']}" if st['paused_reason'] else ""))
+    print(f"sent {report.sent}, skipped {report.skipped}, failed {report.failed} via {pool.name}"
           + (f" — stopped: {report.stopped_reason}" if report.stopped_reason else ""))
-    if hasattr(sender, "close"):
-        sender.close()
+    pool.close()
     db.close()
     return 0 if report.failed == 0 else 1
 
@@ -150,6 +153,24 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if missing == 0 else 1
 
 
+def cmd_mailboxes(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+    settings, osettings = load_settings(), load_outreach_settings()
+    boxes = load_mailboxes()
+    if not boxes:
+        print("no mailboxes configured (GTM_MAILBOX_1_USER=... or GTM_SMTP_USER=...)")
+        return 0
+    ledger = Ledger(ledger_path(args.campaign_id))
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    db = Database(settings.db_path)
+    for a, st in MailboxPool(boxes, osettings, settings.db_path.parent / "outbox").states(db, args.campaign_id, ledger, day).items():
+        print(f"  {a:<34} {st.mailbox.auth_mode:<12} sent {st.sent_today}/{st.cap} today"
+              + (f"  warm-up day {st.days_active}" if st.days_active else "  (never sent)")
+              + (f"  PAUSED: {st.paused_reason}" if st.paused_reason else ""))
+    db.close()
+    return 0
+
+
 def cmd_gmail_auth(args: argparse.Namespace) -> int:
     from gtm_engine.outreach.gmail_oauth import interactive_setup
     interactive_setup()
@@ -191,6 +212,10 @@ def add_outreach_parser(sub: argparse._SubParsersAction) -> None:
     vf = s.add_parser("verify", help="confirm ledger Message-IDs exist in the Gmail Sent folder")
     vf.add_argument("campaign_id")
     vf.set_defaults(func=cmd_verify)
+
+    mb = s.add_parser("mailboxes", help="show every configured mailbox with its cap, warm-up day and guard state")
+    mb.add_argument("campaign_id")
+    mb.set_defaults(func=cmd_mailboxes)
 
     ga = s.add_parser("gmail-auth", help="one-time OAuth2 setup: prints the refresh token to store as a secret")
     ga.set_defaults(func=cmd_gmail_auth)

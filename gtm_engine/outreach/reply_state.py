@@ -80,22 +80,32 @@ def parse_message(raw: bytes) -> InboundMessage:
     )
 
 
-def _imap_login(conn: imaplib.IMAP4_SSL, settings: OutreachSettings) -> None:
-    if settings.oauth_present:
-        token = AccessTokenProvider(*credentials_from_env()).token()
-        conn.authenticate("XOAUTH2", lambda _: xoauth2_string(settings.smtp_user, token).encode())
+def _imap_login(conn: imaplib.IMAP4_SSL, box) -> None:
+    if box.oauth:
+        token = AccessTokenProvider(*box.oauth).token()
+        conn.authenticate("XOAUTH2", lambda _: xoauth2_string(box.address, token).encode())
     else:
-        conn.login(settings.smtp_user, settings.smtp_password)
+        conn.login(box.address, box.password)
 
 
-def fetch_recent(settings: OutreachSettings, since_days: int = 14) -> list[InboundMessage]:
-    if not settings.credentials_present:
+def fetch_recent(settings: OutreachSettings, since_days: int = 14, box=None) -> list[InboundMessage]:
+    """Inbox of one mailbox (default: every configured mailbox, concatenated)."""
+    from gtm_engine.outreach.mailboxes import load_mailboxes
+    boxes = [box] if box is not None else [b for b in load_mailboxes() if b.can_send]
+    if not boxes:
         log.warning("no credentials: skipping reply sync")
         return []
+    out: list[InboundMessage] = []
+    for b in boxes:
+        out.extend(_fetch_one(settings, b, since_days))
+    return out
+
+
+def _fetch_one(settings: OutreachSettings, box, since_days: int) -> list[InboundMessage]:
     since = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
     out: list[InboundMessage] = []
     with imaplib.IMAP4_SSL(settings.imap_host) as conn:
-        _imap_login(conn, settings)
+        _imap_login(conn, box)
         conn.select("INBOX", readonly=True)
         status, data = conn.search(None, f'(SINCE "{since}")')
         if status != "OK":
@@ -169,19 +179,29 @@ def sync_replies(db: Database, campaign_id: str, settings: OutreachSettings, led
 
 
 def verify_sent(settings: OutreachSettings, ledger: Ledger, folder: str = '"[Gmail]/Sent Mail"') -> list[tuple[str, str, bool]]:
-    """Confirm each ledger Message-ID exists in the mailbox's Sent folder.
+    """Confirm each ledger Message-ID exists in the Sent folder of the mailbox that sent it.
     Returns (email, step, found)."""
+    from gtm_engine.outreach.mailboxes import load_mailboxes
+    boxes = {b.address: b for b in load_mailboxes() if b.can_send}
     results: list[tuple[str, str, bool]] = []
-    if not settings.credentials_present:
+    if not boxes:
         return results
-    with imaplib.IMAP4_SSL(settings.imap_host) as conn:
-        _imap_login(conn, settings)
-        status, _ = conn.select(folder, readonly=True)
-        if status != "OK":
-            raise RuntimeError(f"cannot open {folder}")
-        for addr, steps in ledger.data["sent"].items():
-            for step, rec in steps.items():
-                mid = rec.get("message_id")
+    default = next(iter(boxes))
+    by_box: dict[str, list[tuple[str, str, str]]] = {}
+    for addr, steps in ledger.data["sent"].items():
+        for step, rec in steps.items():
+            by_box.setdefault(rec.get("mailbox") or default, []).append((addr, step, rec.get("message_id") or ""))
+    for owner, items in by_box.items():
+        box = boxes.get(owner)
+        if box is None:
+            results.extend((a, s, False) for a, s, _ in items)
+            continue
+        with imaplib.IMAP4_SSL(settings.imap_host) as conn:
+            _imap_login(conn, box)
+            status, _ = conn.select(folder, readonly=True)
+            if status != "OK":
+                raise RuntimeError(f"cannot open {folder} on {owner}")
+            for addr, step, mid in items:
                 if not mid:
                     results.append((addr, step, False))
                     continue

@@ -118,6 +118,19 @@ export interface Queue {
   smtp_configured: boolean
   daily_limit: number
   sent_today: number
+  mailboxes: MailboxState[]
+}
+
+export interface MailboxState {
+  address: string
+  auth_mode: string
+  enabled: boolean
+  days_active: number | null
+  cap: number
+  sent_today: number
+  bounced_today: number
+  remaining: number
+  paused_reason: string | null
 }
 
 export interface SendReport {
@@ -128,6 +141,7 @@ export interface SendReport {
   details: string[]
   mode: string
   sync: Record<string, number | string> | null
+  mailboxes?: Record<string, MailboxState>
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -185,6 +185,7 @@ class Lead(BaseModel):
     approved: bool = False
     next_contact_at: datetime | None = None
     thread_message_id: str | None = None   # Message-ID of email 1; follow-ups reply to it
+    mailbox: str | None = None             # address that sent email 1; follow-ups use the same one
     last_sent_at: datetime | None = None
 
 

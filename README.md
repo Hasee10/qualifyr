@@ -53,7 +53,9 @@ you edit subject/body, approve or reject, then send; plus sequence and activity 
 Credentials come only from the environment. Preferred: Gmail OAuth2 — run
 `gtm outreach gmail-auth` once and store `GTM_GMAIL_CLIENT_ID` / `GTM_GMAIL_CLIENT_SECRET` /
 `GTM_GMAIL_REFRESH_TOKEN` plus `GTM_SMTP_USER`. Fallback: `GTM_SMTP_PASSWORD` (App Password).
-Without either, every send is a dry run. Sender protection is on by default: warm-up ramp
+Several mailboxes: `GTM_MAILBOX_1_USER`/`_PASSWORD`, `GTM_MAILBOX_2_…` — Email 1 rotates to the
+least-loaded mailbox, follow-ups stay on the mailbox that started the thread, each mailbox has
+its own cap, warm-up and bounce guard. Without any credentials, every send is a dry run. Sender protection is on by default: warm-up ramp
 (5/day growing by 2/day to the cap), 30–120 s random spacing, and a bounce-rate guard that
 pauses the mailbox for the day. **Every email requires human approval** (`require_approval: true`): it is drafted, shown in the UI, edited if you like, and sent only after you approve it — follow-ups come back for their own approval. Sequence: Email 1 → +3 days Follow-up 1 →
 +4 days Follow-up 2, threaded; stops on reply, bounce, "STOP", or suppression. Daily cap, 45 s
@@ -122,5 +124,5 @@ data/             sqlite db + exports (gitignored)
 | M7 Scoring with reasons | done |
 | M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
 | M9 Outreach (Gmail SMTP/OAuth2, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
-| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) | done |
+| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation | done |
 | M10 Hardening | in progress |

@@ -38,8 +38,11 @@ Moves reply rate more than any copy change.
   recording which source gave each field (shown in the lead detail).
 
 
-PHASE C — VOLUME WITHOUT SPAM  (~1/2 day)
+PHASE C — VOLUME WITHOUT SPAM  (~1/2 day)  [DONE 2026-09-21]
 -----------------------------------------
+* Configure extra mailboxes as GTM_MAILBOX_N_USER/_PASSWORD (or OAuth trio), optional
+  _LIMIT and _NAME; legacy GTM_SMTP_* is mailbox #1. `gtm outreach mailboxes <campaign>`
+  shows each mailbox's cap, warm-up day and guard state; the UI shows the same panel.
 * Multi-inbox rotation: 2–3 Gmail accounts, per-inbox daily caps and their own
   warm-up state; the sequencer round-robins and threads follow-ups from the
   same inbox that sent Email 1.

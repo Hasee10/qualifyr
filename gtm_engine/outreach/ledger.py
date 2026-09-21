@@ -14,6 +14,9 @@ from gtm_engine.models import utcnow
 class Ledger:
     def __init__(self, path: Path):
         self.path = path
+        # Records written before mailbox tracking carry no mailbox; they belong to the first
+        # configured mailbox (set by MailboxPool), never to a mailbox added later.
+        self.legacy_mailbox: str | None = None
         self.data: dict = {"sent": {}, "stopped": {}, "mailboxes": {}}
         if path.exists():
             try:
@@ -40,9 +43,14 @@ class Ledger:
         recorded = self.data["mailboxes"].get(mailbox.lower(), {}).get("first_send_day")
         if recorded:
             return recorded
-        # Ledgers written before warm-up tracking existed: infer from the earliest send.
-        dates = [rec["at"][:10] for steps in self.data["sent"].values() for rec in steps.values() if rec.get("at")]
+        # Ledgers written before mailbox tracking existed: infer from that mailbox's (or
+        # untagged) earliest send.
+        dates = [rec["at"][:10] for steps in self.data["sent"].values() for rec in steps.values()
+                 if rec.get("at") and self._owner(rec, mailbox) == mailbox.lower()]
         return min(dates) if dates else None
+
+    def _owner(self, rec: dict, fallback: str) -> str:
+        return (rec.get("mailbox") or self.legacy_mailbox or fallback).lower()
 
     def note_send_day(self, mailbox: str, day: str) -> None:
         box = self.data["mailboxes"].setdefault(mailbox.lower(), {})
@@ -58,19 +66,29 @@ class Ledger:
         from datetime import date
         return (date.fromisoformat(today) - date.fromisoformat(first)).days + 1
 
-    def sent_on(self, day_prefix: str) -> int:
-        return sum(
-            1 for steps in self.data["sent"].values()
-            for rec in steps.values() if rec.get("at", "").startswith(day_prefix)
-        )
+    def sent_on(self, day_prefix: str, mailbox: str | None = None) -> int:
+        """Sends on a day; with `mailbox`, only that mailbox's (legacy records without a
+        mailbox count toward the first configured mailbox, passed as `mailbox`)."""
+        n = 0
+        for steps in self.data["sent"].values():
+            for rec in steps.values():
+                if not rec.get("at", "").startswith(day_prefix):
+                    continue
+                if mailbox is None or self._owner(rec, mailbox) == mailbox.lower():
+                    n += 1
+        return n
 
     # -- mutations -----------------------------------------------------------
 
     def record_sent(self, email: str, step: str, message_id: str | None, lead_id: str,
-                    at: datetime | None = None) -> None:
+                    at: datetime | None = None, mailbox: str | None = None) -> None:
         rec = self.data["sent"].setdefault(email.lower(), {})
-        rec[step] = {"at": (at or utcnow()).isoformat(), "message_id": message_id, "lead_id": lead_id}
+        rec[step] = {"at": (at or utcnow()).isoformat(), "message_id": message_id, "lead_id": lead_id,
+                     "mailbox": (mailbox or "").lower() or None}
         self.save()
+
+    def mailbox_of(self, email: str) -> str | None:
+        return (self.steps_sent(email).get("email_1") or {}).get("mailbox")
 
     def record_stop(self, email: str, reason: str) -> None:
         self.data["stopped"][email.lower()] = {"reason": reason, "at": utcnow().isoformat()}

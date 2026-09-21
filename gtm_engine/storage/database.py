@@ -238,6 +238,19 @@ class Database:
         row = self.conn.execute("SELECT config_json FROM campaigns WHERE campaign_id = ?", (campaign_id,)).fetchone()
         return json.loads(row["config_json"]) if row else None
 
+    def bounced_today(self, campaign_id: str, day: str, mailbox: str | None = None,
+                      legacy_mailbox: str | None = None) -> int:
+        """Leads that bounced among those sent on `day` (optionally by one mailbox; leads
+        without a recorded mailbox belong to `legacy_mailbox`)."""
+        n = 0
+        for l in self.leads_by_status(campaign_id, ["bounced"]):
+            if not l.last_sent_at or l.last_sent_at.strftime("%Y-%m-%d") != day:
+                continue
+            owner = (l.mailbox or legacy_mailbox or mailbox or "").lower()
+            if mailbox is None or owner == mailbox.lower():
+                n += 1
+        return n
+
     def events_today(self, event_type: str, day_prefix: str) -> int:
         return self.conn.execute(
             "SELECT COUNT(*) FROM outreach_events WHERE event_type = ? AND created_at LIKE ?",

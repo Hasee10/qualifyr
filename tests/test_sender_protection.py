@@ -101,7 +101,7 @@ def test_bounce_rate_pauses_mailbox_for_the_day(db, campaign, osettings, tmp_pat
     for l in sent_leads:
         stop_lead(db, l, SequenceStatus.BOUNCED, "bounce notification", ledger)
     later = send_due(db, campaign, osettings, load_templates(), sender, ledger, now=MON_10AM_PKT + timedelta(hours=1), sleep=lambda s: None)
-    assert later.sent == 0 and later.stopped_reason.startswith("mailbox paused: bounce rate 2/6")
+    assert later.sent == 0 and "bounce rate 2/6" in later.stopped_reason and "paused" in later.stopped_reason
     # a new day resets the window
     tomorrow = send_due(db, campaign, osettings, load_templates(), sender, ledger, limit=1, now=MON_10AM_PKT + timedelta(days=1), sleep=lambda s: None)
     assert tomorrow.sent == 1

@@ -40,9 +40,10 @@ class Sender(Protocol):
     def send(self, email: OutgoingEmail) -> SendResult: ...
 
 
-def build_message(email: OutgoingEmail, settings: OutreachSettings, from_addr: str) -> EmailMessage:
+def build_message(email: OutgoingEmail, settings: OutreachSettings, from_addr: str,
+                  sender_name: str | None = None) -> EmailMessage:
     msg = EmailMessage()
-    msg["From"] = formataddr((settings.sender_name, from_addr))
+    msg["From"] = formataddr((sender_name or settings.sender_name, from_addr))
     msg["To"] = email.to
     msg["Subject"] = email.subject
     msg["Message-ID"] = make_msgid(domain=from_addr.split("@", 1)[1])
@@ -78,16 +79,24 @@ class DryRunSender:
 class SmtpSender:
     name = "smtp"
 
-    def __init__(self, settings: OutreachSettings, token_provider: AccessTokenProvider | None = None):
-        if not settings.credentials_present:
-            raise RuntimeError("set GTM_SMTP_USER plus either GTM_GMAIL_* OAuth vars or GTM_SMTP_PASSWORD")
+    def __init__(self, settings: OutreachSettings, token_provider: AccessTokenProvider | None = None,
+                 *, from_addr: str | None = None, password: str | None = None, sender_name: str | None = None):
         self.settings = settings
-        self.from_addr = settings.smtp_user
+        self.from_addr = from_addr or settings.smtp_user
+        self._password = password if from_addr else settings.smtp_password
+        self._sender_name = sender_name
         self._conn: smtplib.SMTP | None = None
         self._tokens = token_provider
-        if self._tokens is None and settings.oauth_present:
+        if self._tokens is None and not from_addr and settings.oauth_present:
             self._tokens = AccessTokenProvider(*credentials_from_env())
+        if not self.from_addr or not (self._tokens or self._password):
+            raise RuntimeError("mailbox needs an address plus OAuth2 credentials or an App Password")
         self.name = "smtp-oauth2" if self._tokens else "smtp"
+
+    @classmethod
+    def for_mailbox(cls, box, settings: OutreachSettings) -> "SmtpSender":
+        tokens = AccessTokenProvider(*box.oauth) if box.oauth else None
+        return cls(settings, tokens, from_addr=box.address, password=box.password, sender_name=box.sender_name)
 
     def _connect(self) -> smtplib.SMTP:
         if self._conn is None:
@@ -97,17 +106,17 @@ class SmtpSender:
             conn.ehlo()
             if self._tokens is not None:
                 # XOAUTH2: no password ever leaves the environment; tokens expire hourly.
-                auth = xoauth2_b64(self.settings.smtp_user, self._tokens.token())
+                auth = xoauth2_b64(self.from_addr, self._tokens.token())
                 code, resp = conn.docmd("AUTH", "XOAUTH2 " + auth)
                 if code != 235:
                     raise smtplib.SMTPAuthenticationError(code, resp)
             else:
-                conn.login(self.settings.smtp_user, self.settings.smtp_password)
+                conn.login(self.from_addr, self._password)
             self._conn = conn
         return self._conn
 
     def send(self, email: OutgoingEmail) -> SendResult:
-        msg = build_message(email, self.settings, self.from_addr)
+        msg = build_message(email, self.settings, self.from_addr, self._sender_name)
         try:
             self._connect().send_message(msg)
         except smtplib.SMTPRecipientsRefused as exc:

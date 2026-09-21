@@ -24,7 +24,7 @@ from gtm_engine.outreach.cli import ledger_path
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
 from gtm_engine.outreach.reply_state import sync_replies
-from gtm_engine.outreach.sender import make_sender
+from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
 from gtm_engine.pipeline import Pipeline
@@ -249,12 +249,18 @@ def outreach_queue(campaign_id: str) -> dict:
     for l in db.list_leads(campaign_id):
         counts[l.sequence_status.value] += 1
     db.close()
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ledger = Ledger(ledger_path(campaign_id))
+    db2 = _db()
+    states = MailboxPool(load_mailboxes(), osettings, _settings.db_path.parent / "outbox").states(db2, campaign_id, ledger, day)
+    db2.close()
     return {
         "items": [{"lead": _lead_summary(i["lead"]), "step": i["step"], "draft": i["draft"]} for i in items],
         "counts": counts,
         "smtp_configured": osettings.credentials_present,
-        "daily_limit": osettings.daily_limit,
-        "sent_today": Ledger(ledger_path(campaign_id)).sent_on(datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+        "daily_limit": sum(st.cap for st in states.values()),
+        "sent_today": ledger.sent_on(day),
+        "mailboxes": [st.as_dict() for st in states.values()],
     }
 
 
@@ -367,14 +373,13 @@ def outreach_send(campaign_id: str, req: SendRequest) -> dict:
         shutil.copyfile(_settings.db_path, scratch / "dryrun.sqlite")
         db = Database(scratch / "dryrun.sqlite")
         ledger.path = scratch / "dryrun_ledger.json"
-    sender = make_sender(osettings, _settings.db_path.parent / "outbox", force_dry_run=dry)
-    report = send_due(db, campaign, osettings, templates, sender, ledger, limit=req.limit, ignore_window=req.ignore_window)
-    if hasattr(sender, "close"):
-        sender.close()
+    pool = MailboxPool(load_mailboxes(), osettings, _settings.db_path.parent / "outbox", dry_run=dry)
+    report = send_due(db, campaign, osettings, templates, pool, ledger, limit=req.limit, ignore_window=req.ignore_window)
+    pool.close()
     db.close()
     return {"sent": report.sent, "skipped": report.skipped, "failed": report.failed,
             "stopped_reason": report.stopped_reason, "details": report.details,
-            "mode": sender.name, "sync": sync}
+            "mode": pool.name, "sync": sync, "mailboxes": report.mailboxes}
 
 
 @app.post("/campaigns/{campaign_id}/outreach/sync")

@@ -39,31 +39,39 @@ class OutreachSettings(BaseModel):
     followup_2_after_days: int = 4
     require_approval: bool = True
 
+    # -- mailboxes (see outreach/mailboxes.py). The single-mailbox properties below read the
+    #    first configured mailbox so older call sites keep working.
+
+    def mailboxes(self):
+        from gtm_engine.outreach.mailboxes import load_mailboxes
+        return [b for b in load_mailboxes() if b.enabled]
+
     @property
     def smtp_user(self) -> str | None:
-        return os.environ.get("GTM_SMTP_USER") or None
+        boxes = self.mailboxes()
+        return boxes[0].address if boxes else None
 
     @property
     def smtp_password(self) -> str | None:
-        return os.environ.get("GTM_SMTP_PASSWORD") or None
+        boxes = self.mailboxes()
+        return boxes[0].password if boxes else None
 
     @property
     def oauth_present(self) -> bool:
-        from gtm_engine.outreach.gmail_oauth import credentials_from_env
-        return bool(self.smtp_user and credentials_from_env())
+        boxes = self.mailboxes()
+        return bool(boxes and boxes[0].oauth)
 
     @property
     def credentials_present(self) -> bool:
-        """OAuth2 (preferred) or App Password."""
-        return bool(self.smtp_user and (self.smtp_password or self.oauth_present))
+        """At least one mailbox can send."""
+        return any(b.can_send for b in self.mailboxes())
 
     @property
     def auth_mode(self) -> str:
-        if self.oauth_present:
-            return "oauth2"
-        if self.smtp_user and self.smtp_password:
-            return "app_password"
-        return "none"
+        modes = {b.auth_mode for b in self.mailboxes() if b.can_send}
+        if not modes:
+            return "none"
+        return "mixed" if len(modes) > 1 else modes.pop()
 
     def effective_daily_cap(self, days_active: int | None) -> int:
         """Warm-up ramp: day 1 -> warmup_start_per_day, +step each day, capped at daily_limit."""

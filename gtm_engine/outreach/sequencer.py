@@ -44,6 +44,7 @@ class SendReport:
     failed: int = 0
     stopped_reason: str | None = None
     details: list[str] = field(default_factory=list)
+    mailboxes: dict[str, dict] = field(default_factory=dict)
 
 
 def in_send_window(now: datetime, settings: OutreachSettings) -> bool:
@@ -125,8 +126,9 @@ def due_leads(db: Database, campaign_id: str, now: datetime | None = None) -> li
     for lead in db.leads_by_status(campaign_id, [s.value for s in ACTIVE]):
         if lead.next_contact_at is None or lead.next_contact_at <= now:
             out.append(lead)
-    # Email 1 first (new conversations), then oldest follow-ups.
-    out.sort(key=lambda l: (0 if l.sequence_status == SequenceStatus.QUEUED else 1, l.next_contact_at or now))
+    # Follow-ups first (a promise inside an existing thread, oldest due first), then new
+    # conversations with whatever budget is left.
+    out.sort(key=lambda l: (1 if l.sequence_status == SequenceStatus.QUEUED else 0, l.next_contact_at or now))
     return out
 
 
@@ -145,8 +147,12 @@ def stop_lead(db: Database, lead: Lead, status: SequenceStatus, reason: str, led
 
 
 def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings, templates: Templates,
-             sender: Sender, ledger: Ledger, *, limit: int | None = None, now: datetime | None = None,
+             sender_or_pool, ledger: Ledger, *, limit: int | None = None, now: datetime | None = None,
              sleep=time.sleep, ignore_window: bool = False) -> SendReport:
+    """Send what is due. `sender_or_pool` is a MailboxPool, or a single Sender (wrapped
+    into a one-mailbox pool). Email 1 uses the least-loaded mailbox; follow-ups use the
+    mailbox that sent Email 1, and wait if that mailbox is paused or out of budget."""
+    from gtm_engine.outreach.mailboxes import MailboxPool
     report = SendReport()
     now = now or utcnow()
     if not ignore_window and not in_send_window(now, settings):
@@ -154,37 +160,25 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         return report
 
     day = now.strftime("%Y-%m-%d")
-    mailbox = getattr(sender, "from_addr", None) or settings.smtp_user or "dry-run"
-    already_today = max(db.events_today("sent", day), ledger.sent_on(day))
-
-    # Bounce guard: of the emails sent today, how many have already bounced?
-    bounced_today = sum(
-        1 for l in db.leads_by_status(campaign.campaign_id, [SequenceStatus.BOUNCED.value])
-        if l.last_sent_at and l.last_sent_at.strftime("%Y-%m-%d") == day
-    )
-    if already_today >= settings.min_sends_for_bounce_rate and bounced_today / max(already_today, 1) > settings.max_bounce_rate:
-        report.stopped_reason = (f"mailbox paused: bounce rate {bounced_today}/{already_today} exceeds "
-                                 f"{settings.max_bounce_rate:.0%}; check the list before sending more")
+    pool = sender_or_pool if isinstance(sender_or_pool, MailboxPool) else _single_pool(sender_or_pool, settings)
+    states = pool.states(db, campaign.campaign_id, ledger, day)
+    report.mailboxes = {a: st.as_dict() for a, st in states.items()}
+    if all(st.paused_reason for st in states.values()):
+        report.stopped_reason = "all mailboxes paused: " + "; ".join(
+            f"{a}: {st.paused_reason}" for a, st in states.items())
+        return report
+    if all(st.remaining == 0 for st in states.values()):
+        report.stopped_reason = _limit_reason(states, settings)
         return report
 
-    # Warm-up ramp: today's cap depends on how long this mailbox has been sending.
-    days_active = ledger.days_active(mailbox, day)
-    cap = settings.effective_daily_cap(days_active if days_active is not None else 1)
-    budget = cap - already_today
-    if limit is not None:
-        budget = min(budget, limit)
-    def limit_reason(sent_now: int) -> str:
-        return f"daily limit reached ({already_today + sent_now}/{cap}" + (
-            f", warm-up day {days_active or 1})" if settings.warmup_enabled else ")")
-
-    if budget <= 0:
-        report.stopped_reason = limit_reason(0)
-        return report
-
+    batch_left = limit if limit is not None else 10**9
     consecutive_failures = 0
     for lead in due_leads(db, campaign.campaign_id, now):
-        if report.sent >= budget:
-            report.stopped_reason = limit_reason(report.sent) if limit is None or report.sent < limit else "batch limit reached"
+        if batch_left <= 0:
+            report.stopped_reason = "batch limit reached"
+            break
+        if all(st.remaining == 0 for st in states.values()):
+            report.stopped_reason = _limit_reason(states, settings)
             break
         step, next_status = NEXT_STEP[lead.sequence_status]
         email = lead.contact_email
@@ -213,6 +207,24 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         else:
             rendered = render(step, lead, campaign, settings, templates)
             subject, body = rendered.subject, rendered.body
+
+        # --- choose the mailbox -------------------------------------------------
+        if step == "email_1":
+            state = pool.pick_for_new_thread(states)
+            if state is None:
+                report.stopped_reason = _limit_reason(states, settings)
+                break
+        else:
+            owner = lead.mailbox or ledger.mailbox_of(email) or pool.addresses()[0]
+            state = states.get(owner)
+            if state is None or state.remaining == 0:
+                why = "not configured" if state is None else (state.paused_reason or "daily cap reached")
+                report.skipped += 1
+                report.details.append(f"{lead.company_name}: {step} waits for {owner} ({why})")
+                continue
+        mailbox = state.mailbox.address
+        sender = pool.sender_for(mailbox)
+
         result = sender.send(OutgoingEmail(
             to=email, subject=subject, body=body,
             in_reply_to=lead.thread_message_id if step != "email_1" else None,
@@ -221,7 +233,7 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         if not result.ok:
             report.failed += 1
             consecutive_failures += 1
-            db.add_event(lead.lead_id, "send_failed", step=step, detail=result.error)
+            db.add_event(lead.lead_id, "send_failed", step=step, detail=f"{mailbox}: {result.error}")
             report.details.append(f"{lead.company_name}: {result.error}")
             if result.error and result.error.startswith("recipient_refused"):
                 stop_lead(db, lead, SequenceStatus.BOUNCED, result.error, ledger)
@@ -233,16 +245,40 @@ def send_due(db: Database, campaign: CampaignConfig, settings: OutreachSettings,
         consecutive_failures = 0
         if draft:
             db.set_draft_status(lead.lead_id, step, "sent")
-        ledger.record_sent(email, step, result.message_id, lead.lead_id, now)
+        ledger.record_sent(email, step, result.message_id, lead.lead_id, now, mailbox=mailbox)
         ledger.note_send_day(mailbox, day)
+        if step == "email_1":
+            lead.mailbox = mailbox
         _advance(db, lead, step, next_status, result.message_id, settings, now)
-        db.add_event(lead.lead_id, "sent", step=step, detail=result.message_id)
+        db.add_event(lead.lead_id, "sent", step=step, detail=f"{mailbox} {result.message_id}")
+        state.sent_today += 1
+        batch_left -= 1
         report.sent += 1
-        report.details.append(f"{lead.company_name} <{email}>: {step} via {sender.name}")
-        if report.sent < budget:
+        report.details.append(f"{lead.company_name} <{email}>: {step} via {mailbox}")
+        if batch_left > 0 and any(st.remaining > 0 for st in states.values()):
             sleep(random.uniform(settings.jitter_min_s, settings.jitter_max_s)
                   if settings.jitter_max_s > 0 else settings.delay_between_sends_s)
+    report.mailboxes = {a: st.as_dict() for a, st in states.items()}
     return report
+
+
+def _single_pool(sender, settings: OutreachSettings):
+    """Wrap a bare Sender (tests, legacy callers) into a one-mailbox pool."""
+    from gtm_engine.outreach.mailboxes import Mailbox, MailboxPool
+    address = getattr(sender, "from_addr", None) or settings.smtp_user or "dryrun@example.invalid"
+    pool = MailboxPool([Mailbox(address=address, password="x")], settings, outbox=__import__("pathlib").Path("."),
+                       dry_run=False, sender_factory=lambda box, dry: sender)
+    return pool
+
+
+def _limit_reason(states, settings: OutreachSettings) -> str:
+    parts = []
+    for a, st in states.items():
+        tag = f"{st.sent_today}/{st.cap}"
+        if settings.warmup_enabled:
+            tag += f", warm-up day {st.days_active or 1}"
+        parts.append(f"{a}: {tag}")
+    return "daily limit reached (" + "; ".join(parts) + ")"
 
 
 def _advance(db: Database, lead: Lead, step: str, next_status: SequenceStatus, message_id: str | None,

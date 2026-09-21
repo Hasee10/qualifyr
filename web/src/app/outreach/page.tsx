@@ -112,6 +112,25 @@ function SendPanel({ campaignId, queue, onDone }: { campaignId: string; queue: Q
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        {queue.mailboxes.length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {queue.mailboxes.map((m) => (
+              <div key={m.address} className={cn("rounded-lg border p-3 text-xs", m.paused_reason && "border-destructive/50")}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium">{m.address}</span>
+                  <Badge variant={m.paused_reason ? "destructive" : m.remaining > 0 ? "default" : "secondary"}>
+                    {m.paused_reason ? "paused" : `${m.remaining} left`}
+                  </Badge>
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  {m.sent_today}/{m.cap} today · {m.auth_mode}{m.days_active ? ` · warm-up day ${m.days_active}` : " · never sent"}
+                  {m.bounced_today > 0 && ` · ${m.bounced_today} bounced`}
+                </div>
+                {m.paused_reason && <div className="mt-1 text-destructive">{m.paused_reason}</div>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">Max this batch</span>
           <Input className="w-20" value={limit} onChange={(e) => setLimit(e.target.value)} />
