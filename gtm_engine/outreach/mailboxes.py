@@ -48,33 +48,36 @@ class Mailbox:
         return self.enabled and self.auth_mode != "none"
 
 
-def load_mailboxes(env: dict[str, str] | None = None) -> list[Mailbox]:
+def load_mailboxes(env: dict[str, str] | None = None, max_slots: int = 10) -> list[Mailbox]:
+    """Slot 1 is GTM_MAILBOX_1_* or, when absent, the legacy GTM_SMTP_* / GTM_GMAIL_* variables.
+    Slots 2..max_slots are GTM_MAILBOX_N_*; gaps are allowed."""
     env = env if env is not None else os.environ
     boxes: list[Mailbox] = []
-    i = 1
-    while env.get(f"GTM_MAILBOX_{i}_USER"):
+    for i in range(1, max_slots + 1):
         p = f"GTM_MAILBOX_{i}_"
-        limit = env.get(p + "LIMIT")
-        boxes.append(Mailbox(
-            address=env[p + "USER"].strip().lower(),
-            password=env.get(p + "PASSWORD") or None,
-            client_id=env.get(p + "CLIENT_ID") or None,
-            client_secret=env.get(p + "CLIENT_SECRET") or None,
-            refresh_token=env.get(p + "REFRESH_TOKEN") or None,
-            daily_limit=int(limit) if limit else None,
-            sender_name=env.get(p + "NAME") or None,
-            enabled=env.get(p + "ENABLED", "true").lower() not in ("0", "false", "no"),
-        ))
-        i += 1
-    if not boxes and env.get("GTM_SMTP_USER"):
-        boxes.append(Mailbox(
-            address=env["GTM_SMTP_USER"].strip().lower(),
-            password=env.get("GTM_SMTP_PASSWORD") or None,
-            client_id=env.get("GTM_GMAIL_CLIENT_ID") or None,
-            client_secret=env.get("GTM_GMAIL_CLIENT_SECRET") or None,
-            refresh_token=env.get("GTM_GMAIL_REFRESH_TOKEN") or None,
-        ))
-    return boxes
+        if env.get(p + "USER"):
+            limit = env.get(p + "LIMIT")
+            boxes.append(Mailbox(
+                address=env[p + "USER"].strip().lower(),
+                password=env.get(p + "PASSWORD") or None,
+                client_id=env.get(p + "CLIENT_ID") or None,
+                client_secret=env.get(p + "CLIENT_SECRET") or None,
+                refresh_token=env.get(p + "REFRESH_TOKEN") or None,
+                daily_limit=int(limit) if limit else None,
+                sender_name=env.get(p + "NAME") or None,
+                enabled=env.get(p + "ENABLED", "true").lower() not in ("0", "false", "no"),
+            ))
+        elif i == 1 and env.get("GTM_SMTP_USER"):
+            boxes.append(Mailbox(
+                address=env["GTM_SMTP_USER"].strip().lower(),
+                password=env.get("GTM_SMTP_PASSWORD") or None,
+                client_id=env.get("GTM_GMAIL_CLIENT_ID") or None,
+                client_secret=env.get("GTM_GMAIL_CLIENT_SECRET") or None,
+                refresh_token=env.get("GTM_GMAIL_REFRESH_TOKEN") or None,
+            ))
+    # The same address twice (legacy + numbered) is one mailbox.
+    seen: set[str] = set()
+    return [b for b in boxes if not (b.address in seen or seen.add(b.address))]
 
 
 @dataclass

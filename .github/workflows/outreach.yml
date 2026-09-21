@@ -85,6 +85,7 @@ jobs:
           [ -n "$LIMIT" ] && args="$args --limit $LIMIT"
           [ "$DRY_RUN" = "true" ] && args="$args --dry-run"
           [ "$IGNORE_WINDOW" = "true" ] && args="$args --ignore-window"
+          python -m gtm_engine.cli outreach mailboxes "$CAMPAIGN_ID"
           python -m gtm_engine.cli outreach send "$CAMPAIGN_ID" $args
           python -m gtm_engine.cli outreach status "$CAMPAIGN_ID"
 

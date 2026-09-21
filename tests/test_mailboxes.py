@@ -65,13 +65,22 @@ def test_load_numbered_mailboxes_and_legacy_fallback():
            "GTM_MAILBOX_3_USER": "c@gmail.com", "GTM_MAILBOX_3_ENABLED": "false",
            "GTM_SMTP_USER": "ignored@gmail.com", "GTM_SMTP_PASSWORD": "zzz"}
     boxes = load_mailboxes(env)
-    assert [b.address for b in boxes] == ["a@gmail.com", "b@gmail.com", "c@gmail.com"]
+    assert [b.address for b in boxes] == ["a@gmail.com", "b@gmail.com", "c@gmail.com"]  # legacy ignored when slot 1 is numbered
     assert boxes[0].auth_mode == "app_password" and boxes[0].daily_limit == 20
     assert boxes[1].auth_mode == "oauth2" and boxes[1].sender_name == "Sales Team"
     assert boxes[2].enabled is False and boxes[2].auth_mode == "none"
     legacy = load_mailboxes({"GTM_SMTP_USER": "me@gmail.com", "GTM_SMTP_PASSWORD": "p"})
     assert len(legacy) == 1 and legacy[0].address == "me@gmail.com" and legacy[0].can_send
     assert load_mailboxes({}) == []
+    # The user's real layout: legacy vars as #1 plus GTM_MAILBOX_2_* — both must load, in order.
+    mixed = load_mailboxes({"GTM_SMTP_USER": "me@gmail.com", "GTM_SMTP_PASSWORD": "p",
+                            "GTM_MAILBOX_2_USER": "second@gmail.com", "GTM_MAILBOX_2_PASSWORD": "q"})
+    assert [b.address for b in mixed] == ["me@gmail.com", "second@gmail.com"] and all(b.can_send for b in mixed)
+    # Gaps allowed; duplicates collapse
+    gap = load_mailboxes({"GTM_MAILBOX_1_USER": "a@gmail.com", "GTM_MAILBOX_1_PASSWORD": "p",
+                          "GTM_MAILBOX_3_USER": "c@gmail.com", "GTM_MAILBOX_3_PASSWORD": "p",
+                          "GTM_SMTP_USER": "a@gmail.com"})
+    assert [b.address for b in gap] == ["a@gmail.com", "c@gmail.com"]
 
 
 def test_settings_auth_mode_reflects_all_mailboxes(monkeypatch):
