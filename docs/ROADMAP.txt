@@ -93,3 +93,17 @@ STATUS
 ------
 Engine M1–M9 done, web UI done, human approval required for every email.
 Say "start A" (or whichever phase) to begin.
+
+
+PHASE G — CEO ASKS (after A–F; see docs/DIRECTION.md)
+-----------------------------------------------------
+* Intent & requirement scraping: tenders/RFQs (PPRA, company procurement pages),
+  job posts implying a purchase, "looking for supplier/vendor" posts, expansion
+  announcements — each with source URL + date, feeding scoring and hooks.
+* LLM layer (optional, free/local: Ollama; hosted free tier as fallback):
+  requirement extraction from unstructured text, reply classification, hook
+  drafting from observed facts only. Deterministic path remains default and
+  fallback; every LLM output is labelled and reviewable.
+* Decision-maker personal emails: pattern candidates (first.last@, first@, ...)
+  accepted only when SMTP-verified (Reacher). Unverified guesses never ship.
+* Success metric surfaced in the UI: reviewer-marked correct ÷ shown (target 80%).
