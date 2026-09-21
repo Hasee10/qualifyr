@@ -10,12 +10,14 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings
+from gtm_engine.discovery.chambers import KCCIDirectory
 from gtm_engine.discovery.csv_seed import CSVSeedDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
+from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
@@ -84,6 +86,10 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
         facts.append(f"runs on {tech[0]}")
     if "customer_service_load" in signals.pain:
         facts.append("takes orders over WhatsApp/DM")
+    if signals.news:
+        facts.append(f"recently in the news ({signals.news[0].get('source', '')})")
+    if signals.domain_age_years is not None and signals.domain_age_years < 2:
+        facts.append("recently launched online")
     return "; ".join(facts) if facts else None
 
 
@@ -97,6 +103,8 @@ class Pipeline:
         self.mx = mx if mx is not None else MXChecker(settings.dns_timeout_s)
         self.verifier = verifier
         self.website_finder = WebsiteFinder(fetcher, settings)
+        self.news = NewsChecker(fetcher)
+        self._news_budget = settings.news_max_companies_per_run
 
     async def _verifier(self) -> EmailVerifier:
         if self.verifier is None:
@@ -112,6 +120,8 @@ class Pipeline:
             sources.append(OvertureDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.cities:
             sources.append(OSMDiscovery(self.fetcher, self.settings))
+        if "kcci" in campaign.chamber_sources:
+            sources.append(KCCIDirectory(self.fetcher, self.settings))
         if campaign.seed_csv:
             sources.append(CSVSeedDiscovery(campaign.seed_csv))
         if not sources:
@@ -193,6 +203,12 @@ class Pipeline:
             )
             if company.email:
                 provenance["contact_email"] = f"{company.source} record"
+        rep = company.extra.get("representative")
+        if rep and not contact.name:
+            contact.name, contact.role = rep, f"Member representative ({company.source.upper()})"
+            contact.is_decision_maker = True
+            contact.evidence = f"registered representative in the {company.source.upper()} member directory"
+            provenance["contact_name"] = f"{company.source} directory: {company.source_url}"
         # Discovery-source contact details fill gaps the website did not (waterfall).
         if not contact.email and company.email:
             contact.email = company.email
@@ -227,6 +243,20 @@ class Pipeline:
                 contact.candidate_email = found.email
                 contact.email_pattern = found.pattern
 
+        if cls.company_type == CompanyType.BUYER and snapshot.reachable:
+            if self.settings.enable_domain_age and domain:
+                age = await domain_age(self.fetcher, domain)
+                if age:
+                    signals.domain_age_years, signals.domain_age_note = age.years, age.note or None
+                    provenance["domain_age"] = f"{age.source}: {age.note or f'registered {age.registered:%Y-%m-%d}'}"
+            if self.settings.enable_news_signals and self._news_budget > 0:
+                self._news_budget -= 1
+                mentions = await self.news.mentions(company.name, company.country or "Pakistan")
+                if mentions:
+                    signals.news = [m.__dict__ for m in mentions]
+                    signals.buying.setdefault("news_mention", []).extend(m.title for m in mentions[:2])
+                    provenance["news"] = f"gdelt: {len(mentions)} article(s), latest {mentions[0].date}"
+
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
         suppressed = self.db.is_suppressed(domain, contact.email)
@@ -260,6 +290,8 @@ class Pipeline:
             phone=contact.phone or company.phone,
             phone_type=contact.phone_type,
             candidate_email=contact.candidate_email,
+            news_mentions=signals.news,
+            domain_age_years=signals.domain_age_years,
             provenance=provenance,
             linkedin_or_public_profile_url=contact.profile_url,
             pain_signal=pain,

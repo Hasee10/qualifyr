@@ -13,7 +13,7 @@ the repo. **Status** is updated as keys are added.
 | `GTM_MAILBOX_N_USER` / `_PASSWORD` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_LIMIT` / `_NAME` | Gmail | Further mailboxes (slots 3–10) | free | optional | — |
 | `GTM_REACHER_URL` | Self-hosted Reacher (`check-if-email-exists`) | Mailbox-level email verification → `deliverable` status; unlocks decision-maker email confirmation | free software; needs a host with outbound port 25 | optional | ⏳ not set |
 | `GTM_HUNTER_API_KEY` | Hunter.io | Email verification fallback (50 verifications/month), spent only on decision-maker candidates | free 50/mo | optional | ⏳ not set |
-| `GTM_BRAVE_API_KEY` | Brave Search API | Website finder (replaces DuckDuckGo HTML scraping) | 2,000 queries/mo | optional | ⏳ planned (Phase D) |
+| `GTM_BRAVE_API_KEY` | Brave Search API | Website finder (replaces DuckDuckGo HTML scraping) | 2,000 queries/mo | optional | ⏳ supported, not set |
 | `GTM_GOOGLE_CSE_KEY` / `GTM_GOOGLE_CSE_ID` | Google Custom Search JSON | Website finder fallback | 100 queries/day | optional | ⏳ planned (Phase D) |
 | `GTM_GROQ_API_KEY` or `GTM_GEMINI_API_KEY` | Groq / Google Gemini | Hosted LLM fallback for Phase G (Ollama locally needs no key) | free, rate-limited | optional | ⏳ planned (Phase G) |
 | `GTM_SHEETS_CREDENTIALS_JSON` | Google Sheets API (service account) | One-way export of qualified leads | free | optional | ⏳ planned (Phase F) |

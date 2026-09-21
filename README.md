@@ -90,6 +90,7 @@ Every stage is configuration-driven:
 gtm_engine/
   config/         schema + YAML loader
   discovery/      overture.py (Overture Maps via DuckDB), osm.py (Overpass + mirrors),
+                  chambers.py (KCCI member directory),
                   geocode.py (Nominatim), csv_seed.py, search.py (website finder)
   scraping/       fetcher.py (polite HTTP, charset sniffing), browser.py (optional Playwright
                   fallback for JS-only sites), site_crawler.py, parsers.py
@@ -124,5 +125,5 @@ data/             sqlite db + exports (gitignored)
 | M7 Scoring with reasons | done |
 | M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
 | M9 Outreach (Gmail SMTP/OAuth2, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
-| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation | done |
+| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation · Phase D signals & sources (KCCI directory, domain age, news, site quality, Brave) | done |
 | M10 Hardening | in progress |

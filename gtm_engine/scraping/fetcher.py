@@ -138,7 +138,8 @@ class HttpFetcher:
 
     # -- fetch --------------------------------------------------------------
 
-    async def get(self, url: str, *, delay: float | None = None, api: bool = False) -> FetchResult:
+    async def get(self, url: str, *, delay: float | None = None, api: bool = False,
+                  headers: dict[str, str] | None = None) -> FetchResult:
         """`api=True` marks a programmatic endpoint (Overpass, search): robots.txt governs
         crawlers on websites, not API clients, so the check is skipped there."""
         host = urlparse(url).netloc.lower()
@@ -152,7 +153,7 @@ class HttpFetcher:
                 async with self._lock_for(host):
                     await self._throttle(host, delay)
                     try:
-                        resp = await self._client.get(url)
+                        resp = await self._client.get(url, headers=headers)
                     except httpx.TimeoutException:
                         err = "timeout"
                         resp = None

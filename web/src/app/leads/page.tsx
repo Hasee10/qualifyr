@@ -76,6 +76,12 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <Row label="Buying signals" value={lead.buying_signal} />
               <Row label="Pain signals" value={lead.pain_signal} />
               <Row label="Hook" value={lead.personalization_hook} />
+              <Row label="Domain age" value={lead.domain_age_years !== null && lead.domain_age_years !== undefined ? `${lead.domain_age_years} years` : null} />
+              <Row label="In the news" value={lead.news_mentions && lead.news_mentions.length > 0 ? (
+                <ul className="list-disc pl-4">
+                  {lead.news_mentions.map((n) => <li key={n.url}><a className="underline" href={n.url} target="_blank" rel="noreferrer">{n.title}</a> <span className="text-muted-foreground">({n.source}, {n.date})</span></li>)}
+                </ul>
+              ) : null} />
             </section>
             {lead.provenance && Object.keys(lead.provenance).length > 0 && (
               <section>

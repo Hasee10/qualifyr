@@ -111,6 +111,9 @@ class Signals(BaseModel):
     buying: dict[str, list[str]] = Field(default_factory=dict)
     pain: dict[str, list[str]] = Field(default_factory=dict)
     technologies: list[str] = Field(default_factory=list)
+    news: list[dict] = Field(default_factory=list)          # [{title,url,date,source}]
+    domain_age_years: float | None = None
+    domain_age_note: str | None = None
 
 
 class CompanyQuality(BaseModel):
@@ -122,6 +125,8 @@ class CompanyQuality(BaseModel):
     has_phone: bool = False
     page_count: int = 0
     website_mismatch: bool = False
+    copyright_year: int | None = None
+    mobile_friendly: bool | None = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -179,6 +184,8 @@ class Lead(BaseModel):
     evidence: dict = Field(default_factory=dict)
     phone_type: str | None = None
     candidate_email: str | None = None
+    news_mentions: list[dict] = Field(default_factory=list)
+    domain_age_years: float | None = None
     # Which source produced each important field: {"contact_email": "contact page mailto", ...}
     provenance: dict[str, str] = Field(default_factory=dict)
     # Outreach state (not in the CSV schema, kept in the DB and the ledger)

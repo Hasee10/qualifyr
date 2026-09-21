@@ -46,4 +46,6 @@ def settings(tmp_path: Path) -> EngineSettings:
         overpass_url="https://overpass.test/api/interpreter",
         overpass_mirrors=[],
         email_verification="off",
+        enable_domain_age=False,
+        enable_news_signals=False,
     )

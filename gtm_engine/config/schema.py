@@ -63,6 +63,10 @@ class CampaignConfig(BaseModel):
     overture_categories: list[str] = Field(default_factory=list)
     # Optional seed list of companies/domains supplied by the user.
     seed_csv: Path | None = None
+    # Chamber directories (Pakistan): "kcci" today. Member names are filtered by the campaign's
+    # industry/buyer terms plus these extra name keywords (directories carry no sector field).
+    chamber_sources: list[str] = Field(default_factory=list)
+    chamber_name_keywords: list[str] = Field(default_factory=list)
     min_score: int = 70
     max_companies: int = 150
     max_pages_per_site: int = 6
@@ -82,7 +86,7 @@ class CampaignConfig(BaseModel):
 
     @field_validator(
         "target_industries", "target_roles", "buyer_keywords", "negative_keywords",
-        "allowed_vendor_keywords", "osm_categories", "overture_categories",
+        "allowed_vendor_keywords", "osm_categories", "overture_categories", "chamber_sources", "chamber_name_keywords",
     )
     @classmethod
     def _lower(cls, values: list[str]) -> list[str]:
@@ -129,6 +133,10 @@ class EngineSettings(BaseModel):
     overpass_timeout_s: int = 90
     enable_search_fallback: bool = True
     search_delay_s: float = 5.0
+    # External signals (all keyless): RDAP domain age, GDELT news mentions (1 req / 5.5 s).
+    enable_domain_age: bool = True
+    enable_news_signals: bool = True
+    news_max_companies_per_run: int = 40
     dns_timeout_s: float = 5.0
     # Mailbox-level email verification: auto | direct | reacher | hunter | off (see validation/verifier.py)
     email_verification: str = "auto"

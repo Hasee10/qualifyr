@@ -65,6 +65,11 @@ def assess_quality(snapshot: SiteSnapshot, company_name: str | None = None, doma
     if company_name and not website_belongs_to(company_name, domain, snapshot):
         q.website_mismatch = True
         q.notes.append("website does not appear to belong to this company")
+    if snapshot.reachable:
+        from gtm_engine.enrichment.external_signals import site_quality
+        sq = site_quality(snapshot.raw_html)
+        q.copyright_year, q.mobile_friendly = sq.copyright_year, sq.mobile_friendly
+        q.notes.extend(sq.notes)
     return q
 
 

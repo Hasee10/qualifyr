@@ -4,7 +4,9 @@ clearly appears in the result domain or title. Wrong websites are worse than non
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 from urllib.parse import parse_qs, quote_plus, urlparse
 
@@ -18,6 +20,7 @@ from gtm_engine.validation.domains import canonical_domain, is_social_url
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://html.duckduckgo.com/html/?q={q}"
+BRAVE_URL = "https://api.search.brave.com/res/v1/web/search?q={q}&count=8&country=PK"
 
 # Aggregators/directories that rank for any business name but are never its own site.
 _DIRECTORY_DOMAINS = {
@@ -27,7 +30,8 @@ _DIRECTORY_DOMAINS = {
     "pakbiz.com", "businesslist.pk", "pk.locanto.asia", "findpk.com", "cybo.com", "hipages.com",
     "mapquest.com", "trustpilot.com", "crunchbase.com", "zoominfo.com", "dnb.com", "apollo.io",
     "youtube.com", "tiktok.com", "twitter.com", "x.com", "pinterest.com", "amazon.com",
-    "alibaba.com", "aliexpress.com", "justdial.com", "sulekha.com",
+    "alibaba.com", "aliexpress.com", "justdial.com", "sulekha.com", "businessbook.pk", "pakistanyp.com",
+    "yellowpages.com.pk", "pakbiz.com", "tradekey.com", "exportersindia.com", "kompass.com", "hotfrog.com",
 }
 
 _STOPWORDS = {"the", "and", "of", "pvt", "ltd", "limited", "private", "company", "co", "store",
@@ -98,16 +102,33 @@ class WebsiteFinder:
         self.fetcher = fetcher
         self.settings = settings
 
+    @property
+    def backend(self) -> str:
+        return "brave" if os.environ.get("GTM_BRAVE_API_KEY") else "duckduckgo"
+
+    async def _results(self, query: str) -> list[tuple[str, str]]:
+        key = os.environ.get("GTM_BRAVE_API_KEY")
+        if key:
+            result = await self.fetcher.get(BRAVE_URL.format(q=quote_plus(query)), delay=1.1, api=True,
+                                            headers={"X-Subscription-Token": key, "Accept": "application/json"})
+            if result.ok:
+                try:
+                    items = json.loads(result.text).get("web", {}).get("results", [])
+                    return [(i.get("url", ""), i.get("title", "")) for i in items]
+                except json.JSONDecodeError:
+                    pass
+            log.debug("brave search failed (%s %s); falling back to duckduckgo", result.status_code, result.error)
+        result = await self.fetcher.get(SEARCH_URL.format(q=quote_plus(query)), delay=self.settings.search_delay_s, api=True)
+        if not result.ok:
+            log.debug("search: failed for %r (%s)", query, result.error or result.status_code)
+            return []
+        return parse_results(result.text)
+
     async def find(self, company_name: str, city: str | None, country: str | None) -> str | None:
         if not self.settings.enable_search_fallback:
             return None
         query = " ".join(p for p in (company_name, city, country, "official website") if p)
-        url = SEARCH_URL.format(q=quote_plus(query))
-        result = await self.fetcher.get(url, delay=self.settings.search_delay_s, api=True)
-        if not result.ok:
-            log.debug("search: failed for %r (%s)", company_name, result.error or result.status_code)
-            return None
-        for href, title in parse_results(result.text)[:8]:
+        for href, title in (await self._results(query))[:8]:
             domain = canonical_domain(href)
             if not domain or is_social_url(href) or domain in _DIRECTORY_DOMAINS:
                 continue

@@ -57,6 +57,11 @@ overture_categories:
   - shopping_center
   - home_goods
 
+# Chamber directories: KCCI lists every active Karachi member with its representative
+# (usually the owner). Only used when Karachi is one of the cities.
+chamber_sources: [kcci]
+chamber_name_keywords: [garments, apparel, textile, mart, traders, enterprises]
+
 # OpenStreetMap tags to query in each city. "shop=*" means any shop.
 osm_categories:
   - shop=clothes

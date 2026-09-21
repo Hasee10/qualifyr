@@ -49,8 +49,16 @@ PHASE C — VOLUME WITHOUT SPAM  (~1/2 day)  [DONE 2026-09-21]
 * Ledger and reply sync become per-mailbox.
 
 
-PHASE D — SIGNALS & SOURCES  (1–2 days)
+PHASE D — SIGNALS & SOURCES  (1–2 days)  [DONE 2026-09-21]
 ---------------------------------------
+* Built: KCCI member directory (29.9k companies with representative names) as a
+  DiscoverySource; RDAP domain age (.com/.net…; no RDAP exists for .pk); GDELT news
+  mentions (best-effort, GDELT rate-limits aggressively); site-quality signals
+  (copyright year, mobile viewport, page weight) in company-quality scoring; Brave Search
+  API as website finder when GTM_BRAVE_API_KEY is set.
+* Not scrapeable today: LCCI directory (needs a session), ICCI (no public member list),
+  SECP public search (Cloudflare). SECP eServices name search is reachable and is a
+  candidate for Phase G intent work.
 * Site-quality signals (copyright year, mobile-friendly, page weight, HTTPS)
   into company-quality scoring.
 * Domain age via WHOIS/RDAP (free) as a "new business" signal.

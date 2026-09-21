@@ -4,6 +4,7 @@ campaign config; this module only decides how each dimension earns its points.""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from gtm_engine.config.schema import CampaignConfig
 from gtm_engine.models import (
@@ -76,6 +77,11 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
         cq += 2
     if q.has_public_email or q.has_phone:
         cq += 3
+    if q.reachable and q.mobile_friendly is False:
+        cq -= 1
+    if q.copyright_year and q.copyright_year <= datetime.now(timezone.utc).year - 3:
+        cq -= 1
+    cq = max(cq, 0)
     if not q.reachable:
         reasons.append("website unreachable")
     if q.notes:
@@ -118,6 +124,11 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     if ecommerce_tech:
         bs += 2
         reasons.append("ecommerce platform detected: " + ", ".join(ecommerce_tech))
+    if sig.news:
+        reasons.append(f"in the news: {sig.news[0]['title'][:60]} ({sig.news[0]['source']})")
+    if sig.domain_age_years is not None and sig.domain_age_years < 2:
+        bs += 1.5
+        reasons.append(f"young domain ({sig.domain_age_years} y): new or recently relaunched business")
     if sig.buying:
         reasons.append("buying signals: " + ", ".join(sig.buying))
     if sig.pain:
