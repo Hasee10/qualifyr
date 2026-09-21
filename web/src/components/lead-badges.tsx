@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import type { CompanyType, SequenceStatus } from "@/lib/api"
+import { api, type CompanyType, type SequenceStatus } from "@/lib/api"
 
 export function TypeBadge({ type }: { type: CompanyType }) {
   const variant = type === "BUYER" ? "default" : type === "VENDOR" ? "destructive" : "outline"
@@ -39,6 +39,25 @@ export function ReplyLabelBadge({ label }: { label: string | null }) {
   if (!label) return null
   const cfg = REPLY_LABEL[label] ?? { text: label, variant: "outline" as const }
   return <Badge variant={cfg.variant}>{cfg.text}</Badge>
+}
+
+export function ReviewButtons({ leadId, verdict, onChange }: { leadId: string; verdict: string | null; onChange: (v: string | null) => void }) {
+  const opts: [string, string][] = [["correct", "Correct"], ["wrong_company", "Wrong company"], ["wrong_person", "Wrong person"], ["wrong_email", "Wrong email"]]
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="mr-1 text-xs text-muted-foreground">Reviewer:</span>
+      {opts.map(([v, label]) => (
+        <button
+          key={v}
+          onClick={async () => { const next = verdict === v ? "clear" : v; const r = await api.review(leadId, next); onChange(r.review_verdict) }}
+          className={
+            "rounded-full border px-2 py-0.5 text-xs transition-colors " +
+            (verdict === v ? (v === "correct" ? "border-primary bg-primary text-primary-foreground" : "border-destructive bg-destructive/10 text-destructive") : "border-border text-muted-foreground hover:bg-muted")
+          }
+        >{label}</button>
+      ))}
+    </div>
+  )
 }
 
 export function EmailStatusBadge({ status }: { status: string }) {

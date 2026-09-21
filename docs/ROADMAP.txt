@@ -119,8 +119,14 @@ Engine M1–M9 done, web UI done, human approval required for every email.
 Say "start A" (or whichever phase) to begin.
 
 
-PHASE G — CEO ASKS (after A–F; see docs/DIRECTION.md)
+PHASE G — CEO ASKS (after A–F; see docs/DIRECTION.md)  [DONE 2026-09-21]
 -----------------------------------------------------
+* Built: intent/ppra.py (PPRA e-procurement, keyword-filtered + paginated, open tenders
+  only, org-name cleaning, tender = buyer evidence), intent/company_pages.py (RFQ phrases
+  and purchase-implying hiring roles from the company's own pages), llm/ (Ollama / Groq /
+  Gemini; requirement extraction, unlabelled-reply second opinion, hook drafting; every
+  output grounded in observed text or dropped; off by default), reviewer verdicts
+  (correct / wrong company / wrong person / wrong email) with accuracy on the dashboard.
 * Intent & requirement scraping: tenders/RFQs (PPRA, company procurement pages),
   job posts implying a purchase, "looking for supplier/vendor" posts, expansion
   announcements — each with source URL + date, feeding scoring and hooks.

@@ -18,6 +18,10 @@ from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
 from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
+from gtm_engine.intent.company_pages import intent_from_pages
+from gtm_engine.intent.ppra import PPRATenders
+from gtm_engine.llm.client import build_llm
+from gtm_engine.llm.tasks import draft_hook, extract_requirement
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
@@ -86,6 +90,13 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
         facts.append(f"runs on {tech[0]}")
     if "customer_service_load" in signals.pain:
         facts.append("takes orders over WhatsApp/DM")
+    for s in signals.intent[:1]:
+        if s.get("kind") == "tender":
+            facts.append(f"tendering: {s['text'][:70]}")
+        elif s.get("kind") == "hiring":
+            facts.append(f"hiring a {s['matched_terms'][0]}" if s.get("matched_terms") else "hiring")
+        elif s.get("kind") == "rfq":
+            facts.append("has a live request for quotations")
     if signals.news:
         facts.append(f"recently in the news ({signals.news[0].get('source', '')})")
     if signals.domain_age_years is not None and signals.domain_age_years < 2:
@@ -105,6 +116,10 @@ class Pipeline:
         self.website_finder = WebsiteFinder(fetcher, settings)
         self.news = NewsChecker(fetcher)
         self._news_budget = settings.news_max_companies_per_run
+        self.ppra = PPRATenders(fetcher, settings)
+        self.llm = build_llm(settings.llm_provider, settings.llm_model) if settings.enable_llm else None
+        if self.llm:
+            log.info("llm layer: %s", self.llm.name)
 
     async def _verifier(self) -> EmailVerifier:
         if self.verifier is None:
@@ -122,6 +137,8 @@ class Pipeline:
             sources.append(OSMDiscovery(self.fetcher, self.settings))
         if "kcci" in campaign.chamber_sources:
             sources.append(KCCIDirectory(self.fetcher, self.settings))
+        if "ppra" in campaign.intent_sources:
+            sources.append(self.ppra)
         if campaign.seed_csv:
             sources.append(CSVSeedDiscovery(campaign.seed_csv))
         if not sources:
@@ -179,6 +196,7 @@ class Pipeline:
             body_text=snapshot.all_text,
             category=company.category,
             site_reachable=snapshot.reachable,
+            tender_terms=(company.extra.get("intent") or {}).get("matched_terms") or None,
         )
         cls = classifier.classify(bundle)
         quality = assess_quality(snapshot, company.name, domain)
@@ -243,6 +261,26 @@ class Pipeline:
                 contact.candidate_email = found.email
                 contact.email_pattern = found.pattern
 
+        # Intent: tenders naming this organisation, plus RFQ/hiring phrases on its own pages.
+        if self.settings.enable_intent_signals and cls.company_type != CompanyType.VENDOR:
+            intents = []
+            if company.extra.get("intent"):
+                intents.append(dict(company.extra["intent"]))
+            if snapshot.reachable:
+                intents += [s.model_dump(mode="json") for s in intent_from_pages(snapshot, self.defaults)]
+            if company.source != "ppra" and ("ppra" in campaign.intent_sources or self.settings.enable_intent_signals):
+                try:
+                    intents += [s.model_dump(mode="json") for s in await self.ppra.signals_for(company.name, campaign)]
+                except Exception as exc:  # noqa: BLE001 - intent is additive, never blocking
+                    log.debug("ppra match failed for %s: %s", company.name, exc)
+            for sig in intents:
+                if sig.get("kind") == "tender" and self.llm and not sig.get("extracted"):
+                    sig["extracted"] = await extract_requirement(self.llm, sig.get("text", ""))
+            if intents:
+                signals.intent = intents
+                signals.buying.setdefault("intent", []).extend(f"{s['kind']}: {s['text'][:60]}" for s in intents[:2])
+                provenance["intent"] = "; ".join(f"{s['source']} {s['kind']}" + (f" ({s['source_url']})" if s.get('source_url') else "") for s in intents[:3])
+
         if cls.company_type == CompanyType.BUYER and snapshot.reachable:
             if self.settings.enable_domain_age and domain:
                 age = await domain_age(self.fetcher, domain)
@@ -292,6 +330,7 @@ class Pipeline:
             candidate_email=contact.candidate_email,
             news_mentions=signals.news,
             domain_age_years=signals.domain_age_years,
+            intent_signals=signals.intent,
             provenance=provenance,
             linkedin_or_public_profile_url=contact.profile_url,
             pain_signal=pain,
@@ -316,6 +355,7 @@ class Pipeline:
         previous = self.db.lead_for_company(campaign.campaign_id, key)
         if previous:
             lead.lead_id = previous.lead_id
+            lead.review_verdict, lead.reviewed_at = previous.review_verdict, previous.reviewed_at
             lead.sequence_status = previous.sequence_status if previous.sequence_status != SequenceStatus.NOT_QUEUED else lead.sequence_status
         self.db.save_lead(lead, run_id, key)
         return lead

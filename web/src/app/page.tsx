@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Users, ShieldCheck, Send, MessageSquareReply } from "lucide-react"
+import { Users, ShieldCheck, Send, MessageSquareReply, Target, Gauge } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -59,16 +59,18 @@ export default function DashboardPage() {
         <p className="text-muted-foreground">{campaign?.offer}</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {stats ? (
           <>
+            <StatCard title="Reviewer accuracy" value={stats.accuracy === null ? "—" : `${Math.round(stats.accuracy * 100)}%`} hint={stats.reviewed ? `${stats.correct}/${stats.reviewed} marked correct · target 80%` : "mark leads correct / wrong in the queue"} icon={Gauge} />
+            <StatCard title="With intent" value={stats.with_intent} hint="tenders, RFQs or hiring that imply a purchase" icon={Target} />
             <StatCard title="Companies processed" value={stats.leads} hint={`${stats.by_type.BUYER} buyers · ${stats.by_type.VENDOR} vendors · ${stats.by_type.UNKNOWN} unknown`} icon={Users} />
             <StatCard title="Qualified buyers" value={stats.qualified} hint={`score ≥ ${campaign?.min_score ?? 70}, ${stats.outreach_ready} with a validated email`} icon={ShieldCheck} />
             <StatCard title="Emails sent" value={stats.emails_sent} hint={`${stats.by_status.email_1_sent} in step 1 · ${stats.by_status.followup_1_sent} in step 2 · ${stats.by_status.followup_2_sent} done`} icon={Send} />
             <StatCard title="Replies" value={stats.replied} hint={`${stats.bounced} bounced · ${stats.by_status.unsubscribed} unsubscribed`} icon={MessageSquareReply} />
           </>
         ) : (
-          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28" />)
         )}
       </div>
 

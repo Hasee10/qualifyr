@@ -17,6 +17,7 @@ from gtm_engine.outreach.config import OutreachSettings
 from gtm_engine.outreach.gmail_oauth import AccessTokenProvider, credentials_from_env, xoauth2_string
 from gtm_engine.outreach.ledger import Ledger
 from gtm_engine.outreach.reply_classifier import classify, strip_quoted
+from gtm_engine.llm.tasks import classify_reply as classify_reply_llm
 from gtm_engine.outreach.sequencer import ACTIVE, stop_lead
 from gtm_engine.storage.database import Database
 
@@ -123,8 +124,18 @@ def _fetch_one(settings: OutreachSettings, box, since_days: int) -> list[Inbound
     return out
 
 
+def await_sync(coro):
+    """Run a coroutine from sync code (the sync path is synchronous by design)."""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    return loop.run_until_complete(coro) if not loop.is_running() else None
+
+
 def apply_inbound(db: Database, campaign_id: str, messages: list[InboundMessage],
-                  ledger: Ledger | None = None, now: datetime | None = None) -> SyncReport:
+                  ledger: Ledger | None = None, now: datetime | None = None, llm=None) -> SyncReport:
     """Match inbound mail to active leads by sender address or by thread id, classify the
     reply, and act: stop, suppress, postpone, or record a referral."""
     from gtm_engine.models import utcnow
@@ -168,6 +179,10 @@ def apply_inbound(db: Database, campaign_id: str, messages: list[InboundMessage]
             continue
 
         c = classify(m.subject, m.body, own_email=lead.mailbox, sender=m.from_addr, now=now)
+        if c.label == "reply" and llm is not None:
+            second = await_sync(classify_reply_llm(llm, m.subject, strip_quoted(m.body)))
+            if second and second != "reply":
+                c.label, c.matched = second, f"llm:{llm.name}"
         excerpt = " ".join(strip_quoted(m.body).split())[:300]
         lead.reply_label = c.label
         lead.reply_excerpt = excerpt or None

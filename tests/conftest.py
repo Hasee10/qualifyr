@@ -48,4 +48,5 @@ def settings(tmp_path: Path) -> EngineSettings:
         email_verification="off",
         enable_domain_age=False,
         enable_news_signals=False,
+        enable_intent_signals=False,
     )

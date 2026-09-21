@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, STEP_LABEL, type Draft, type Lead, type OutreachEvent, type Queue, type QueueItem, type SendReport } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
-import { ReplyLabelBadge, ScoreBadge, StatusBadge } from "@/components/lead-badges"
+import { ReplyLabelBadge, ReviewButtons, ScoreBadge, StatusBadge } from "@/components/lead-badges"
 import { cn } from "@/lib/utils"
 
 function DraftBadge({ status }: { status: Draft["status"] }) {
@@ -41,6 +41,8 @@ function Editor({ item, onChange }: { item: QueueItem; onChange: (d: Draft) => v
   const reset = () => run("reset", () => api.resetDraft(item.lead.lead_id, item.step))
   const locked = item.draft.status === "sent"
   const { lead } = item
+  const [verdict, setVerdict] = React.useState<string | null>(lead.review_verdict)
+  React.useEffect(() => { setVerdict(lead.review_verdict) }, [lead.lead_id, lead.review_verdict])
 
   return (
     <Card>
@@ -63,7 +65,11 @@ function Editor({ item, onChange }: { item: QueueItem; onChange: (d: Draft) => v
           <div><span className="font-medium text-foreground">Why a buyer:</span> {lead.buyer_fit_reason}</div>
           {lead.personalization_hook && <div><span className="font-medium text-foreground">Observed facts:</span> {lead.personalization_hook}</div>}
           {lead.website && <div><span className="font-medium text-foreground">Website:</span> <a className="underline" href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a></div>}
+          {lead.intent_signals && lead.intent_signals.length > 0 && (
+            <div><span className="font-medium text-foreground">Intent:</span> {lead.intent_signals.map((s) => `${s.kind}: ${s.text.slice(0, 80)}${s.deadline ? ` (closes ${s.deadline})` : ""}`).join(" · ")}</div>
+          )}
         </div>
+        <ReviewButtons leadId={lead.lead_id} verdict={verdict} onChange={setVerdict} />
         <div className="grid gap-1">
           <label className="text-xs text-muted-foreground">Subject</label>
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} disabled={locked} />

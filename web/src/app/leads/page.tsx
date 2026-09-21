@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, type Lead } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
-import { EmailStatusBadge, ReplyLabelBadge, ScoreBadge, StatusBadge, TypeBadge } from "@/components/lead-badges"
+import { EmailStatusBadge, ReplyLabelBadge, ReviewButtons, ScoreBadge, StatusBadge, TypeBadge } from "@/components/lead-badges"
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === "") return null
@@ -52,6 +52,20 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <StatusBadge status={lead.sequence_status} />
               <ReplyLabelBadge label={lead.reply_label} />
             </div>
+            <ReviewButtons leadId={lead.lead_id} verdict={lead.review_verdict} onChange={(v) => setLead({ ...lead, review_verdict: v })} />
+            {lead.intent_signals && lead.intent_signals.length > 0 && (
+              <section>
+                <h3 className="mb-1 text-sm font-semibold">Intent & requirements</h3>
+                {lead.intent_signals.map((s, i) => (
+                  <div key={i} className="rounded-lg border p-2 text-sm mb-2">
+                    <div className="flex flex-wrap items-center gap-2"><Badge variant="default">{s.kind}</Badge><span className="text-xs text-muted-foreground">{s.source}{s.date ? ` · ${s.date}` : ""}{s.deadline ? ` · closes ${s.deadline}` : ""}</span></div>
+                    <div className="mt-1">{s.text}</div>
+                    {s.extracted && <div className="mt-1 text-xs text-muted-foreground">{Object.entries(s.extracted).filter(([k]) => k !== "by").map(([k, v]) => `${k}: ${v}`).join(" · ")} <em>({s.extracted.by})</em></div>}
+                    {s.source_url && <a className="text-xs underline" href={s.source_url} target="_blank" rel="noreferrer">source</a>}
+                  </div>
+                ))}
+              </section>
+            )}
             {lead.reply_excerpt && (
               <section>
                 <h3 className="mb-1 text-sm font-semibold">Their reply</h3>

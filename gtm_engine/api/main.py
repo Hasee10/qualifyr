@@ -164,7 +164,14 @@ def stats(campaign_id: str) -> dict:
         s = l.total_score
         bands["0-49" if s < 50 else "50-69" if s < 70 else "70-79" if s < 80 else "80-100"] += 1
     sent = sum(v for k, v in by_status.items() if k.endswith("_sent") or k in ("replied", "bounced", "unsubscribed"))
+    reviewed = [l for l in leads if l.review_verdict]
+    correct = sum(1 for l in reviewed if l.review_verdict == "correct")
+    with_intent = sum(1 for l in leads if l.intent_signals)
     return {
+        "reviewed": len(reviewed), "correct": correct,
+        "accuracy": round(correct / len(reviewed), 3) if reviewed else None,
+        "verdicts": {v: sum(1 for l in reviewed if l.review_verdict == v) for v in ("correct", "wrong_company", "wrong_person", "wrong_email")},
+        "with_intent": with_intent,
         "campaign_id": campaign_id, "leads": len(leads), "by_type": by_type, "by_status": by_status,
         "by_priority": by_priority, "score_bands": bands,
         "qualified": sum(1 for l in leads if l.company_type == CompanyType.BUYER and l.total_score >= campaign.min_score),
@@ -334,6 +341,30 @@ def export_to_sheets(campaign_id: str, min_score: int = 70, buyers_only: bool = 
         return sheets_export.export_leads(rows, campaign_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"sheets export failed: {exc}")
+
+
+class ReviewBody(BaseModel):
+    verdict: str  # correct | wrong_company | wrong_person | wrong_email | clear
+
+
+@app.post("/leads/{lead_id}/review")
+def review_lead(lead_id: str, body: ReviewBody) -> dict:
+    """The success metric the CEO asked for: a human says whether this lead is right."""
+    if body.verdict not in ("correct", "wrong_company", "wrong_person", "wrong_email", "clear"):
+        raise HTTPException(422, "verdict must be correct | wrong_company | wrong_person | wrong_email | clear")
+    db = _db()
+    l = db.get_lead(lead_id)
+    if not l:
+        db.close()
+        raise HTTPException(404, "lead not found")
+    l.review_verdict = None if body.verdict == "clear" else body.verdict
+    l.reviewed_at = None if body.verdict == "clear" else datetime.now(timezone.utc)
+    if body.verdict == "wrong_company":
+        l.outreach_ready = False
+    db.update_lead(l)
+    db.add_event(lead_id, "reviewed", detail=body.verdict)
+    db.close()
+    return {"ok": True, "review_verdict": l.review_verdict}
 
 
 class ReferralAction(BaseModel):

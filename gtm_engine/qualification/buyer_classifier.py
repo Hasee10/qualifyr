@@ -26,6 +26,7 @@ class TextBundle:
     body_text: str
     category: str | None = None  # discovery category, e.g. "shop=clothes"
     site_reachable: bool = True  # False -> only the discovery record is available
+    tender_terms: list[str] | None = None  # campaign terms matched in a live tender (PPRA)
 
     @property
     def identity(self) -> str:
@@ -102,6 +103,13 @@ class BuyerClassifier:
             reasons.append("buyer terms in page text: " + ", ".join(buyer_body[:6]))
 
         # --- decision ---------------------------------------------------------
+        # A live public tender for what the campaign sells is buyer evidence by definition:
+        # a stated requirement with a deadline from the procuring organisation itself.
+        if bundle.tender_terms and not vendor_name:
+            reasons.insert(0, "live tender matches campaign terms: " + ", ".join(bundle.tender_terms))
+            return Classification(company_type=CompanyType.BUYER, confidence=0.9, reasons=reasons,
+                                  buyer_hits=list(bundle.tender_terms) + buyer_id + buyer_body, vendor_hits=vendor_body + phrase_hits)
+
         # The name says what the company is. "Retail Growth Consultancy" serves retailers;
         # it is not one, however often "retail" appears on its pages.
         if vendor_name:

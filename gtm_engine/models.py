@@ -112,6 +112,7 @@ class Signals(BaseModel):
     pain: dict[str, list[str]] = Field(default_factory=dict)
     technologies: list[str] = Field(default_factory=list)
     news: list[dict] = Field(default_factory=list)          # [{title,url,date,source}]
+    intent: list[dict] = Field(default_factory=list)        # IntentSignal dicts
     domain_age_years: float | None = None
     domain_age_note: str | None = None
 
@@ -186,6 +187,9 @@ class Lead(BaseModel):
     candidate_email: str | None = None
     news_mentions: list[dict] = Field(default_factory=list)
     domain_age_years: float | None = None
+    intent_signals: list[dict] = Field(default_factory=list)   # IntentSignal dicts
+    review_verdict: str | None = None       # correct | wrong_company | wrong_person | wrong_email (human)
+    reviewed_at: datetime | None = None
     # Which source produced each important field: {"contact_email": "contact page mailto", ...}
     provenance: dict[str, str] = Field(default_factory=dict)
     # Outreach state (not in the CSV schema, kept in the DB and the ledger)

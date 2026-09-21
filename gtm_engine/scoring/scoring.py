@@ -124,6 +124,10 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     if ecommerce_tech:
         bs += 2
         reasons.append("ecommerce platform detected: " + ", ".join(ecommerce_tech))
+    if sig.intent:
+        kinds = {s.get("kind") for s in sig.intent}
+        bs += 4 if "tender" in kinds or "rfq" in kinds else 2
+        reasons.append("intent: " + "; ".join(f"{s.get('kind')} – {s.get('text', '')[:50]}" for s in sig.intent[:2]))
     if sig.news:
         reasons.append(f"in the news: {sig.news[0]['title'][:60]} ({sig.news[0]['source']})")
     if sig.domain_age_years is not None and sig.domain_age_years < 2:

@@ -40,6 +40,8 @@ export interface Lead {
   phone_type: string | null
   candidate_email: string | null
   news_mentions: { title: string; url: string; date: string; source: string }[]
+  intent_signals: { kind: string; source: string; source_url: string | null; text: string; organization: string | null; date: string | null; deadline: string | null; matched_terms: string[]; extracted: Record<string, string> | null }[]
+  review_verdict: string | null
   reply_label: string | null
   reply_excerpt: string | null
   referred_contact: { name: string | null; email: string; status: string } | null
@@ -114,6 +116,11 @@ export interface Stats {
   emails_sent: number
   replied: number
   bounced: number
+  reviewed: number
+  correct: number
+  accuracy: number | null
+  verdicts: Record<string, number>
+  with_intent: number
 }
 
 export interface QueueItem { lead: Lead; step: Step; draft: Draft }
@@ -207,6 +214,8 @@ export const api = {
     request<{ ok: boolean; file: string }>(`/campaigns/${id}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
   sheetsStatus: () => request<{ configured: boolean; spreadsheet_id: string | null }>("/sheets/status"),
   exportSheets: (id: string) => request<{ rows: number; tab: string; url: string }>(`/campaigns/${id}/export/sheets`, { method: "POST" }),
+  review: (leadId: string, verdict: string) =>
+    request<{ ok: boolean; review_verdict: string | null }>(`/leads/${leadId}/review`, { method: "POST", body: JSON.stringify({ verdict }) }),
   referral: (leadId: string, accept: boolean) =>
     request<{ ok: boolean }>(`/leads/${leadId}/referral`, { method: "POST", body: JSON.stringify({ accept }) }),
   sequence: (id: string) => request<Lead[]>(`/campaigns/${id}/outreach/sequence`),

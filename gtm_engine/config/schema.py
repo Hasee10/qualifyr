@@ -67,6 +67,10 @@ class CampaignConfig(BaseModel):
     # industry/buyer terms plus these extra name keywords (directories carry no sector field).
     chamber_sources: list[str] = Field(default_factory=list)
     chamber_name_keywords: list[str] = Field(default_factory=list)
+    # Intent sources: "ppra" turns organisations tendering for the offer into leads.
+    intent_sources: list[str] = Field(default_factory=list)
+    # Terms that describe what we sell, matched against tender text (in addition to industries).
+    intent_keywords: list[str] = Field(default_factory=list)
     min_score: int = 70
     max_companies: int = 150
     max_pages_per_site: int = 6
@@ -86,7 +90,7 @@ class CampaignConfig(BaseModel):
 
     @field_validator(
         "target_industries", "target_roles", "buyer_keywords", "negative_keywords",
-        "allowed_vendor_keywords", "osm_categories", "overture_categories", "chamber_sources", "chamber_name_keywords",
+        "allowed_vendor_keywords", "osm_categories", "overture_categories", "chamber_sources", "chamber_name_keywords", "intent_sources", "intent_keywords",
     )
     @classmethod
     def _lower(cls, values: list[str]) -> list[str]:
@@ -108,6 +112,8 @@ class DefaultRules(BaseModel):
     pain_signal_keywords: dict[str, list[str]] = Field(default_factory=dict)
     technology_markers: dict[str, list[str]] = Field(default_factory=dict)
     geography_tiers: dict[str, list[str]] = Field(default_factory=dict)
+    intent_rfq_phrases: list[str] = Field(default_factory=list)
+    intent_hiring_roles: list[str] = Field(default_factory=list)
 
 
 class EngineSettings(BaseModel):
@@ -143,4 +149,9 @@ class EngineSettings(BaseModel):
     reacher_url: str | None = None
     # Try first.last@ style candidates for a named decision-maker when only a generic mailbox is public.
     discover_decision_maker_email: bool = True
+    # Optional LLM layer (docs/DIRECTION.md). Off by default; deterministic paths always run.
+    enable_llm: bool = False
+    llm_provider: str = "auto"      # auto | ollama | groq | gemini
+    llm_model: str | None = None
+    enable_intent_signals: bool = True
     log_level: str = "INFO"

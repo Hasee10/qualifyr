@@ -102,6 +102,8 @@ gtm_engine/
   storage/        database.py (SQLite)
   outreach/       templates, sequencer (queue + state machine), sender (Gmail/dry-run),
                   reply_state (IMAP), ledger (durable send log committed to leads/)
+  intent/         ppra.py (live tenders), company_pages.py (RFQ / hiring intent)
+  llm/            optional grounded LLM layer (Ollama / Groq / Gemini), off by default
   api/            FastAPI backend for the web UI
 web/              Next.js 16 + shadcn UI (see web/README.md)
   pipeline.py     orchestration
@@ -125,5 +127,5 @@ data/             sqlite db + exports (gitignored)
 | M7 Scoring with reasons | done |
 | M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
 | M9 Outreach (Gmail SMTP/OAuth2, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
-| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation · Phase D signals & sources (KCCI directory, domain age, news, site quality, Brave) · Phase E reply intelligence · Phase F sharing & polish (Sheets, landing page, Settings UI) | done |
+| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation · Phase D signals & sources (KCCI directory, domain age, news, site quality, Brave) · Phase E reply intelligence · Phase F sharing & polish (Sheets, landing page, Settings UI) · Phase G intent scraping, optional LLM layer, reviewer accuracy | done |
 | M10 Hardening | in progress |
