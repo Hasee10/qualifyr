@@ -83,8 +83,13 @@ PHASE E — REPLY INTELLIGENCE  (~1/2 day)  [DONE 2026-09-21]
 * Tags visible in Outreach -> Activity and on the lead.
 
 
-PHASE F — SHARING & POLISH  (~1/2 day)
+PHASE F — SHARING & POLISH  (~1/2 day)  [DONE 2026-09-21]
 --------------------------------------
+* Built: export/sheets.py (service account, GTM_SHEETS_* secrets, `gtm sheets`, UI button,
+  auto-mirror in the gather workflow when configured); landing page site/index.html on
+  GitHub Pages (https://hasee10.github.io/qualifyr/, {landing_url} template placeholder);
+  Settings page: campaign YAML editor with validation + new-campaign template, mailbox
+  table, suppression add/remove, Sheets export.
 * One-way Google Sheets export of qualified leads (free tier, Sheets API) for
   anyone who won't open the UI.
 * Static demo / landing page on GitHub Pages that emails can link to.

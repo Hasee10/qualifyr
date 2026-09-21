@@ -126,6 +126,8 @@ export interface Queue {
   mailboxes: MailboxState[]
 }
 
+export interface Suppression { value: string; kind: string; reason: string | null; created_at: string }
+
 export interface MailboxState {
   address: string
   auth_mode: string
@@ -193,6 +195,18 @@ export const api = {
     request<SendReport>(`/campaigns/${id}/outreach/send`, { method: "POST", body: JSON.stringify(body) }),
   sync: (id: string) => request<SendReport["sync"] & { details: string[] }>(`/campaigns/${id}/outreach/sync`, { method: "POST" }),
   activity: (id: string) => request<OutreachEvent[]>(`/campaigns/${id}/outreach/activity`),
+  suppressions: () => request<Suppression[]>("/suppressions"),
+  addSuppression: (value: string, reason?: string) =>
+    request<{ ok: boolean }>("/suppressions", { method: "POST", body: JSON.stringify({ value, reason }) }),
+  removeSuppression: (value: string) => request<{ ok: boolean }>(`/suppressions/${encodeURIComponent(value)}`, { method: "DELETE" }),
+  mailboxes: (campaignId?: string) => request<MailboxState[]>(`/mailboxes${campaignId ? `?campaign_id=${campaignId}` : ""}`),
+  campaignYaml: (id: string) => request<{ campaign_id: string; file: string; yaml: string }>(`/campaigns/${id}/yaml`),
+  validateCampaign: (yaml: string) =>
+    request<{ ok: boolean; error?: string; campaign_id: string; name: string; sources: string[] }>("/campaigns/validate", { method: "POST", body: JSON.stringify({ yaml }) }),
+  saveCampaignYaml: (id: string, yaml: string) =>
+    request<{ ok: boolean; file: string }>(`/campaigns/${id}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
+  sheetsStatus: () => request<{ configured: boolean; spreadsheet_id: string | null }>("/sheets/status"),
+  exportSheets: (id: string) => request<{ rows: number; tab: string; url: string }>(`/campaigns/${id}/export/sheets`, { method: "POST" }),
   referral: (leadId: string, accept: boolean) =>
     request<{ ok: boolean }>(`/leads/${leadId}/referral`, { method: "POST", body: JSON.stringify({ accept }) }),
   sequence: (id: string) => request<Lead[]>(`/campaigns/${id}/outreach/sequence`),

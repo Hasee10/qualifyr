@@ -74,6 +74,7 @@ def build_context(lead: Lead, campaign: CampaignConfig, settings: OutreachSettin
         "sender_name": settings.sender_name,
         "personalization_hook": lead.personalization_hook or "",
         "hook_sentence": hook_sentence(lead.personalization_hook),
+        "landing_url": settings.landing_url or "",
     }
     return ctx, missing
 

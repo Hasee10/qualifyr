@@ -16,6 +16,7 @@ OUTREACH_DIR = CONFIG_DIR / "outreach"
 class OutreachSettings(BaseModel):
     sender_name: str = "Your Name"
     reply_to: str | None = None
+    landing_url: str | None = None   # optional {landing_url} placeholder for templates
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     imap_host: str = "imap.gmail.com"

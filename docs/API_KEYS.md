@@ -16,7 +16,7 @@ the repo. **Status** is updated as keys are added.
 | `GTM_BRAVE_API_KEY` | Brave Search API | Website finder (replaces DuckDuckGo HTML scraping) | 2,000 queries/mo | optional | ⏳ supported, not set |
 | `GTM_GOOGLE_CSE_KEY` / `GTM_GOOGLE_CSE_ID` | Google Custom Search JSON | Website finder fallback | 100 queries/day | optional | ⏳ planned (Phase D) |
 | `GTM_GROQ_API_KEY` or `GTM_GEMINI_API_KEY` | Groq / Google Gemini | Hosted LLM fallback for Phase G (Ollama locally needs no key) | free, rate-limited | optional | ⏳ planned (Phase G) |
-| `GTM_SHEETS_CREDENTIALS_JSON` | Google Sheets API (service account) | One-way export of qualified leads | free | optional | ⏳ planned (Phase F) |
+| `GTM_SHEETS_CREDENTIALS_JSON` / `GTM_SHEETS_SPREADSHEET_ID` | Google Sheets API (service account) | One-way mirror of qualified leads (`gtm sheets`, Settings → Google Sheets, auto in gather workflow) | free | optional | ⏳ supported, not set |
 
 ## Keyless services in use
 

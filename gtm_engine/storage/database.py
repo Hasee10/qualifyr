@@ -311,6 +311,14 @@ class Database:
     def drafts_by_status(self, status: str) -> list[dict]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM drafts WHERE status = ? ORDER BY created_at", (status,))]
 
+    def list_suppressions(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM suppressions ORDER BY created_at DESC")]
+
+    def remove_suppression(self, value: str) -> bool:
+        cur = self.conn.execute("DELETE FROM suppressions WHERE value = ?", (value.lower().strip(),))
+        self.conn.commit()
+        return cur.rowcount > 0
+
     # -- outreach events -----------------------------------------------------
 
     def add_event(self, lead_id: str, event_type: str, step: str | None = None,

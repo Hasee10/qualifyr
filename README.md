@@ -35,7 +35,7 @@ Other commands:
 cd web && npm install && npm run dev                              # UI  :3000
 ```
 
-Four pages: **Dashboard** (counts, score distribution, top buyers), **Campaigns** (run discovery
+Five pages: **Settings** (campaign YAML editor, mailboxes, suppressions, Sheets export), **Dashboard** (counts, score distribution, top buyers), **Campaigns** (run discovery
 with live progress, download CSV), **Leads** (filter by type/score, open a lead to see every
 reason and its activity, suppress), **Outreach** (the approval queue: each due email is rendered,
 you edit subject/body, approve or reject, then send; plus sequence and activity views).
@@ -125,5 +125,5 @@ data/             sqlite db + exports (gitignored)
 | M7 Scoring with reasons | done |
 | M8 Web UI (dashboard, campaigns, leads, outreach approval queue) | done — `web/` |
 | M9 Outreach (Gmail SMTP/OAuth2, 3-step sequence, reply/bounce/STOP sync, ledger) | done |
-| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation · Phase D signals & sources (KCCI directory, domain age, news, site quality, Brave) · Phase E reply intelligence | done |
+| Phase A sender protection · Phase B contacts (verifier, phone type, provenance, decision-maker email discovery) · Phase C multi-mailbox rotation · Phase D signals & sources (KCCI directory, domain age, news, site quality, Brave) · Phase E reply intelligence · Phase F sharing & polish (Sheets, landing page, Settings UI) | done |
 | M10 Hardening | in progress |

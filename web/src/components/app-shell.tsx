@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Users, Send, Radar, Moon, Sun, Menu } from "lucide-react"
+import { LayoutDashboard, Users, Send, Radar, Moon, Sun, Menu, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ const nav = [
   { icon: Radar, label: "Campaigns", href: "/campaigns" },
   { icon: Users, label: "Leads", href: "/leads" },
   { icon: Send, label: "Outreach", href: "/outreach" },
+  { icon: Settings, label: "Settings", href: "/settings" },
 ]
 
 function SidebarContent() {

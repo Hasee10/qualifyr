@@ -19,6 +19,7 @@ from gtm_engine import __version__
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
 from gtm_engine.config.loader import CONFIG_DIR
 from gtm_engine.export.csv_export import export_path, write_csv
+from gtm_engine.export import sheets as sheets_export
 from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
 from gtm_engine.outreach.cli import ledger_path
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
@@ -223,6 +224,116 @@ def suppress(lead_id: str, req: SuppressRequest) -> dict:
     stop_lead(db, l, SequenceStatus.SUPPRESSED, req.reason or "suppressed from UI", Ledger(ledger_path(l.campaign_id)))
     db.close()
     return {"ok": True}
+
+
+# -- settings: suppressions, mailboxes, campaign YAML, sheets -----------------------------
+
+@app.get("/suppressions")
+def list_suppressions() -> list[dict]:
+    db = _db()
+    rows = db.list_suppressions()
+    db.close()
+    return rows
+
+
+class SuppressionCreate(BaseModel):
+    value: str
+    reason: str | None = None
+
+
+@app.post("/suppressions")
+def add_suppression(req: SuppressionCreate) -> dict:
+    value = req.value.strip().lower()
+    if not value:
+        raise HTTPException(422, "empty value")
+    db = _db()
+    db.add_suppression(value, "email" if "@" in value else "domain", req.reason or "added from UI")
+    db.close()
+    return {"ok": True, "value": value}
+
+
+@app.delete("/suppressions/{value}")
+def delete_suppression(value: str) -> dict:
+    db = _db()
+    removed = db.remove_suppression(value)
+    db.close()
+    if not removed:
+        raise HTTPException(404, "not suppressed")
+    return {"ok": True}
+
+
+@app.get("/mailboxes")
+def mailboxes(campaign_id: str | None = None) -> list[dict]:
+    osettings = load_outreach_settings()
+    boxes = load_mailboxes()
+    if not boxes:
+        return []
+    cid = campaign_id or next(iter(_campaign_files()), None)
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    db = _db()
+    states = MailboxPool(boxes, osettings, _settings.db_path.parent / "outbox").states(
+        db, cid or "", Ledger(ledger_path(cid)) if cid else Ledger(_settings.db_path.parent / "no-campaign.json"), day)
+    db.close()
+    return [st.as_dict() for st in states.values()]
+
+
+@app.get("/campaigns/{campaign_id}/yaml")
+def campaign_yaml(campaign_id: str) -> dict:
+    path = _campaign_files().get(campaign_id)
+    if not path:
+        raise HTTPException(404, "campaign file not found")
+    return {"campaign_id": campaign_id, "file": path.name, "yaml": path.read_text(encoding="utf-8")}
+
+
+class YamlBody(BaseModel):
+    yaml: str
+
+
+@app.post("/campaigns/validate")
+def validate_campaign_yaml(body: YamlBody) -> dict:
+    import yaml as _yaml
+    try:
+        data = _yaml.safe_load(body.yaml) or {}
+        cfg = CampaignConfig.model_validate(data)
+    except Exception as exc:  # noqa: BLE001 - surface the validator's message verbatim
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "campaign_id": cfg.campaign_id, "name": cfg.name,
+            "sources": [s for s, on in (("overture", bool(cfg.overture_categories)), ("osm", bool(cfg.osm_categories)),
+                                        ("kcci", "kcci" in cfg.chamber_sources), ("seed_csv", bool(cfg.seed_csv))) if on]}
+
+
+@app.put("/campaigns/{campaign_id}/yaml")
+def save_campaign_yaml(campaign_id: str, body: YamlBody) -> dict:
+    """Validate, then write. A new campaign_id creates config/campaigns/<id>.yaml."""
+    import yaml as _yaml
+    try:
+        cfg = CampaignConfig.model_validate(_yaml.safe_load(body.yaml) or {})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(422, str(exc))
+    if cfg.campaign_id != campaign_id:
+        raise HTTPException(422, f"campaign_id in YAML ({cfg.campaign_id}) must match the URL ({campaign_id})")
+    path = _campaign_files().get(campaign_id) or (CAMPAIGN_DIR / f"{campaign_id}.yaml")
+    path.write_text(body.yaml, encoding="utf-8")
+    return {"ok": True, "file": path.name}
+
+
+@app.get("/sheets/status")
+def sheets_status() -> dict:
+    return {"configured": sheets_export.configured(),
+            "spreadsheet_id": (__import__("os").environ.get("GTM_SHEETS_SPREADSHEET_ID") or None)}
+
+
+@app.post("/campaigns/{campaign_id}/export/sheets")
+def export_to_sheets(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> dict:
+    if not sheets_export.configured():
+        raise HTTPException(400, "Google Sheets not configured (GTM_SHEETS_CREDENTIALS_JSON, GTM_SHEETS_SPREADSHEET_ID)")
+    db = _db()
+    rows = db.list_leads(campaign_id, min_score=min_score, company_type=CompanyType.BUYER.value if buyers_only else None)
+    db.close()
+    try:
+        return sheets_export.export_leads(rows, campaign_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"sheets export failed: {exc}")
 
 
 class ReferralAction(BaseModel):

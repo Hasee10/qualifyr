@@ -5,6 +5,7 @@
 #   {first_name} {contact_name} {company_name} {city} {offer} {sender_name}
 #   {personalization_hook}  e.g. "sells online; operates multiple branches; runs on shopify"
 #   {hook_sentence}         the hook rewritten as one natural sentence, or empty
+#   {landing_url}           the public page (config/outreach/settings.yaml: landing_url)
 #
 fallbacks:
   first_name: "there"

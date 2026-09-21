@@ -73,6 +73,18 @@ def _export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sheets(args: argparse.Namespace) -> int:
+    from gtm_engine.export import sheets as sheets_export
+    settings = load_settings()
+    db = Database(settings.db_path)
+    leads = db.list_leads(args.campaign_id, min_score=None if args.all else args.min_score,
+                          company_type=None if args.all else CompanyType.BUYER.value)
+    db.close()
+    info = sheets_export.export_leads(leads, args.campaign_id, tab=args.tab)
+    print(f"wrote {info['rows']} leads -> {info['url']} (tab {info['tab']})")
+    return 0
+
+
 def _suppress(args: argparse.Namespace) -> int:
     settings = load_settings()
     db = Database(settings.db_path)
@@ -109,6 +121,13 @@ def build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--all", action="store_true", help="include vendors/unknown/rejected")
     exp.add_argument("--out", default=None)
     exp.set_defaults(func=_export)
+
+    sh = sub.add_parser("sheets", help="mirror leads to the configured Google Sheet")
+    sh.add_argument("campaign_id")
+    sh.add_argument("--min-score", type=int, default=70)
+    sh.add_argument("--all", action="store_true")
+    sh.add_argument("--tab", default=None)
+    sh.set_defaults(func=_sheets)
 
     sup = sub.add_parser("suppress", help="never contact this email or domain again")
     sup.add_argument("value")
