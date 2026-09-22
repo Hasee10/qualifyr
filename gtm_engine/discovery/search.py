@@ -20,7 +20,9 @@ from gtm_engine.validation.domains import canonical_domain, is_social_url
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://html.duckduckgo.com/html/?q={q}"
-BRAVE_URL = "https://api.search.brave.com/res/v1/web/search?q={q}&count=8&country=PK"
+# Note: the free Brave plan rejects the `country` parameter (422), so the query carries
+# the country instead of filtering by it.
+BRAVE_URL = "https://api.search.brave.com/res/v1/web/search?q={q}&count=8"
 
 # Aggregators/directories that rank for any business name but are never its own site.
 _DIRECTORY_DOMAINS = {

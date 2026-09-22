@@ -8,6 +8,28 @@ import yaml
 from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_dotenv(path: Path | None = None) -> int:
+    """Read KEY=VALUE lines from .env into the environment for local runs. Values already
+    set in the real environment win, so CI secrets are never overridden by a stale file."""
+    path = path or PROJECT_ROOT / ".env"
+    if not path.exists():
+        return 0
+    loaded = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
+
+
+load_dotenv()
 CONFIG_DIR = PROJECT_ROOT / "config"
 DEFAULTS_DIR = CONFIG_DIR / "defaults"
 

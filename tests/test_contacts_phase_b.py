@@ -187,3 +187,27 @@ async def test_pipeline_keeps_generic_when_unconfirmed(campaign, settings, defau
     assert lead.candidate_email == "ahmed.raza@zarafabrics.pk"   # shown to the reviewer, never sent
     assert "no verifier available" in lead.provenance["email_discovery"]
     db.close()
+
+
+async def test_hunter_repolls_while_the_check_is_still_running():
+    """Hunter answers 222 while its SMTP probe runs; one re-poll turns that into a verdict."""
+    from gtm_engine.validation.verifier import HunterVerifier
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url)
+        if len(calls) == 1:
+            return httpx.Response(222, json={"data": {}})
+        return httpx.Response(200, json={"data": {"result": "deliverable", "score": 98, "accept_all": False}})
+
+    v = HunterVerifier("k", timeout_s=5)
+    v._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    import gtm_engine.validation.verifier as mod
+    original = mod.asyncio.sleep
+    mod.asyncio.sleep = lambda s: original(0)
+    try:
+        r = await v.verify("a@b.pk")
+    finally:
+        mod.asyncio.sleep = original
+    assert r.status.value == "deliverable" and len(calls) == 2
+    assert v.used == 1          # a re-poll must not cost a second credit

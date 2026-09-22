@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -50,3 +51,11 @@ def settings(tmp_path: Path) -> EngineSettings:
         enable_news_signals=False,
         enable_intent_signals=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def isolate_credentials(monkeypatch):
+    """Tests must never see a developer's real .env: the engine loads one automatically, and
+    a live GTM_BRAVE_API_KEY (or any other) would silently change which code path runs."""
+    for key in [k for k in os.environ if k.startswith(("GTM_", "OLLAMA_"))]:
+        monkeypatch.delenv(key, raising=False)

@@ -45,7 +45,8 @@ async def classify_reply(llm: LLM | None, subject: str, body: str) -> str | None
               + ", ".join(REPLY_LABELS) + ". Output nothing else.")
     user = f"Subject: {subject}\n\nReply:\n\"\"\"\n{body[:2000]}\n\"\"\""
     try:
-        raw = (await llm.complete(system, user, max_tokens=10)).strip().lower()
+        # Reasoning models spend tokens before answering, so the ceiling must leave room.
+        raw = (await llm.complete(system, user, max_tokens=256)).strip().lower()
     except Exception as exc:  # noqa: BLE001
         log.debug("llm classify failed: %s", exc)
         return None
@@ -62,7 +63,11 @@ async def draft_hook(llm: LLM | None, company: str, facts: list[str]) -> str | N
     system = f"You write one short, plain sentence for a sales email opener. {_NO_OUTSIDE_FACTS} No flattery, no claims."
     user = f"Company: {company}\nObserved facts:\n- " + "\n- ".join(facts) + "\n\nWrite ONE sentence (max 25 words) that mentions these facts."
     try:
-        sentence = (await llm.complete(system, user, max_tokens=60)).strip().splitlines()[0].strip('" ')
+        out = (await llm.complete(system, user, max_tokens=256)).strip()
+        lines = [l.strip('" ') for l in out.splitlines() if l.strip()]
+        if not lines:
+            return None
+        sentence = lines[-1]
     except Exception as exc:  # noqa: BLE001
         log.debug("llm hook failed: %s", exc)
         return None

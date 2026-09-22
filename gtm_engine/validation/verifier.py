@@ -184,7 +184,9 @@ class ReacherVerifier:
 class HunterVerifier:
     name = "hunter"
 
-    def __init__(self, api_key: str, timeout_s: float = 20.0, monthly_budget: int = 50):
+    def __init__(self, api_key: str, timeout_s: float = 75.0, monthly_budget: int = 100):
+        # Hunter performs a real SMTP check, which regularly takes 30-60 s; a short timeout
+        # burns a quota credit and returns nothing.
         self.api_key = api_key
         self._client = httpx.AsyncClient(timeout=timeout_s)
         self.used = 0
@@ -200,6 +202,15 @@ class HunterVerifier:
         except httpx.HTTPError as exc:
             return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter error: {type(exc).__name__}")
         self.used += 1
+        # 202/222: Hunter accepted the job but the SMTP check is still running. One short
+        # re-poll costs no extra quota and turns most of these into a real answer.
+        if r.status_code in (202, 222):
+            await asyncio.sleep(6)
+            try:
+                r = await self._client.get("https://api.hunter.io/v2/email-verifier",
+                                           params={"email": email, "api_key": self.api_key})
+            except httpx.HTTPError as exc:
+                return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter retry error: {type(exc).__name__}")
         if r.status_code != 200:
             return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter {r.status_code}")
         d = r.json().get("data", {})

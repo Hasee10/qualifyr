@@ -51,7 +51,7 @@ class OllamaLLM:
 @dataclass
 class GroqLLM:
     api_key: str
-    model: str = "llama-3.1-8b-instant"
+    model: str = "openai/gpt-oss-20b"      # verified available on the free tier
     name: str = "groq"
 
     async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
@@ -64,20 +64,37 @@ class GroqLLM:
             return r.json()["choices"][0]["message"]["content"]
 
 
+# Google retires model ids often and free-tier previews return 503 under load, so the
+# provider walks a short list instead of failing on the first name.
+GEMINI_MODELS = ("gemini-3-flash-preview", "gemini-flash-latest", "gemini-flash-lite-latest")
+
+
 @dataclass
 class GeminiLLM:
     api_key: str
-    model: str = "gemini-2.0-flash"
+    model: str | None = None
     name: str = "gemini"
 
     async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}",
-                             json={"systemInstruction": {"parts": [{"text": system}]},
-                                   "contents": [{"parts": [{"text": user}]}],
-                                   "generationConfig": {"temperature": 0, "maxOutputTokens": max_tokens}})
-            r.raise_for_status()
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        models = [self.model] if self.model else list(GEMINI_MODELS)
+        last: Exception | None = None
+        async with httpx.AsyncClient(timeout=90) as c:
+            for model in models:
+                r = await c.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}",
+                    json={"systemInstruction": {"parts": [{"text": system}]},
+                          "contents": [{"parts": [{"text": user}]}],
+                          "generationConfig": {"temperature": 0, "maxOutputTokens": max_tokens}})
+                if r.status_code in (404, 429, 503):      # retired, rate-limited or overloaded
+                    last = httpx.HTTPStatusError(f"{model}: {r.status_code}", request=r.request, response=r)
+                    continue
+                r.raise_for_status()
+                cand = (r.json().get("candidates") or [{}])[0]
+                text = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", []))
+                if text.strip():
+                    return text
+                last = RuntimeError(f"{model}: empty response ({cand.get('finishReason')})")
+        raise last or RuntimeError("gemini: no model produced a response")
 
 
 def build_llm(provider: str = "auto", model: str | None = None) -> LLM | None:
@@ -92,9 +109,9 @@ def build_llm(provider: str = "auto", model: str | None = None) -> LLM | None:
                 log.warning("llm: ollama not reachable at %s", ollama_url)
                 return None
     if provider in ("groq", "auto") and groq:
-        return GroqLLM(groq, model or "llama-3.1-8b-instant")
+        return GroqLLM(groq, model or "openai/gpt-oss-20b")
     if provider in ("gemini", "auto") and gemini:
-        return GeminiLLM(gemini, model or "gemini-2.0-flash")
+        return GeminiLLM(gemini, model)
     log.info("llm: no provider available (no local Ollama, no GTM_GROQ_API_KEY / GTM_GEMINI_API_KEY)")
     return None
 
