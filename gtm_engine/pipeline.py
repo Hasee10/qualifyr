@@ -50,6 +50,7 @@ class RunStats:
     processed: int = 0
     no_website: int = 0
     unreachable: int = 0
+    rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
     buyer: int = 0
     vendor: int = 0
     unknown: int = 0
@@ -175,14 +176,33 @@ class Pipeline:
                                country=company.country, city=company.city, source=company.source,
                                source_url=company.source_url, raw=company.model_dump(mode="json"))
 
+        provenance: dict[str, str] = {"company": f"{company.source}: {company.source_url or 'record'}"}
         if not website:
             stats.no_website += 1
             snapshot = SiteSnapshot(website="", final_url=None, reachable=False, https=False, error="no_website")
         else:
-            crawler = SiteCrawler(self.fetcher, campaign.max_pages_per_site)
+            crawler = SiteCrawler(self.fetcher, campaign.max_pages_per_site,
+                                  deadline_s=self.settings.per_company_timeout_s)
             snapshot = await crawler.crawl(website)
+            if snapshot.redirected_to and snapshot.redirected_to != domain:
+                # The site moved: the lead belongs to the domain that actually answers.
+                provenance["domain"] = f"{domain or website} redirects to {snapshot.redirected_to}"
+                domain = snapshot.redirected_to
+                new_key = company_key(domain, company.name, company.city)
+                if seen_keys is not None and new_key in seen_keys and new_key != key:
+                    # Two records that redirect to the same site are one company.
+                    stats.duplicates += 1
+                    log.info("skipping %s: redirects to %s, already processed", company.name, domain)
+                    return None
+                if seen_keys is not None:
+                    seen_keys.discard(key)
+                    seen_keys.add(new_key)
+                key = new_key
             if not snapshot.reachable:
                 stats.unreachable += 1
+                if snapshot.integrity_reason:
+                    stats.rejected_sites += 1
+                    provenance["website_rejected"] = f"{snapshot.integrity_reason}: {snapshot.integrity_detail}"
             for kind, page in snapshot.pages.items():
                 self.db.save_page(key, page.url, kind, 200, page.title, page.text[:5000])
 
@@ -201,8 +221,12 @@ class Pipeline:
         cls = classifier.classify(bundle)
         quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
-        provenance: dict[str, str] = {"company": f"{company.source}: {company.source_url or 'record'}"}
-        if snapshot.reachable:
+        # A site that does not belong to this company cannot supply its contact details:
+        # its email, phone and staff names belong to somebody else.
+        trust_site = snapshot.reachable and not quality.website_mismatch
+        if snapshot.reachable and quality.website_mismatch:
+            provenance["website_rejected"] = "website does not appear to belong to this company; its contact details were not used"
+        if trust_site:
             contact = choose_contact(snapshot, campaign, self.defaults, domain)
             if contact.email:
                 provenance["contact_email"] = contact.email_source or "website"
@@ -217,7 +241,8 @@ class Pipeline:
                 phone_type=src_phone.kind if src_phone else None,
                 email_status=EmailStatus.UNVERIFIED if company.email else EmailStatus.NONE,
                 email_source=f"{company.source} record" if company.email else None,
-                evidence="from discovery source only",
+                evidence="from discovery source only" if not quality.website_mismatch
+                         else "website looked like a different company; using the discovery record only",
             )
             if company.email:
                 provenance["contact_email"] = f"{company.source} record"
@@ -266,7 +291,7 @@ class Pipeline:
             intents = []
             if company.extra.get("intent"):
                 intents.append(dict(company.extra["intent"]))
-            if snapshot.reachable:
+            if trust_site:
                 intents += [s.model_dump(mode="json") for s in intent_from_pages(snapshot, self.defaults)]
             if company.source != "ppra" and ("ppra" in campaign.intent_sources or self.settings.enable_intent_signals):
                 try:
@@ -385,15 +410,15 @@ class Pipeline:
             classifier = BuyerClassifier(campaign, self.defaults)
             leads: list[Lead] = []
             sem = asyncio.Semaphore(self.settings.concurrency)
-            # Keys of companies with a known domain are reserved up front so a search-found
-            # domain for a later, domain-less company cannot collide with them.
-            seen_keys: set[str] = {company_key(c.domain, c.name, c.city) for c in companies if c.domain}
+            # Claimed as each company is processed. Companies that already carry a website are
+            # sorted first, so a search- or redirect-found domain can never steal the key of a
+            # company that genuinely owns it.
+            seen_keys: set[str] = set()
 
             async def worker(c: DiscoveredCompany) -> None:
                 async with sem:
                     try:
-                        lead = await self.process_company(c, campaign, classifier, run_id, stats,
-                                                          seen_keys if not c.domain else None)
+                        lead = await self.process_company(c, campaign, classifier, run_id, stats, seen_keys)
                         if lead is None:
                             return
                         leads.append(lead)

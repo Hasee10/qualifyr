@@ -92,7 +92,9 @@ gtm_engine/
   discovery/      overture.py (Overture Maps via DuckDB), osm.py (Overpass + mirrors),
                   chambers.py (KCCI member directory),
                   geocode.py (Nominatim), csv_seed.py, search.py (website finder)
-  scraping/       fetcher.py (polite HTTP, charset sniffing), browser.py (optional Playwright
+  scraping/       fetcher.py (polite HTTP, charset sniffing, size cap, host circuit breaker),
+                  integrity.py (parked / soft-404 / placeholder / marketplace-redirect detection),
+                  browser.py (optional Playwright
                   fallback for JS-only sites), site_crawler.py, parsers.py
   qualification/  buyer_classifier.py  ← the gate
   enrichment/     contacts.py, signals.py

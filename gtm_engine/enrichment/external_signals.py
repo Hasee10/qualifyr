@@ -109,15 +109,21 @@ class NewsChecker:
         self._lock = asyncio.Lock()
         self._last = 0.0
 
-    async def mentions(self, company_name: str, country: str = "Pakistan") -> list[NewsMention]:
+    async def mentions(self, company_name: str, country: str = "Pakistan", *, wait: bool = False) -> list[NewsMention]:
+        """GDELT allows one request per 5 s, so this is opportunistic by default: if another
+        company is already using the slot, the signal is skipped rather than stalling the
+        batch behind it. News is a bonus signal, never a reason to slow the pipeline."""
         name = re.sub(r"[^\w\s&.-]", " ", company_name).strip()
         if len(name) < 4:
             return []
         query = quote(f'"{name}" {country}')
+        if not wait and self._lock.locked():
+            log.debug("gdelt: slot busy, skipping news for %s", name)
+            return []
         async with self._lock:
-            wait = self._last + self.min_interval_s - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
+            pause = self._last + self.min_interval_s - time.monotonic()
+            if pause > 0:
+                await asyncio.sleep(pause)
             result = await self.fetcher.get(GDELT_URL.format(q=query), api=True)
             self._last = time.monotonic()
         if not result.ok:

@@ -56,6 +56,7 @@ class FetchResult:
     text: str
     content_type: str
     error: str | None = None
+    truncated: bool = False      # body hit max_response_bytes and was cut
 
     @property
     def ok(self) -> bool:
@@ -88,6 +89,7 @@ class HttpFetcher:
         self._host_locks: dict[str, asyncio.Lock] = {}
         self._robots: dict[str, RobotFileParser | None] = {}
         self._sem = asyncio.Semaphore(settings.concurrency)
+        self._host_failures: dict[str, int] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -136,6 +138,25 @@ class HttpFetcher:
         rp.parse(resp.text.splitlines())
         return rp
 
+    async def _read_capped(self, url: str, headers: dict[str, str] | None):
+        """Stream the body, stopping at max_response_bytes so one huge page cannot
+        exhaust memory. Returns (response, raw_bytes, truncated)."""
+        cap = self.settings.max_response_bytes
+        chunks: list[bytes] = []
+        size = 0
+        truncated = False
+        async with self._client.stream("GET", url, headers=headers) as resp:
+            declared = resp.headers.get("content-length")
+            if declared and declared.isdigit() and int(declared) > cap:
+                truncated = True
+            async for chunk in resp.aiter_bytes():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= cap:
+                    truncated = True
+                    break
+            return resp, b"".join(chunks)[:cap], truncated
+
     # -- fetch --------------------------------------------------------------
 
     async def get(self, url: str, *, delay: float | None = None, api: bool = False,
@@ -143,6 +164,8 @@ class HttpFetcher:
         """`api=True` marks a programmatic endpoint (Overpass, search): robots.txt governs
         crawlers on websites, not API clients, so the check is skipped there."""
         host = urlparse(url).netloc.lower()
+        if self._host_failures.get(host, 0) >= self.settings.host_failure_limit:
+            return FetchResult(url, url, 0, "", "", error="host_unavailable")
         if not api and not await self._allowed(url):
             log.info("robots.txt disallows %s", url)
             return FetchResult(url, url, 0, "", "", error="robots_disallowed")
@@ -150,10 +173,11 @@ class HttpFetcher:
         attempt = 0
         async with self._sem:
             while True:
+                truncated = False
                 async with self._lock_for(host):
                     await self._throttle(host, delay)
                     try:
-                        resp = await self._client.get(url, headers=headers)
+                        resp, raw, truncated = await self._read_capped(url, headers)
                     except httpx.TimeoutException:
                         err = "timeout"
                         resp = None
@@ -163,14 +187,22 @@ class HttpFetcher:
                     else:
                         err = None
                 if resp is not None and resp.status_code not in _RETRYABLE:
+                    if 200 <= resp.status_code < 400:
+                        self._host_failures.pop(host, None)
+                    elif resp.status_code in (401, 403, 429):
+                        # The site is refusing us. We do not disguise the client to get around
+                        # that; the host is simply recorded as blocked.
+                        self._host_failures[host] = self._host_failures.get(host, 0) + 1
+                        return FetchResult(url, str(resp.url), resp.status_code, "", "", error="blocked")
                     ctype = resp.headers.get("content-type", "")
                     textual = ("text" in ctype or "json" in ctype or "xml" in ctype
-                               or (not ctype and resp.content[:64].lstrip().lower().startswith((b"<!doctype", b"<html", b"{"))))
-                    body = decode_body(resp.content, ctype) if textual else ""
-                    return FetchResult(url, str(resp.url), resp.status_code, body, ctype)
+                               or (not ctype and raw[:64].lstrip().lower().startswith((b"<!doctype", b"<html", b"{"))))
+                    body = decode_body(raw, ctype) if textual else ""
+                    return FetchResult(url, str(resp.url), resp.status_code, body, ctype, truncated=truncated)
                 attempt += 1
                 if attempt > self.settings.max_retries:
                     status = resp.status_code if resp is not None else 0
+                    self._host_failures[host] = self._host_failures.get(host, 0) + 1
                     return FetchResult(url, url, status, "", "", error=err or f"status_{status}")
                 backoff = min(2.0 ** attempt, 20.0)
                 log.debug("retry %s in %.1fs (%s)", url, backoff, err or resp.status_code)

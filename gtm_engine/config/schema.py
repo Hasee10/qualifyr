@@ -123,8 +123,16 @@ class EngineSettings(BaseModel):
     export_dir: Path = Path("data/exports")
     user_agent: str = "GTMLeadEngine/0.1 (+business research; contact via site form)"
     request_timeout_s: float = 15.0
+    # Hard cap on a single response body. A handful of 50 MB pages in one batch is enough
+    # to exhaust memory; no company website needs more than a few MB of HTML.
+    max_response_bytes: int = 4_000_000
     per_host_delay_s: float = 2.0
     max_retries: int = 2
+    # After this many consecutive failures, stop calling a host for the rest of the run:
+    # a dead or hostile host must not consume the batch's time in retries.
+    host_failure_limit: int = 3
+    # Hard ceiling on the time spent on one company's website.
+    per_company_timeout_s: float = 90.0
     concurrency: int = 4
     respect_robots: bool = True
     # Render JS-only sites with headless Chromium when static HTTP returns an empty shell.

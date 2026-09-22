@@ -52,7 +52,10 @@ def assess_quality(snapshot: SiteSnapshot, company_name: str | None = None, doma
         page_count=len(snapshot.pages),
     )
     if not q.reachable:
-        q.notes.append(f"website unreachable ({snapshot.error})")
+        if snapshot.integrity_reason:
+            q.notes.append(f"website rejected: {snapshot.integrity_detail or snapshot.integrity_reason}")
+        else:
+            q.notes.append(f"website unreachable ({snapshot.error})")
     if q.reachable and not q.https:
         q.notes.append("no https")
     if q.reachable and q.page_count <= 1:

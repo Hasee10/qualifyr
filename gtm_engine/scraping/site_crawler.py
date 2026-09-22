@@ -4,9 +4,11 @@ buyer evidence (about, contact, team, services, careers). Never a full-site craw
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from gtm_engine.scraping.fetcher import Fetcher
+from gtm_engine.scraping.integrity import check as check_integrity
 from gtm_engine.scraping.parsers import ParsedPage, parse_page
 from gtm_engine.validation.domains import normalize_url
 
@@ -30,6 +32,10 @@ class SiteSnapshot:
     pages: dict[str, ParsedPage] = field(default_factory=dict)  # kind -> page
     error: str | None = None
     raw_html: dict[str, str] = field(default_factory=dict)      # kind -> html (for tech markers)
+    integrity_reason: str | None = None   # parked | soft_404 | placeholder | binary | off_domain_not_own | thin
+    integrity_detail: str = ""
+    redirected_to: str | None = None      # registrable domain a redirect landed on, if different
+    notes: list[str] = field(default_factory=list)
 
     @property
     def all_text(self) -> str:
@@ -82,11 +88,13 @@ class SiteSnapshot:
 
 
 class SiteCrawler:
-    def __init__(self, fetcher: Fetcher, max_pages: int = 6):
+    def __init__(self, fetcher: Fetcher, max_pages: int = 6, deadline_s: float | None = None):
         self.fetcher = fetcher
         self.max_pages = max(1, max_pages)
+        self.deadline_s = deadline_s
 
     async def crawl(self, website: str) -> SiteSnapshot:
+        started = time.monotonic()
         url = normalize_url(website)
         if not url:
             return SiteSnapshot(website=website, final_url=None, reachable=False, https=False, error="bad_url")
@@ -101,16 +109,31 @@ class SiteCrawler:
             return SiteSnapshot(website=website, final_url=home.final_url, reachable=False,
                                 https=False, error=home.error or f"status_{home.status_code}")
 
-        snap = SiteSnapshot(website=website, final_url=home.final_url, reachable=True,
-                            https=home.final_url.startswith("https://"))
         home_page = parse_page(home.final_url, home.text)
+        # A 200 is not proof of a live company site: parked, sold, soft-404 and marketplace
+        # redirects all look fine until you read them.
+        integrity = check_integrity(url, home.final_url, home.text, home_page.text, home_page.title)
+        if not integrity.usable:
+            return SiteSnapshot(website=website, final_url=home.final_url, reachable=False, https=False,
+                                error=integrity.reason, integrity_reason=integrity.reason,
+                                integrity_detail=integrity.detail, redirected_to=integrity.final_domain)
+
+        snap = SiteSnapshot(website=website, final_url=home.final_url, reachable=True,
+                            https=home.final_url.startswith("https://"),
+                            integrity_reason=integrity.reason, integrity_detail=integrity.detail,
+                            redirected_to=integrity.final_domain)
         snap.pages["home"] = home_page
         snap.raw_html["home"] = home.text
 
         budget = self.max_pages - 1
         visited = {home.final_url.rstrip("/")}
+        deadline = (started + self.deadline_s) if self.deadline_s else None
         for kind in _PRIORITY:
             if budget <= 0:
+                break
+            if deadline and time.monotonic() > deadline:
+                snap.notes.append("page budget cut short: per-company time limit reached")
+                log.info("crawl deadline reached for %s after %s", website, list(snap.pages))
                 break
             candidates = []
             if kind in home_page.internal_links:

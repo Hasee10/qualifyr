@@ -137,3 +137,19 @@ async def test_website_finder_uses_brave_when_key_present(settings, monkeypatch)
         assert finder.backend == "brave"
         assert await finder.find("Khaadi", "Lahore", "Pakistan") == "https://khaadi.com"
     assert route.called and route.calls[0].request.headers["X-Subscription-Token"] == "k"
+
+
+@respx.mock
+async def test_news_check_is_opportunistic_not_blocking(settings):
+    """A busy GDELT slot must not stall the batch: the signal is skipped instead."""
+    import asyncio
+    respx.get(url__startswith="https://api.gdeltproject.org/").mock(
+        return_value=httpx.Response(200, json={"articles": []}))
+    async with HttpFetcher(settings) as fetcher:
+        nc = NewsChecker(fetcher, min_interval_s=30)
+        await nc._lock.acquire()          # another company holds the slot
+        try:
+            result = await asyncio.wait_for(nc.mentions("Khaadi"), timeout=2)
+        finally:
+            nc._lock.release()
+    assert result == []

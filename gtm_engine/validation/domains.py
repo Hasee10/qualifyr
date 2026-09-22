@@ -25,7 +25,8 @@ HOSTED_PLATFORMS = {
     "square.site", "carrd.co", "strikingly.com", "yolasite.com", "webs.com",
 }
 
-_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+# Labels are alphanumeric+hyphen; the TLD is letters or a punycode label (xn--...).
+_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$")
 
 
 def normalize_url(raw: str | None) -> str | None:
@@ -47,12 +48,37 @@ def normalize_url(raw: str | None) -> str | None:
     return urlunparse((parsed.scheme, host, path, "", parsed.query, ""))
 
 
-def canonical_domain(raw: str | None) -> str | None:
-    """'https://www.Shop.com.pk/about?x=1' -> 'shop.com.pk'. None for social hosts / junk."""
+def registrable_domain(raw: str | None) -> str | None:
+    """The registrable domain of any URL, including marketplaces and social hosts.
+    `canonical_domain` filters those out on purpose; redirect detection must still see them."""
     url = normalize_url(raw)
     if not url:
         return None
-    host = urlparse(url).netloc.split(":")[0]
+    host = urlparse(url).netloc.split(":")[0].rstrip(".")
+    if any(ord(ch) > 127 for ch in host):
+        try:
+            host = host.encode("idna").decode("ascii")
+        except (UnicodeError, ValueError):
+            return None
+    ext = _extract(host)
+    if not ext.domain or not ext.suffix:
+        return None
+    domain = f"{ext.domain}.{ext.suffix}".lower()
+    return domain if _DOMAIN_RE.match(domain) else None
+
+
+def canonical_domain(raw: str | None) -> str | None:
+    """'https://www.Shop.com.pk/about?x=1' -> 'shop.com.pk'. None for social hosts / junk.
+    Internationalised names are folded to punycode so 'اردو.pk' and its xn-- form are one."""
+    url = normalize_url(raw)
+    if not url:
+        return None
+    host = urlparse(url).netloc.split(":")[0].rstrip(".")
+    if any(ord(ch) > 127 for ch in host):
+        try:
+            host = host.encode("idna").decode("ascii")
+        except (UnicodeError, ValueError):
+            return None
     ext = _extract(host)
     if not ext.domain or not ext.suffix:
         return None

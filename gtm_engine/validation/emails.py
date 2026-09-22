@@ -25,10 +25,24 @@ FREEMAIL_DOMAINS = {
 _JUNK_DOMAINS = {"example.com", "email.com", "domain.com", "yourdomain.com", "sentry.io", "wixpress.com"}
 
 
+def _mangled(email: str, source: str) -> bool:
+    """True when the matched address is a fragment of something with non-ASCII characters
+    (Cyrillic lookalikes, zero-width joiners). 'іnfo@x.pk' would otherwise be harvested as
+    'nfo@x.pk' — an address that silently bounces."""
+    i = source.lower().find(email)
+    if i <= 0:
+        return False
+    before = source[i - 1]
+    return not before.isspace() and (ord(before) > 127 or before.isalnum())
+
+
 def extract_emails(text: str) -> list[str]:
     seen: list[str] = []
-    for match in EMAIL_RE.findall(text or ""):
+    source = text or ""
+    for match in EMAIL_RE.findall(source):
         email = match.lower().strip(".")
+        if _mangled(email, source):
+            continue
         if email.endswith(_JUNK_SUFFIXES):
             continue
         domain = email.split("@", 1)[1]
