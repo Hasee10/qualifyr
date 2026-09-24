@@ -94,4 +94,15 @@ jobs:
           git add leads
           git diff --cached --quiet && echo "no new leads" && exit 0
           git commit -m "leads: $campaign_id run ${{ github.run_number }} [skip ci]"
-          git push
+          # The branch moves under us. A crawl takes minutes, during which another
+          # campaign's run commits its own leads and ordinary development gets pushed,
+          # so a bare push fails non-fast-forward and reds the job *after* the pipeline
+          # already succeeded - losing the CSVs for a reason unrelated to the run.
+          # Each run writes only leads/<its own campaign>/, so rebasing is safe.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "$GITHUB_REF_NAME" && git push && exit 0
+            echo "push attempt $attempt failed, retrying"
+            sleep 5
+          done
+          echo "could not push leads after 3 attempts" >&2
+          exit 1
