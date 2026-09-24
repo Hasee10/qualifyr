@@ -2,7 +2,7 @@
 db_path: data/gtm.sqlite
 export_dir: data/exports
 user_agent: "GTMLeadEngine/0.1 (+business research; contact via site form)"
-request_timeout_s: 15
+request_timeout_s: 30          # Pakistani SMB hosting is slow; 15s lost sites that answer by ~20s
 max_response_bytes: 4000000    # stop reading a response past this size
 per_host_delay_s: 2.0
 max_retries: 2

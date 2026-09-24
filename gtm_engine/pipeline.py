@@ -36,6 +36,7 @@ from gtm_engine.storage.database import Database
 from gtm_engine.validation.dedupe import dedupe_companies
 from gtm_engine.validation.domains import canonical_domain, company_key
 from gtm_engine.validation.emails import MXChecker, classify_email, is_generic_mailbox
+from gtm_engine.validation.liveness import HostResolver
 from gtm_engine.validation.verifier import EmailVerifier, MxOnlyVerifier, VerifyStatus, build_verifier
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class RunStats:
     no_website: int = 0
     unreachable: int = 0
     rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
+    dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     buyer: int = 0
     vendor: int = 0
     unknown: int = 0
@@ -107,12 +109,14 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 
 class Pipeline:
     def __init__(self, settings: EngineSettings, defaults: DefaultRules, db: Database,
-                 fetcher: Fetcher, mx: MXChecker | None = None, verifier: EmailVerifier | None = None):
+                 fetcher: Fetcher, mx: MXChecker | None = None, verifier: EmailVerifier | None = None,
+                 resolver: HostResolver | None = None):
         self.settings = settings
         self.defaults = defaults
         self.db = db
         self.fetcher = fetcher
         self.mx = mx if mx is not None else MXChecker(settings.dns_timeout_s)
+        self.resolver = resolver if resolver is not None else HostResolver(settings.dns_timeout_s)
         self.verifier = verifier
         self.website_finder = WebsiteFinder(fetcher, settings)
         self.news = NewsChecker(fetcher)
@@ -385,6 +389,57 @@ class Pipeline:
         self.db.save_lead(lead, run_id, key)
         return lead
 
+    async def _take_live(self, companies: list[DiscoveredCompany], limit: int | None,
+                         progress: ProgressFn | None) -> tuple[list[DiscoveredCompany], int]:
+        """Fill the run's company budget with domains that still resolve.
+
+        The budget is spent before anything is fetched, so a dead domain costs a whole
+        slot and yields nothing. On the first production run that was 60% of them - and
+        discovery had found 3854 candidates behind a cap of 120, so the dead ones were
+        being paid for while thousands of live ones went untouched.
+
+        Screened in batches rather than all at once: we usually only need to look at a
+        little more than `limit` before the budget is full, and resolving all 3854 would
+        cost more than it saves.
+
+        Companies with no website are kept as a tail - there is nothing to resolve yet,
+        and WebsiteFinder may still turn one up during processing.
+        """
+        if not limit or limit <= 0:
+            return companies, 0
+
+        with_site = [c for c in companies if c.website]
+        without_site = [c for c in companies if not c.website]
+
+        # Screening only pays when there is a queue to promote from. With no more
+        # candidates than slots, a dead domain's place cannot be refilled, so rejecting
+        # it just shrinks the run - and a resolver wrong about one host would cost a
+        # company for nothing. Also keeps small and offline runs off the network.
+        if len(with_site) <= limit:
+            return companies[:limit], 0
+        live: list[DiscoveredCompany] = []
+        dead = 0
+        cursor = 0
+
+        while len(live) < limit and cursor < len(with_site):
+            batch = with_site[cursor:cursor + max(limit, 50)]
+            cursor += len(batch)
+            for company, alive in zip(batch, await asyncio.gather(
+                    *(self.resolver.resolves(c.website) for c in batch))):
+                if alive:
+                    live.append(company)
+                    if len(live) >= limit:
+                        break
+                else:
+                    dead += 1
+            await _emit(progress, "liveness", len(live), limit,
+                        f"{len(live)} live, {dead} dead domains skipped")
+
+        live.extend(without_site[: max(0, limit - len(live))])
+        if dead:
+            log.info("liveness: skipped %d dead domains to fill %d slots", dead, len(live))
+        return live, dead
+
     # -- full run --------------------------------------------------------------------
 
     async def run(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> RunResult:
@@ -403,7 +458,8 @@ class Pipeline:
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)
-            companies = companies[: campaign.max_companies]
+            companies, stats.dead_websites = await self._take_live(
+                companies, campaign.max_companies, progress)
             stats.after_dedupe = len(companies)
             await _emit(progress, "dedupe", len(companies), len(companies), f"{len(companies)} unique companies")
 
