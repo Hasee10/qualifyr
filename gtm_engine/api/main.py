@@ -70,8 +70,17 @@ def dispatch_workflow(workflow_file: str, inputs: dict[str, str]) -> None:
     PAT or fine-grained token with 'actions: write') and GTM_GITHUB_REPO ('owner/repo')."""
     token = os.environ.get("GTM_GITHUB_TOKEN")
     repo = os.environ.get("GTM_GITHUB_REPO")
-    if not token or not repo:
-        raise HTTPException(500, "GTM_GITHUB_TOKEN / GTM_GITHUB_REPO not configured; cannot dispatch long-running jobs")
+    # Name the ones actually missing. The old message listed both whatever the cause,
+    # which sends you checking a variable that was set correctly all along -- and on
+    # Vercel the fix differs per variable (one is a PAT you must mint, the other a
+    # one-line value), so "which" is the only useful part of this error.
+    missing = [n for n, v in (("GTM_GITHUB_TOKEN", token), ("GTM_GITHUB_REPO", repo)) if not v]
+    if missing:
+        raise HTTPException(
+            500,
+            f"{' and '.join(missing)} not set; cannot dispatch long-running jobs. "
+            "On Vercel, adding an environment variable only takes effect after a redeploy.",
+        )
     resp = httpx.post(
         f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/dispatches",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
