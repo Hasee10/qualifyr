@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!web/.env.local.example
 
 # Data (local engine state and exports; CI publishes leads into leads/)
 data/*
