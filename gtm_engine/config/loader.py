@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,25 @@ def load_dotenv(path: Path | None = None) -> int:
 load_dotenv()
 CONFIG_DIR = PROJECT_ROOT / "config"
 DEFAULTS_DIR = CONFIG_DIR / "defaults"
+
+
+def is_serverless() -> bool:
+    """True on Vercel / AWS Lambda, where the deployment bundle is mounted read-only."""
+    return bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+
+def runtime_dir() -> Path:
+    """A directory this process may actually write to.
+
+    Everything under PROJECT_ROOT is read-only on Vercel; only the temp dir is writable,
+    and only for the life of the container. Callers must therefore treat what they put
+    here as scratch - anything durable belongs in Postgres. That is already true of the
+    two things that land here (the dry-run outbox and the API's ledger copy): real sends
+    run in GitHub Actions, which has a writable checkout and commits the ledger back.
+    """
+    base = Path(tempfile.gettempdir()) / "gtm" if is_serverless() else PROJECT_ROOT / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
 
 
 def _read_yaml(path: Path) -> dict:

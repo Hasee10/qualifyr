@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from gtm_engine import __version__
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
-from gtm_engine.config.loader import CONFIG_DIR
+from gtm_engine.config.loader import CONFIG_DIR, is_serverless, runtime_dir
 from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.export import sheets as sheets_export
 from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
@@ -46,6 +46,23 @@ CAMPAIGN_DIR = CONFIG_DIR / "campaigns"
 
 def _db() -> Database:
     return Database(_settings.database_url)
+
+
+def _read_only_ledger(campaign_id: str) -> Ledger:
+    """The campaign's send ledger, loaded from the repo but never written back to it.
+
+    The ledger file is committed by the GitHub Actions jobs, so the deployment bundle
+    carries an up-to-date copy that is fine to read. Writing it is not: the bundle is
+    read-only on Vercel, and `Ledger.save()` would raise OSError mid-request. Pointing
+    writes at scratch keeps those endpoints working, and loses nothing - every state
+    change they make is also written to Postgres, which is the real source of truth.
+    Real sends, where the ledger genuinely matters as a double-send guard, happen in
+    Actions against a writable checkout.
+    """
+    ledger = Ledger(ledger_path(campaign_id))
+    if is_serverless():
+        ledger.path = runtime_dir() / f"{campaign_id}_ledger.json"
+    return ledger
 
 
 def dispatch_workflow(workflow_file: str, inputs: dict[str, str]) -> None:
@@ -243,7 +260,7 @@ def suppress(lead_id: str, req: SuppressRequest) -> dict:
         db.add_suppression(l.domain, "domain", req.reason or "suppressed from UI")
     if l.contact_email:
         db.add_suppression(l.contact_email, "email", req.reason or "suppressed from UI")
-    stop_lead(db, l, SequenceStatus.SUPPRESSED, req.reason or "suppressed from UI", Ledger(ledger_path(l.campaign_id)))
+    stop_lead(db, l, SequenceStatus.SUPPRESSED, req.reason or "suppressed from UI", _read_only_ledger(l.campaign_id))
     db.close()
     return {"ok": True}
 
@@ -293,8 +310,8 @@ def mailboxes(campaign_id: str | None = None) -> list[dict]:
     cid = campaign_id or next(iter(_campaign_files()), None)
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     db = _db()
-    states = MailboxPool(boxes, osettings, _settings.db_path.parent / "outbox").states(
-        db, cid or "", Ledger(ledger_path(cid)) if cid else Ledger(_settings.db_path.parent / "no-campaign.json"), day)
+    states = MailboxPool(boxes, osettings, runtime_dir() / "outbox").states(
+        db, cid or "", _read_only_ledger(cid) if cid else Ledger(runtime_dir() / "no-campaign.json"), day)
     db.close()
     return [st.as_dict() for st in states.values()]
 
@@ -426,7 +443,9 @@ def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> F
     rows = db.list_leads(campaign_id, min_score=min_score,
                          company_type=CompanyType.BUYER.value if buyers_only else None)
     db.close()
-    path = write_csv(rows, export_path(_settings.export_dir, campaign_id, "ui", buyers_only))
+    # Scratch on serverless: the CSV only has to survive long enough to be streamed back.
+    export_dir = runtime_dir() / "exports" if is_serverless() else _settings.export_dir
+    path = write_csv(rows, export_path(export_dir, campaign_id, "ui", buyers_only))
     return FileResponse(path, media_type="text/csv", filename=path.name)
 
 
@@ -438,16 +457,16 @@ def outreach_queue(campaign_id: str) -> dict:
     campaign = _campaign(campaign_id)
     osettings, templates = load_outreach_settings(), load_templates()
     db = _db()
-    enqueue(db, campaign_id, osettings, Ledger(ledger_path(campaign_id)))
+    enqueue(db, campaign_id, osettings, _read_only_ledger(campaign_id))
     items = prepare_drafts(db, campaign, osettings, templates)
     counts = {s.value: 0 for s in SequenceStatus}
     for l in db.list_leads(campaign_id):
         counts[l.sequence_status.value] += 1
     db.close()
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    ledger = Ledger(ledger_path(campaign_id))
+    ledger = _read_only_ledger(campaign_id)
     db2 = _db()
-    states = MailboxPool(load_mailboxes(), osettings, _settings.db_path.parent / "outbox").states(db2, campaign_id, ledger, day)
+    states = MailboxPool(load_mailboxes(), osettings, runtime_dir() / "outbox").states(db2, campaign_id, ledger, day)
     db2.close()
     return {
         "items": [{"lead": _lead_summary(i["lead"]), "step": i["step"], "draft": i["draft"]} for i in items],
@@ -566,7 +585,7 @@ def outreach_send(campaign_id: str, req: SendRequest) -> dict:
                 "sync": None, "mailboxes": {}}
     # Dry-run preview: no trace on the real DB or ledger. Transactional dry-run mode is
     # rolled back on close; the ledger is pointed at a throwaway file.
-    scratch = _settings.db_path.parent / "outbox"
+    scratch = runtime_dir() / "outbox"
     scratch.mkdir(parents=True, exist_ok=True)
     db = Database(_settings.database_url, dry_run=True)
     ledger = Ledger(ledger_path(campaign_id))
@@ -586,7 +605,7 @@ def outreach_sync(campaign_id: str) -> dict:
     if not osettings.credentials_present:
         raise HTTPException(400, "SMTP credentials not configured")
     db = _db()
-    r = sync_replies(db, campaign_id, osettings, Ledger(ledger_path(campaign_id)))
+    r = sync_replies(db, campaign_id, osettings, _read_only_ledger(campaign_id))
     db.close()
     return {"replied": r.replied, "unsubscribed": r.unsubscribed, "bounced": r.bounced, "scanned": r.scanned,
             "interested": r.interested, "not_interested": r.not_interested, "out_of_office": r.out_of_office,
