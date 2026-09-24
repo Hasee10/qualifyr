@@ -17,8 +17,14 @@ on:
         description: Send outside 09-18 PKT (supervised runs only)
         type: boolean
         default: false
-  schedule:
-    - cron: "0 5 * * 1-5"   # weekdays 05:00 UTC = 10:00 PKT, inside the send window
+  # No schedule. This job sends real email from a real mailbox, and the credentials to
+  # do it have been live since well before the pipeline was. An unattended weekday cron
+  # means whatever happens to be in the database at 05:00 UTC gets contacted, with no
+  # one looking - which nearly fired against 91 rows of test fixtures. Sends stay
+  # manual (workflow_dispatch, or the approval queue in the UI) until someone decides
+  # the lead list is worth mailing. Re-enable deliberately, not by default:
+  #   schedule:
+  #     - cron: "0 5 * * 1-5"   # weekdays 05:00 UTC = 10:00 PKT, inside the send window
 
 concurrency:
   group: outreach
