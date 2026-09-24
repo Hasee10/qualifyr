@@ -17,7 +17,14 @@ from gtm_engine.api.main import app as _app  # noqa: E402
 
 async def app(scope, receive, send):
     """Strip the /api prefix that vercel.json's rewrite adds, so gtm_engine's routes
-    (defined as /health, /campaigns, ...) keep matching unmodified."""
+    (defined as /health, /campaigns, ...) keep matching unmodified.
+
+    The rewrite still hands us the *original* request path, so /api/health arrives here
+    as /api/health even though it was routed via /api/index. Note the rewrite target is
+    "/api/index", not "/api/index.py": Vercel addresses functions by their extensionless
+    route, and a destination that does not resolve is silently ignored, which drops the
+    request through to Next.js and yields a 500 that looks nothing like a Python error.
+    """
     if scope["type"] == "http" and scope["path"].startswith("/api"):
         scope = dict(scope)
         scope["path"] = scope["path"][len("/api"):] or "/"

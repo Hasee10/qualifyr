@@ -3,7 +3,7 @@
 Background: the per-test schema isolation silently failed for one run (Supabase's
 pooler drops the `options=-csearch_path=` startup parameter, so every test resolved
 in `public`). Fixed in storage/database.py, but the rows it already wrote are still
-there — and `outreach.yml` runs on a cron against this same database, so fake leads
+there - and `outreach.yml` runs on a cron against this same database, so fake leads
 are not merely untidy.
 
 Prints what it would delete and exits. Pass --apply to actually delete.
@@ -24,28 +24,41 @@ import psycopg
 from gtm_engine.config.loader import load_settings
 
 # What the fixtures create. tests/conftest.py uses campaign_id "test-retail"; the lead
-# factories in test_mailboxes/test_outreach use domains co0.pk .. co9.pk with contact
-# addresses owner@coN.pk. Narrow on purpose — a broad "delete where domain like '%.pk'"
-# would take real Pakistani prospects with it, which is the whole target market.
-TEST_CAMPAIGNS = ("test-retail",)
+# factories in test_mailboxes/test_outreach address contacts as owner@coN.pk. Narrow on
+# purpose - a broad "delete where email like '%.pk'" would take real Pakistani prospects
+# with it, which is the whole target market.
+#
+# Note `leads` has no domain column (that lives on `companies`), so leads are matched by
+# campaign and contact_email only.
+TEST_CAMPAIGNS = ["test-retail"]
 TEST_EMAIL_PATTERN = r"^owner@co\d+\.pk$"
-TEST_DOMAIN_PATTERN = r"^co\d+\.pk$"
+
+LEAD_MATCH = "campaign_id = ANY(%(campaigns)s) OR contact_email ~ %(email)s"
 
 PREVIEW = [
-    ("leads (test campaign)",
-     "SELECT count(*) FROM leads WHERE campaign_id = ANY(%s)"),
-    ("leads (fixture domains, any campaign)",
-     "SELECT count(*) FROM leads WHERE domain ~ %s OR contact_email ~ %s"),
-    ("companies (test campaign)",
-     "SELECT count(*) FROM companies WHERE campaign_id = ANY(%s)"),
-    ("runs (test campaign)",
-     "SELECT count(*) FROM runs WHERE campaign_id = ANY(%s)"),
-    ("campaigns",
-     "SELECT count(*) FROM campaigns WHERE campaign_id = ANY(%s)"),
-    ("run_progress",
-     "SELECT count(*) FROM run_progress WHERE campaign_id = ANY(%s)"),
-    ("suppressions (fixture addresses)",
-     "SELECT count(*) FROM suppressions WHERE value ~ %s"),
+    ("leads", f"SELECT count(*) FROM leads WHERE {LEAD_MATCH}"),
+    ("outreach_events (of those leads)",
+     f"SELECT count(*) FROM outreach_events WHERE lead_id IN "
+     f"(SELECT lead_id FROM leads WHERE {LEAD_MATCH})"),
+    ("drafts (of those leads)",
+     f"SELECT count(*) FROM drafts WHERE lead_id IN "
+     f"(SELECT lead_id FROM leads WHERE {LEAD_MATCH})"),
+    ("companies", "SELECT count(*) FROM companies WHERE campaign_id = ANY(%(campaigns)s)"),
+    ("runs", "SELECT count(*) FROM runs WHERE campaign_id = ANY(%(campaigns)s)"),
+    ("campaigns", "SELECT count(*) FROM campaigns WHERE campaign_id = ANY(%(campaigns)s)"),
+    ("run_progress", "SELECT count(*) FROM run_progress WHERE campaign_id = ANY(%(campaigns)s)"),
+    ("suppressions", "SELECT count(*) FROM suppressions WHERE value ~ %(email)s"),
+]
+
+DELETES = [
+    f"DELETE FROM outreach_events WHERE lead_id IN (SELECT lead_id FROM leads WHERE {LEAD_MATCH})",
+    f"DELETE FROM drafts WHERE lead_id IN (SELECT lead_id FROM leads WHERE {LEAD_MATCH})",
+    f"DELETE FROM leads WHERE {LEAD_MATCH}",
+    "DELETE FROM companies WHERE campaign_id = ANY(%(campaigns)s)",
+    "DELETE FROM run_progress WHERE campaign_id = ANY(%(campaigns)s)",
+    "DELETE FROM runs WHERE campaign_id = ANY(%(campaigns)s)",
+    "DELETE FROM campaigns WHERE campaign_id = ANY(%(campaigns)s)",
+    "DELETE FROM suppressions WHERE value ~ %(email)s",
 ]
 
 
@@ -55,40 +68,32 @@ def main() -> None:
     if not dsn:
         sys.exit("GTM_DATABASE_URL is not set")
 
-    with psycopg.connect(dsn, autocommit=False) as conn:
-        print(f"{'what':42} {'rows':>6}")
-        print("-" * 50)
-        for label, sql in PREVIEW:
-            params = ([list(TEST_CAMPAIGNS)] if "ANY" in sql
-                      else [TEST_DOMAIN_PATTERN, TEST_EMAIL_PATTERN][: sql.count("%s")])
-            n = conn.execute(sql, params).fetchone()[0]
-            print(f"{label:42} {n:>6}")
+    args = {"campaigns": TEST_CAMPAIGNS, "email": TEST_EMAIL_PATTERN}
 
-        print("\nreal (non-test) leads that would be KEPT:")
+    with psycopg.connect(dsn, autocommit=False, prepare_threshold=None) as conn:
+        print(f"{'what':36} {'rows':>6}")
+        print("-" * 44)
+        for label, sql in PREVIEW:
+            print(f"{label:36} {conn.execute(sql, args).fetchone()[0]:>6}")
+
+        # The point of the preview: show what survives, so an over-broad pattern is
+        # obvious before it runs rather than after.
+        print("\nleads that would be KEPT:")
         kept = conn.execute(
-            "SELECT campaign_id, count(*) FROM leads "
-            "WHERE NOT (campaign_id = ANY(%s)) AND NOT (domain ~ %s) "
+            f"SELECT campaign_id, count(*) FROM leads WHERE NOT ({LEAD_MATCH}) "
             "GROUP BY campaign_id ORDER BY 2 DESC",
-            [list(TEST_CAMPAIGNS), TEST_DOMAIN_PATTERN],
+            args,
         ).fetchall()
         for row in kept or [("(none)", 0)]:
-            print(f"  {row[0]:40} {row[1]:>6}")
+            print(f"  {row[0]:34} {row[1]:>6}")
 
         if not apply:
             print("\nPreview only. Re-run with --apply to delete.")
             return
 
         # Children first: outreach_events and drafts reference leads by lead_id.
-        lead_ids = "SELECT lead_id FROM leads WHERE campaign_id = ANY(%s) OR domain ~ %s"
-        args = [list(TEST_CAMPAIGNS), TEST_DOMAIN_PATTERN]
-        conn.execute(f"DELETE FROM outreach_events WHERE lead_id IN ({lead_ids})", args)
-        conn.execute(f"DELETE FROM drafts WHERE lead_id IN ({lead_ids})", args)
-        conn.execute("DELETE FROM leads WHERE campaign_id = ANY(%s) OR domain ~ %s", args)
-        conn.execute("DELETE FROM companies WHERE campaign_id = ANY(%s)", [list(TEST_CAMPAIGNS)])
-        conn.execute("DELETE FROM run_progress WHERE campaign_id = ANY(%s)", [list(TEST_CAMPAIGNS)])
-        conn.execute("DELETE FROM runs WHERE campaign_id = ANY(%s)", [list(TEST_CAMPAIGNS)])
-        conn.execute("DELETE FROM campaigns WHERE campaign_id = ANY(%s)", [list(TEST_CAMPAIGNS)])
-        conn.execute("DELETE FROM suppressions WHERE value ~ %s", [TEST_EMAIL_PATTERN])
+        for sql in DELETES:
+            print(f"  {conn.execute(sql, args).rowcount:>6}  {sql.split(' WHERE')[0][12:]}")
         conn.commit()
         print("\ndeleted.")
 
