@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterable
 
 from gtm_engine.config.schema import CampaignConfig, EngineSettings
 from gtm_engine.discovery.geocode import BBox, Geocoder
@@ -19,23 +19,46 @@ S3_ROOT = "s3://overturemaps-us-west-2/release"
 COLUMNS = ["id", "name", "category", "website", "email", "phone", "address", "city", "brand", "lat", "lon"]
 
 
-def build_sql(release: str, bbox: BBox, categories: list[str], limit: int | None) -> tuple[str, list[str]]:
+# The struct holding a place's category. Overture renamed it from `categories` to
+# `taxonomy` in release 2026-09-23.0, and _query() always reads whichever release is
+# newest - so an upstream rename breaks every run with no commit on our side, and the
+# error ("Referenced table not found") names a table, which sends you looking at SQL
+# syntax rather than at the schema. Newest name first; probe rather than assume.
+CATEGORY_COLUMNS = ("taxonomy", "categories")
+
+
+def pick_category_column(available: Iterable[str]) -> str:
+    available = set(available)
+    for name in CATEGORY_COLUMNS:
+        if name in available:
+            return name
+    raise RuntimeError(
+        f"Overture places has none of {CATEGORY_COLUMNS} (columns: {sorted(available)}). "
+        "The schema changed again; add the new name to CATEGORY_COLUMNS."
+    )
+
+
+def build_sql(release: str, bbox: BBox, categories: list[str], limit: int | None,
+              category_column: str = CATEGORY_COLUMNS[0]) -> tuple[str, list[str]]:
+    # Bracket access, not dot: `primary` is a reserved word, and the struct is nested
+    # deep enough that a bare dot chain reads as schema.table.column when it fails.
+    cat_expr = f"{category_column}['primary']"
     cat_clause = ""
     params: list[str] = []
     if categories:
-        cat_clause = "AND (" + " OR ".join("lower(categories.primary) LIKE ?" for _ in categories) + ")"
+        cat_clause = "AND (" + " OR ".join(f"lower({cat_expr}) LIKE ?" for _ in categories) + ")"
         params = [f"%{c.lower()}%" for c in categories]
     sql = f"""
-        SELECT id, names.primary AS name, categories.primary AS category,
+        SELECT id, names['primary'] AS name, {cat_expr} AS category,
                CASE WHEN length(websites)>0 THEN websites[1] END AS website,
                CASE WHEN length(emails)>0   THEN emails[1]   END AS email,
                CASE WHEN length(phones)>0   THEN phones[1]   END AS phone,
                addresses[1].freeform AS address, addresses[1].locality AS city,
-               brand.names.primary AS brand, bbox.ymin AS lat, bbox.xmin AS lon
+               brand.names['primary'] AS brand, bbox.ymin AS lat, bbox.xmin AS lon
         FROM read_parquet('{S3_ROOT}/{release}/theme=places/type=place/*', hive_partitioning=1)
         WHERE bbox.xmin BETWEEN {bbox.west} AND {bbox.east}
           AND bbox.ymin BETWEEN {bbox.south} AND {bbox.north}
-          AND names.primary IS NOT NULL
+          AND names['primary'] IS NOT NULL
           {cat_clause}
         {f'LIMIT {int(limit)}' if limit else ''}
     """
@@ -83,7 +106,12 @@ class OvertureDiscovery:
             "SELECT max(regexp_extract(file, 'release/([^/]+)/', 1)) "
             f"FROM glob('{S3_ROOT}/*/theme=places/type=place/*')"
         ).fetchone()[0]
-        sql, params = build_sql(release, bbox, categories, self.per_city_limit)
+        dataset = f"{S3_ROOT}/{release}/theme=places/type=place/*"
+        columns = [r[0] for r in con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{dataset}', hive_partitioning=1)"
+        ).fetchall()]
+        sql, params = build_sql(release, bbox, categories, self.per_city_limit,
+                                pick_category_column(columns))
         rows = con.execute(sql, params).fetchall()
         con.close()
         return [dict(zip(COLUMNS, r)) for r in rows]

@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 import respx
 
 from conftest import fixture
@@ -153,3 +154,27 @@ def test_overture_row_mapping_and_sql():
     assert c.source == "overture" and c.category == "overture=mobile_phone_store"
     assert c.email == "info@cellstory.pk" and c.city == "Islamabad"
     assert row_to_company({"name": ""}, "Islamabad", "Pakistan") is None
+
+
+def test_overture_category_column_follows_the_release_schema():
+    """Overture renamed `categories` to `taxonomy` in 2026-09-23.0 and the query reads
+    whichever release is newest, so this broke in production with no commit on our side.
+    The old test asserted on the release path and the LIKE count and stayed green."""
+    from gtm_engine.discovery.overture import build_sql, pick_category_column
+
+    assert pick_category_column(["id", "names", "taxonomy"]) == "taxonomy"
+    assert pick_category_column(["id", "names", "categories"]) == "categories"
+    # Both present (a transition release): prefer the current name.
+    assert pick_category_column(["categories", "taxonomy"]) == "taxonomy"
+
+    with pytest.raises(RuntimeError, match="schema changed again"):
+        pick_category_column(["id", "names", "websites"])
+
+    for column in ("taxonomy", "categories"):
+        sql, _ = build_sql("2026-08-19.0", BBox(33.5, 72.8, 33.8, 73.2), ["clothing"], 5, column)
+        assert f"{column}['primary']" in sql
+        other = "categories" if column == "taxonomy" else "taxonomy"
+        assert other not in sql
+        # `primary` is reserved; a bare dot chain is what produced the original
+        # "Referenced table not found" error rather than an unknown-column one.
+        assert ".primary" not in sql
