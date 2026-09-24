@@ -1,16 +1,33 @@
 """Vercel Python entrypoint. Wraps the FastAPI app defined in the repo-root gtm_engine
-package — no endpoint logic lives here. Requires Project Settings -> "Include files
-outside the root directory" so this function can import gtm_engine (Root Directory is
-set to web/)."""
+package - no endpoint logic lives here.
+
+Two layouts have to work, and they differ in where gtm_engine sits relative to this file:
+
+  local dev   E:/job/gtm-leads/{gtm_engine,config}  with this file at web/api/index.py
+  Vercel      /var/task/{gtm_engine,config}         with this file at api/index.py
+
+On Vercel the Root Directory is web/, so web/ *becomes* the deployment root and
+everything above it is gone - the repo root simply does not exist at runtime. That is
+why vercel.json's installCommand copies gtm_engine/ and config/ into web/ during the
+build (and why web/.gitignore excludes those copies). Rather than hardcode a parent
+depth that is right in one layout and wrong in the other, walk up until we find the
+package.
+"""
 
 import sys
 from pathlib import Path
 
-# Root Directory is web/, so the repo root (containing gtm_engine/) is two levels up
-# from this file (web/api/index.py) — not on sys.path by default.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_HERE = Path(__file__).resolve()
+for _root in _HERE.parents:
+    if (_root / "gtm_engine").is_dir():
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        break
+else:  # pragma: no cover - only reachable if the build step did not run
+    raise ModuleNotFoundError(
+        f"gtm_engine not found above {_HERE}. On Vercel this means vercel.json's "
+        "installCommand did not copy it into the root directory."
+    )
 
 from gtm_engine.api.main import app as _app  # noqa: E402
 
@@ -19,11 +36,8 @@ async def app(scope, receive, send):
     """Strip the /api prefix that vercel.json's rewrite adds, so gtm_engine's routes
     (defined as /health, /campaigns, ...) keep matching unmodified.
 
-    The rewrite still hands us the *original* request path, so /api/health arrives here
-    as /api/health even though it was routed via /api/index. Note the rewrite target is
-    "/api/index", not "/api/index.py": Vercel addresses functions by their extensionless
-    route, and a destination that does not resolve is silently ignored, which drops the
-    request through to Next.js and yields a 500 that looks nothing like a Python error.
+    The rewrite hands us the *original* request path, so /api/health arrives here as
+    /api/health even though vercel.json routed it via /api/index.py.
     """
     if scope["type"] == "http" and scope["path"].startswith("/api"):
         scope = dict(scope)

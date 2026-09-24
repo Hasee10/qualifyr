@@ -39,6 +39,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Copied in from the repo root by vercel.json's installCommand so the Python function
+# can import them (Root Directory is web/, so nothing above it exists at runtime).
+# Build artefacts, not source - the originals live at the repo root.
+/gtm_engine/
+/config/
+/api/__pycache__/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

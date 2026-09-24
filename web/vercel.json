@@ -1,6 +1,10 @@
 {
+  "installCommand": "cp -r ../gtm_engine ../config . && npm ci",
+  "functions": {
+    "api/index.py": { "includeFiles": "{gtm_engine,config}/**" }
+  },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/api", "destination": "/api/index" }
+    { "source": "/api/:path*", "destination": "/api/index.py" },
+    { "source": "/api", "destination": "/api/index.py" }
   ]
 }
