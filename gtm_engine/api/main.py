@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,9 +35,10 @@ from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
 app = FastAPI(title="GTM Lead Engine", version=__version__)
+_extra_origins = [o.strip() for o in os.environ.get("GTM_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", *_extra_origins],
     allow_methods=["*"], allow_headers=["*"],
 )
 

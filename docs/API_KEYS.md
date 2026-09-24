@@ -20,6 +20,7 @@ the repo. **Status** is updated as keys are added.
 | `GTM_GEMINI_API_KEY` | Google Gemini | LLM fallback after Groq | free, rate-limited | optional | ⚠️ key valid, but every free flash model returned 404/503 on 2026-09-22; Groq is used instead |
 | `GTM_SHEETS_SPREADSHEET_ID` | Google Sheets | Target sheet for the lead mirror | free | optional | ✅ set (id present) |
 | `GTM_SHEETS_CREDENTIALS_JSON` | Google service account | Auth for the sheet mirror | free | optional | ⏳ **not supplied** — the PDF points at `sheets-api-key.json` in a Drive folder I cannot open; paste its contents as one line |
+| `GTM_CORS_ORIGINS` | — | Comma-separated extra origins allowed to call the API (e.g. the deployed frontend URL); `localhost:3000` is always allowed | n/a | optional | — |
 
 ## Keyless services in use
 
