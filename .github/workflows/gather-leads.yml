@@ -17,7 +17,12 @@ on:
     - cron: "0 3 * * 1"   # Mondays 03:00 UTC (08:00 PKT)
 
 concurrency:
-  group: gather-leads
+  # Per campaign, not global. Two campaigns share nothing - separate rows, separate
+  # leads/<campaign>/ output - but one group meant dispatching three at once left
+  # GitHub cancelling the queued ones, so two of the three silently never ran and sat
+  # wedged at "starting" instead. Same campaign twice still queues, which is the case
+  # that genuinely conflicts.
+  group: gather-leads-${{ github.event.inputs.campaign || 'config/campaigns/example_retail_islamabad.yaml' }}
   cancel-in-progress: false
 
 permissions:
