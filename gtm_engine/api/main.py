@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from gtm_engine import __version__
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
-from gtm_engine.config.loader import CONFIG_DIR, is_serverless, runtime_dir
+from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
 from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.export import sheets as sheets_export
 from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
@@ -89,6 +89,35 @@ def dispatch_workflow(workflow_file: str, inputs: dict[str, str]) -> None:
     )
     if resp.status_code >= 300:
         raise HTTPException(502, f"GitHub workflow dispatch failed ({resp.status_code}): {resp.text}")
+
+
+# A run that has not reported in this long is treated as dead rather than active. The
+# Actions job can die without ever writing "failed" - bad input, cancelled run, runner
+# failure - and the row it left behind would otherwise block every future dispatch for
+# that campaign, permanently, with no way to clear it from the UI. The pipeline reports
+# after each company, so a healthy run is never this quiet.
+_STALE_AFTER = timedelta(minutes=15)
+
+
+def _run_is_active(live: dict | None) -> bool:
+    if not live or live.get("stage") in (None, "completed", "failed"):
+        return False
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(live["updated_at"])
+    except (KeyError, TypeError, ValueError):
+        return True  # no usable timestamp: assume live, since double-dispatching is worse
+    return age < _STALE_AFTER
+
+
+def _workflow_campaign_path(campaign_id: str) -> str:
+    """The campaign YAML as a path the *Actions runner* can open.
+
+    _campaign_files() yields absolute paths rooted at this process's PROJECT_ROOT, which
+    on Vercel is /var/task. The runner resolves the input against its own checkout, so an
+    absolute path from here points at nothing there and `gtm run` dies on a missing file.
+    The workflow's own default is repo-relative, so match that.
+    """
+    return _campaign_files()[campaign_id].relative_to(PROJECT_ROOT).as_posix()
 
 
 def _campaign_files() -> dict[str, Path]:
@@ -164,12 +193,12 @@ def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     db = _db()
     live = db.get_run_progress(campaign_id)
     db.close()
-    if live and live.get("stage") not in (None, "completed", "failed"):
+    if _run_is_active(live):
         raise HTTPException(409, "a run is already in progress for this campaign")
     dispatch_workflow(
         "gather-leads.yml",
         {
-            "campaign": str(_campaign_files()[campaign_id]),
+            "campaign": _workflow_campaign_path(campaign_id),
             "max_companies": str(req.max_companies or campaign.max_companies),
         },
     )

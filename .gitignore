@@ -34,3 +34,6 @@ Thumbs.db
 # venv
 .venv/
 data/outbox/
+
+# Local snapshot taken before clean_test_debris.py --apply. Data, not source.
+debris-backup.json

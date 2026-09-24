@@ -44,6 +44,11 @@ PREVIEW = [
      f"SELECT count(*) FROM drafts WHERE lead_id IN "
      f"(SELECT lead_id FROM leads WHERE {LEAD_MATCH})"),
     ("companies", "SELECT count(*) FROM companies WHERE campaign_id = ANY(%(campaigns)s)"),
+    # pages hangs off companies by company_key with no campaign_id of its own, so it is
+    # invisible to every campaign-scoped filter here. Missed on the first pass and left
+    # three orphans behind; match anything whose company is gone.
+    ("pages (orphaned)",
+     "SELECT count(*) FROM pages WHERE company_key NOT IN (SELECT company_key FROM companies)"),
     ("runs", "SELECT count(*) FROM runs WHERE campaign_id = ANY(%(campaigns)s)"),
     ("campaigns", "SELECT count(*) FROM campaigns WHERE campaign_id = ANY(%(campaigns)s)"),
     ("run_progress", "SELECT count(*) FROM run_progress WHERE campaign_id = ANY(%(campaigns)s)"),
@@ -54,7 +59,10 @@ DELETES = [
     f"DELETE FROM outreach_events WHERE lead_id IN (SELECT lead_id FROM leads WHERE {LEAD_MATCH})",
     f"DELETE FROM drafts WHERE lead_id IN (SELECT lead_id FROM leads WHERE {LEAD_MATCH})",
     f"DELETE FROM leads WHERE {LEAD_MATCH}",
+    "DELETE FROM pages WHERE company_key IN "
+    "(SELECT company_key FROM companies WHERE campaign_id = ANY(%(campaigns)s))",
     "DELETE FROM companies WHERE campaign_id = ANY(%(campaigns)s)",
+    "DELETE FROM pages WHERE company_key NOT IN (SELECT company_key FROM companies)",
     "DELETE FROM run_progress WHERE campaign_id = ANY(%(campaigns)s)",
     "DELETE FROM runs WHERE campaign_id = ANY(%(campaigns)s)",
     "DELETE FROM campaigns WHERE campaign_id = ANY(%(campaigns)s)",
