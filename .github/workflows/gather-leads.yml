@@ -34,6 +34,11 @@ jobs:
       GTM_SHEETS_CREDENTIALS_JSON: ${{ secrets.GTM_SHEETS_CREDENTIALS_JSON }}
       GTM_SHEETS_SPREADSHEET_ID: ${{ secrets.GTM_SHEETS_SPREADSHEET_ID }}
       GTM_BRAVE_API_KEY: ${{ secrets.GTM_BRAVE_API_KEY }}
+      GTM_DATABASE_URL: ${{ secrets.GTM_DATABASE_URL }}
+      # Read by validation/verifier.py (mailbox verification) and llm/client.py. Without
+      # them the crawl silently downgrades: no mailbox confirmation, no LLM layer.
+      GTM_HUNTER_API_KEY: ${{ secrets.GTM_HUNTER_API_KEY }}
+      GTM_GROQ_API_KEY: ${{ secrets.GTM_GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,16 +49,13 @@ jobs:
 
       - run: pip install -e ".[api,overture,sheets]"
 
-      # The SQLite DB carries dedupe state and suppressions across runs. Cache keys are
-      # immutable, so save under a fresh key every run and restore the newest.
-      - name: Restore engine database
+      # Local geocode cache only (dedupe/suppression state now lives in Postgres).
+      - name: Restore geocode cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            data/gtm.sqlite
-            data/geocode_cache.json
-          key: gtm-db-${{ github.run_id }}
-          restore-keys: gtm-db-
+          path: data/geocode_cache.json
+          key: gtm-geocode-${{ github.run_id }}
+          restore-keys: gtm-geocode-
 
       - name: Run campaign
         run: python -m gtm_engine.cli run "$CAMPAIGN" --max-companies "$MAX_COMPANIES"
@@ -64,14 +66,12 @@ jobs:
           campaign_id=$(python -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['campaign_id'])" "$CAMPAIGN")
           python -m gtm_engine.cli sheets "$campaign_id" || echo "sheets export failed (non-fatal)"
 
-      - name: Save engine database
+      - name: Save geocode cache
         uses: actions/cache/save@v4
         if: always()
         with:
-          path: |
-            data/gtm.sqlite
-            data/geocode_cache.json
-          key: gtm-db-${{ github.run_id }}
+          path: data/geocode_cache.json
+          key: gtm-geocode-${{ github.run_id }}
 
       - name: Upload CSVs as artifact
         uses: actions/upload-artifact@v4

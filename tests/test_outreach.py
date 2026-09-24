@@ -36,7 +36,7 @@ def _lead(name: str, email: str, **kw) -> Lead:
 
 @pytest.fixture
 def db(settings, campaign):
-    d = Database(settings.db_path)
+    d = Database(settings.database_url)
     d.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     for l in (
         _lead("Zara Fabrics", "ahmed@zarafabrics.pk", contact_name="Ahmed Raza", total_score=92),
@@ -179,13 +179,13 @@ def test_daily_cap_and_window(db, campaign, osettings, templates, tmp_path):
     assert r.sent == 0 and r.stopped_reason == "outside send window"
 
 
-def test_ledger_prevents_double_send_after_db_loss(db, campaign, osettings, templates, tmp_path):
+def test_ledger_prevents_double_send_after_db_loss(db, campaign, osettings, templates, tmp_path, pg_schema):
     ledger = Ledger(tmp_path / "ledger.json")
     enqueue(db, "test-retail", osettings, ledger, now=MON_10AM_PKT)
     send_due(db, campaign, osettings, templates, FakeSender(), ledger, now=MON_10AM_PKT, sleep=lambda s: None)
 
     # Simulate a fresh runner: brand-new DB with the leads re-scraped, same ledger file on disk.
-    fresh = Database(tmp_path / "fresh.sqlite")
+    fresh = Database(pg_schema())
     fresh.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     for l in db.list_leads("test-retail"):
         l.sequence_status = SequenceStatus.NOT_QUEUED

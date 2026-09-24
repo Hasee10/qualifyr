@@ -66,7 +66,7 @@ def _lead(name, email):
 
 @pytest.fixture
 def world(settings, campaign, tmp_path):
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     for l in (_lead("Zara Fabrics", "ahmed@zarafabrics.pk"), _lead("MCC", "info@mcc.com.pk"), _lead("Vegas", "x@vegas.pk")):
         db.save_lead(l, "run", l.domain)

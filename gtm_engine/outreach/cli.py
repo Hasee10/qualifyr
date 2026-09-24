@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -32,7 +31,7 @@ def _campaign(db: Database, campaign_id: str) -> CampaignConfig:
 
 def cmd_queue(args: argparse.Namespace) -> int:
     settings, osettings = load_settings(), load_outreach_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     queued = enqueue(db, args.campaign_id, osettings, Ledger(ledger_path(args.campaign_id)))
     for l in queued:
         print(f"  queued  {l.company_name:<30} {l.contact_email}")
@@ -45,18 +44,17 @@ def cmd_send(args: argparse.Namespace) -> int:
     settings, osettings, templates = load_settings(), load_outreach_settings(), load_templates()
     dry_run = args.dry_run or not osettings.credentials_present
     if dry_run:
-        # A dry run must leave no trace: work on a throwaway copy of the DB and ledger so
-        # the real ledger never claims an email was sent.
+        # A dry run must leave no trace: open the DB in transactional dry-run mode
+        # (rolled back on close) and point the ledger at a throwaway file so the
+        # real ledger never claims an email was sent.
         scratch = settings.db_path.parent / "outbox"
         scratch.mkdir(parents=True, exist_ok=True)
-        db_copy = scratch / "dryrun.sqlite"
-        shutil.copyfile(settings.db_path, db_copy)
-        db = Database(db_copy)
+        db = Database(settings.database_url, dry_run=True)
         ledger = Ledger(ledger_path(args.campaign_id))
         ledger.path = scratch / "dryrun_ledger.json"
         print("DRY RUN: no email will be sent; state changes go to data/outbox/ only")
     else:
-        db = Database(settings.db_path)
+        db = Database(settings.database_url)
         ledger = Ledger(ledger_path(args.campaign_id))
     campaign = _campaign(db, args.campaign_id)
     if not args.no_queue:
@@ -82,7 +80,7 @@ def cmd_send(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     settings, osettings = load_settings(), load_outreach_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     r = sync_replies(db, args.campaign_id, osettings, Ledger(ledger_path(args.campaign_id)))
     for d in r.details:
         print("  " + d)
@@ -94,7 +92,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     counts: dict[str, int] = {}
     for l in db.list_leads(args.campaign_id):
         counts[l.sequence_status.value] = counts.get(l.sequence_status.value, 0) + 1
@@ -114,7 +112,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_approve(args: argparse.Namespace) -> int:
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     n = 0
     for l in db.list_leads(args.campaign_id, outreach_ready=True):
         if args.all or l.lead_id in args.lead_ids:
@@ -128,7 +126,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
 
 def cmd_preview(args: argparse.Namespace) -> int:
     settings, osettings, templates = load_settings(), load_outreach_settings(), load_templates()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     campaign = _campaign(db, args.campaign_id)
     leads = db.list_leads(args.campaign_id, outreach_ready=True)[: args.count]
     for l in leads:
@@ -163,7 +161,7 @@ def cmd_mailboxes(args: argparse.Namespace) -> int:
         return 0
     ledger = Ledger(ledger_path(args.campaign_id))
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     for a, st in MailboxPool(boxes, osettings, settings.db_path.parent / "outbox").states(db, args.campaign_id, ledger, day).items():
         print(f"  {a:<34} {st.mailbox.auth_mode:<12} sent {st.sent_today}/{st.cap} today"
               + (f"  warm-up day {st.days_active}" if st.days_active else "  (never sent)")

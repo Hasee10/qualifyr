@@ -3,14 +3,13 @@ through the human-approval queue: preview -> edit -> approve -> send."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -29,8 +28,6 @@ from gtm_engine.outreach.reply_state import sync_replies
 from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
-from gtm_engine.pipeline import Pipeline
-from gtm_engine.scraping.browser import build_fetcher
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -44,12 +41,28 @@ app.add_middleware(
 
 _settings = load_settings()
 _defaults = load_defaults()
-_runs: dict[str, dict] = {}          # campaign_id -> live progress of the current/last run
 CAMPAIGN_DIR = CONFIG_DIR / "campaigns"
 
 
 def _db() -> Database:
-    return Database(_settings.db_path)
+    return Database(_settings.database_url)
+
+
+def dispatch_workflow(workflow_file: str, inputs: dict[str, str]) -> None:
+    """Trigger a GitHub Actions workflow_dispatch run. Requires GTM_GITHUB_TOKEN (a repo-scoped
+    PAT or fine-grained token with 'actions: write') and GTM_GITHUB_REPO ('owner/repo')."""
+    token = os.environ.get("GTM_GITHUB_TOKEN")
+    repo = os.environ.get("GTM_GITHUB_REPO")
+    if not token or not repo:
+        raise HTTPException(500, "GTM_GITHUB_TOKEN / GTM_GITHUB_REPO not configured; cannot dispatch long-running jobs")
+    resp = httpx.post(
+        f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/dispatches",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        json={"ref": os.environ.get("GTM_GITHUB_REF", "main"), "inputs": inputs},
+        timeout=15.0,
+    )
+    if resp.status_code >= 300:
+        raise HTTPException(502, f"GitHub workflow dispatch failed ({resp.status_code}): {resp.text}")
 
 
 def _campaign_files() -> dict[str, Path]:
@@ -101,7 +114,7 @@ def campaigns() -> list[dict]:
             "qualified": sum(1 for l in buyers if l.total_score >= c.min_score),
             "outreach_ready": sum(1 for l in leads if l.outreach_ready),
             "last_run": (db.list_runs(cid) or [None])[0],
-            "live": _runs.get(cid),
+            "live": db.get_run_progress(cid),
         })
     db.close()
     return out
@@ -117,36 +130,36 @@ class RunRequest(BaseModel):
 
 
 @app.post("/campaigns/{campaign_id}/run")
-async def run_campaign(campaign_id: str, req: RunRequest) -> dict:
+def run_campaign(campaign_id: str, req: RunRequest) -> dict:
+    """Dispatches the crawl to GitHub Actions (gather-leads.yml) rather than running it
+    in-request: a full campaign run is minutes-to-hours, far past any serverless timeout.
+    Progress lands in the run_progress table, written by the Actions runner."""
     campaign = _campaign(campaign_id)
-    if req.max_companies:
-        campaign.max_companies = req.max_companies
-    if _runs.get(campaign_id, {}).get("stage") not in (None, "completed", "failed"):
+    db = _db()
+    live = db.get_run_progress(campaign_id)
+    db.close()
+    if live and live.get("stage") not in (None, "completed", "failed"):
         raise HTTPException(409, "a run is already in progress for this campaign")
-    ticket = {"run_id": None, "stage": "starting", "done": 0, "total": 0, "message": "", "stats": None}
-    _runs[campaign_id] = ticket
-
-    async def job() -> None:
-        db = _db()
-        try:
-            async with build_fetcher(_settings) as fetcher:
-                def on_progress(stage: str, done: int, total: int, message: str) -> None:
-                    ticket.update(stage=stage, done=done, total=total, message=message)
-                result = await Pipeline(_settings, _defaults, db, fetcher).run(campaign, progress=on_progress)
-                ticket.update(run_id=result.run_id, stage="completed", message="done", stats=result.stats.as_dict())
-        except Exception as exc:  # noqa: BLE001
-            ticket.update(stage="failed", message=str(exc))
-            log.exception("run failed")
-        finally:
-            db.close()
-
-    asyncio.create_task(job())
+    dispatch_workflow(
+        "gather-leads.yml",
+        {
+            "campaign": str(_campaign_files()[campaign_id]),
+            "max_companies": str(req.max_companies or campaign.max_companies),
+        },
+    )
+    db = _db()
+    db.set_run_progress(campaign_id, None, "starting", 0, 0, "dispatched to GitHub Actions")
+    ticket = db.get_run_progress(campaign_id)
+    db.close()
     return ticket
 
 
 @app.get("/campaigns/{campaign_id}/progress")
 def progress(campaign_id: str) -> dict:
-    return _runs.get(campaign_id) or {"stage": "idle"}
+    db = _db()
+    live = db.get_run_progress(campaign_id)
+    db.close()
+    return live or {"stage": "idle"}
 
 
 @app.get("/campaigns/{campaign_id}/stats")
@@ -534,36 +547,37 @@ class SendRequest(BaseModel):
 
 @app.post("/campaigns/{campaign_id}/outreach/send")
 def outreach_send(campaign_id: str, req: SendRequest) -> dict:
-    """Send approved, due emails. Runs the reply sync first so nobody who answered gets a follow-up."""
+    """Send approved, due emails. A real send is dispatched to GitHub Actions
+    (outreach.yml): sender-protection jitter spaces sends 30-120s apart, which a batch
+    of even a few emails blows past any Vercel serverless timeout. Dry-run previews stay
+    synchronous here since they're fast and only touch throwaway state."""
     campaign = _campaign(campaign_id)
     osettings, templates = load_outreach_settings(), load_templates()
-    db = _db()
-    ledger = Ledger(ledger_path(campaign_id))
-    sync = None
-    if osettings.credentials_present and not req.dry_run:
-        try:
-            r = sync_replies(db, campaign_id, osettings, ledger)
-            sync = {"replied": r.replied, "interested": r.interested, "not_interested": r.not_interested,
-                    "out_of_office": r.out_of_office, "wrong_person": r.wrong_person, "auto_reply": r.auto_reply,
-                    "unsubscribed": r.unsubscribed, "bounced": r.bounced, "scanned": r.scanned}
-        except Exception as exc:  # noqa: BLE001 - a mailbox hiccup must not block a supervised send
-            sync = {"error": str(exc)}
     dry = req.dry_run or not osettings.credentials_present
-    if dry:
-        # No trace on the real DB or ledger: work on throwaway copies.
-        db.close()
-        scratch = _settings.db_path.parent / "outbox"
-        scratch.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(_settings.db_path, scratch / "dryrun.sqlite")
-        db = Database(scratch / "dryrun.sqlite")
-        ledger.path = scratch / "dryrun_ledger.json"
-    pool = MailboxPool(load_mailboxes(), osettings, _settings.db_path.parent / "outbox", dry_run=dry)
+    if not dry:
+        dispatch_workflow("outreach.yml", {
+            "campaign_id": campaign_id,
+            "limit": str(req.limit or ""),
+            "dry_run": "false",
+            "ignore_window": "true" if req.ignore_window else "false",
+        })
+        return {"dispatched": True, "mode": "github-actions", "sent": 0, "skipped": 0, "failed": 0,
+                "stopped_reason": None, "details": ["dispatched to GitHub Actions (outreach.yml)"],
+                "sync": None, "mailboxes": {}}
+    # Dry-run preview: no trace on the real DB or ledger. Transactional dry-run mode is
+    # rolled back on close; the ledger is pointed at a throwaway file.
+    scratch = _settings.db_path.parent / "outbox"
+    scratch.mkdir(parents=True, exist_ok=True)
+    db = Database(_settings.database_url, dry_run=True)
+    ledger = Ledger(ledger_path(campaign_id))
+    ledger.path = scratch / "dryrun_ledger.json"
+    pool = MailboxPool(load_mailboxes(), osettings, scratch, dry_run=True)
     report = send_due(db, campaign, osettings, templates, pool, ledger, limit=req.limit, ignore_window=req.ignore_window)
     pool.close()
     db.close()
     return {"sent": report.sent, "skipped": report.skipped, "failed": report.failed,
             "stopped_reason": report.stopped_reason, "details": report.details,
-            "mode": pool.name, "sync": sync, "mailboxes": report.mailboxes}
+            "mode": pool.name, "sync": None, "mailboxes": report.mailboxes}
 
 
 @app.post("/campaigns/{campaign_id}/outreach/sync")

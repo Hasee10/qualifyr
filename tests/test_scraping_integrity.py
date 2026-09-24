@@ -153,7 +153,7 @@ async def test_parked_site_cannot_produce_a_qualified_lead(campaign, settings, d
     respx.get("https://parked.pk/").mock(return_value=_html("<html><body><h1>parked.pk is for sale</h1></body></html>"))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     campaign.osm_categories, campaign.overture_categories = [], []
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Parked Traders", website="https://parked.pk", city="Islamabad",
@@ -228,7 +228,7 @@ async def test_two_records_redirecting_to_one_site_are_one_lead(campaign, settin
     respx.get("https://zarafabrics.com/").mock(return_value=_html(REAL))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     campaign.osm_categories, campaign.overture_categories = [], []
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Zara Fabrics", website="https://zarafabrics.com", city="Islamabad",
@@ -254,7 +254,7 @@ async def test_mismatched_website_contributes_no_contact_details(campaign, setti
     respx.get("https://islamabadinns.wordpress.com/").mock(return_value=_html(other))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     campaign.osm_categories, campaign.overture_categories = [], []
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="D-12 Markaz", website="https://islamabadinns.wordpress.com",

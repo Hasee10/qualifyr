@@ -42,7 +42,7 @@ def test_sheets_exporter_creates_tab_clears_and_writes():
 
 
 def test_suppression_list_and_removal(settings):
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     db.add_suppression("Info@X.pk", "email", "test")
     db.add_suppression("bad.pk", "domain")
     rows = db.list_suppressions()

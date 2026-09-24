@@ -26,9 +26,14 @@ def _setup_logging(level: str) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _progress(stage: str, done: int, total: int, message: str) -> None:
-    suffix = f"{done}/{total}" if total else str(done)
-    print(f"[{stage:>8}] {suffix:<9} {message}", file=sys.stderr, flush=True)
+def _make_progress(db: Database, campaign_id: str):
+    def _progress(stage: str, done: int, total: int, message: str) -> None:
+        suffix = f"{done}/{total}" if total else str(done)
+        print(f"[{stage:>8}] {suffix:<9} {message}", file=sys.stderr, flush=True)
+        # Written to run_progress so /campaigns/{id}/progress (served from a different
+        # process on Vercel) can show live state while this runs in GitHub Actions.
+        db.set_run_progress(campaign_id, None, stage, done, total, message)
+    return _progress
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -38,10 +43,16 @@ async def _run(args: argparse.Namespace) -> int:
     campaign = load_campaign(args.campaign)
     if args.max_companies:
         campaign.max_companies = args.max_companies
-    db = Database(settings.db_path)
-    async with build_fetcher(settings) as fetcher:
-        pipeline = Pipeline(settings, defaults, db, fetcher)
-        result = await pipeline.run(campaign, progress=_progress)
+    db = Database(settings.database_url)
+    try:
+        async with build_fetcher(settings) as fetcher:
+            pipeline = Pipeline(settings, defaults, db, fetcher)
+            result = await pipeline.run(campaign, progress=_make_progress(db, campaign.campaign_id))
+    except Exception as exc:
+        db.set_run_progress(campaign.campaign_id, None, "failed", 0, 0, str(exc))
+        db.close()
+        raise
+    db.set_run_progress(campaign.campaign_id, result.run_id, "completed", 0, 0, "done")
     if getattr(fetcher, "fallbacks", 0):
         print(f"  browser fallback rendered {fetcher.fallbacks} page(s)")
 
@@ -62,7 +73,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 def _export(args: argparse.Namespace) -> int:
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     leads = db.list_leads(args.campaign_id, run_id=args.run_id,
                           min_score=None if args.all else args.min_score,
                           company_type=None if args.all else CompanyType.BUYER.value)
@@ -76,7 +87,7 @@ def _export(args: argparse.Namespace) -> int:
 def _sheets(args: argparse.Namespace) -> int:
     from gtm_engine.export import sheets as sheets_export
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     leads = db.list_leads(args.campaign_id, min_score=None if args.all else args.min_score,
                           company_type=None if args.all else CompanyType.BUYER.value)
     db.close()
@@ -87,7 +98,7 @@ def _sheets(args: argparse.Namespace) -> int:
 
 def _suppress(args: argparse.Namespace) -> int:
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     kind = "email" if "@" in args.value else "domain"
     db.add_suppression(args.value, kind, args.reason)
     print(f"suppressed {kind}: {args.value}")
@@ -97,7 +108,7 @@ def _suppress(args: argparse.Namespace) -> int:
 
 def _runs(args: argparse.Namespace) -> int:
     settings = load_settings()
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     for r in db.list_runs(args.campaign_id):
         print(f"{r['run_id']}  {r['campaign_id']}  {r['status']:<9}  {r['started_at'][:19]}  {r.get('stats_json') or ''}")
     db.close()

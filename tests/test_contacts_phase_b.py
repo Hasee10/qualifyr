@@ -146,7 +146,7 @@ async def test_pipeline_discovers_decision_maker_email(campaign, settings, defau
                                   country="Pakistan", source="osm", phone="0300 1234567")]
 
     verifier = ScriptedVerifier(deliverable={"ahmed.raza@zarafabrics.pk"})
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     async with HttpFetcher(settings) as fetcher:
         pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX(), verifier=verifier)
         pipeline.discover = fake_discover
@@ -177,7 +177,7 @@ async def test_pipeline_keeps_generic_when_unconfirmed(campaign, settings, defau
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk", city="Islamabad", country="Pakistan", source="osm")]
 
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     async with HttpFetcher(settings) as fetcher:
         pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX(), verifier=MxOnlyVerifier())
         pipeline.discover = fake_discover

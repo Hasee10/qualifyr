@@ -21,6 +21,14 @@ the repo. **Status** is updated as keys are added.
 | `GTM_SHEETS_SPREADSHEET_ID` | Google Sheets | Target sheet for the lead mirror | free | optional | ✅ set (id present) |
 | `GTM_SHEETS_CREDENTIALS_JSON` | Google service account | Auth for the sheet mirror | free | optional | ⏳ **not supplied** — the PDF points at `sheets-api-key.json` in a Drive folder I cannot open; paste its contents as one line |
 | `GTM_CORS_ORIGINS` | — | Comma-separated extra origins allowed to call the API (e.g. the deployed frontend URL); `localhost:3000` is always allowed | n/a | optional | — |
+| `GTM_DATABASE_URL` | Supabase Postgres (pooler connection string) | Primary datastore, replacing local SQLite — required everywhere the engine runs (API, CLI, GitHub Actions) | free tier | **yes** | ✅ set (Supabase project provisioned) |
+| `GTM_GITHUB_TOKEN` | GitHub PAT (repo-scoped, `actions:write`) | Lets the deployed API trigger `gather-leads.yml` / `outreach.yml` via `workflow_dispatch` instead of running them in-request | free | required on Vercel | ⏳ not set |
+| `GTM_GITHUB_REPO` | — | `owner/repo` for the dispatch call above | n/a | required on Vercel | ⏳ not set |
+| `GTM_GITHUB_REF` | — | Branch to run the dispatched workflow from; defaults to `main` | n/a | optional | — |
+
+Note: Supabase's **service-role/anon API keys are not used** by this engine — storage
+goes over plain SQL via `psycopg` against `GTM_DATABASE_URL`, not the Supabase REST/client
+API. Keep them out of Vercel/Actions unless something starts calling that API directly.
 
 ## Keyless services in use
 

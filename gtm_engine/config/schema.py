@@ -120,6 +120,9 @@ class EngineSettings(BaseModel):
     """Runtime settings. Loaded from config/engine.yaml, overridable via env GTM_*."""
 
     db_path: Path = Path("data/gtm.sqlite")
+    # Postgres connection string (Supabase pooler URL). Required in any deployed
+    # environment; storage.Database refuses to construct without it.
+    database_url: str | None = None
     export_dir: Path = Path("data/exports")
     user_agent: str = "GTMLeadEngine/0.1 (+business research; contact via site form)"
     request_timeout_s: float = 15.0

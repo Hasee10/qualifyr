@@ -50,6 +50,10 @@ jobs:
       GTM_MAILBOX_2_PASSWORD: ${{ secrets.GTM_MAILBOX_2_PASSWORD }}
       GTM_MAILBOX_3_USER: ${{ secrets.GTM_MAILBOX_3_USER }}
       GTM_MAILBOX_3_PASSWORD: ${{ secrets.GTM_MAILBOX_3_PASSWORD }}
+      GTM_DATABASE_URL: ${{ secrets.GTM_DATABASE_URL }}
+      # Reply classification (interested / not interested / wrong person) goes through
+      # the LLM layer during the sync step.
+      GTM_GROQ_API_KEY: ${{ secrets.GTM_GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,21 +64,12 @@ jobs:
 
       - run: pip install -e ".[api,overture]"
 
-      - name: Restore engine database
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            data/gtm.sqlite
-            data/geocode_cache.json
-          key: gtm-db-${{ github.run_id }}
-          restore-keys: gtm-db-
-
       - name: Ensure the campaign exists in the database
         run: |
-          if [ ! -f data/gtm.sqlite ] || ! python -c "
-          import sys; from gtm_engine.storage.database import Database
-          sys.exit(0 if Database('data/gtm.sqlite').campaign_config('$CAMPAIGN_ID') else 1)"; then
-            echo "database missing or campaign not gathered yet; gathering first"
+          if ! python -c "
+          import os, sys; from gtm_engine.storage.database import Database
+          sys.exit(0 if Database(os.environ['GTM_DATABASE_URL']).campaign_config('$CAMPAIGN_ID') else 1)"; then
+            echo "campaign not gathered yet; gathering first"
             cfg=$(grep -l "campaign_id: *$CAMPAIGN_ID" config/campaigns/*.yaml | head -1)
             python -m gtm_engine.cli run "$cfg" --max-companies 60
           fi
@@ -88,15 +83,6 @@ jobs:
           python -m gtm_engine.cli outreach mailboxes "$CAMPAIGN_ID"
           python -m gtm_engine.cli outreach send "$CAMPAIGN_ID" $args
           python -m gtm_engine.cli outreach status "$CAMPAIGN_ID"
-
-      - name: Save engine database
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            data/gtm.sqlite
-            data/geocode_cache.json
-          key: gtm-db-${{ github.run_id }}
 
       - name: Upload dry-run outbox
         if: always()

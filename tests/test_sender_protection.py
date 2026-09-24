@@ -37,7 +37,7 @@ def _leads(n: int) -> list[Lead]:
 
 @pytest.fixture
 def db(settings, campaign):
-    d = Database(settings.db_path)
+    d = Database(settings.database_url)
     d.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     for l in _leads(12):
         d.save_lead(l, "run", l.domain)

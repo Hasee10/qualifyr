@@ -12,6 +12,7 @@ dependencies = [
     "dnspython>=2.6",
     "tldextract>=5",
     "tzdata>=2024.1",
+    "psycopg[binary]>=3",
 ]
 
 [project.optional-dependencies]

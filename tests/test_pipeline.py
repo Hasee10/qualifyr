@@ -42,7 +42,7 @@ def _mock_world(settings):
 async def test_full_run_matches_acceptance_criteria(campaign, settings, defaults, tmp_path):
     _mock_world(settings)
     campaign.geography.cities = ["Islamabad"]
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     async with HttpFetcher(settings) as fetcher:
         pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
         result = await pipeline.run(campaign)
@@ -101,7 +101,7 @@ async def test_full_run_matches_acceptance_criteria(campaign, settings, defaults
 async def test_rerun_updates_lead_in_place_and_respects_suppression(campaign, settings, defaults):
     _mock_world(settings)
     campaign.geography.cities = ["Islamabad"]
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     async with HttpFetcher(settings) as fetcher:
         pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
         first = await pipeline.run(campaign)
@@ -127,7 +127,7 @@ async def test_search_found_domain_that_duplicates_earlier_company_is_skipped(ca
     campaign.geography.cities = ["Islamabad"]
     campaign.osm_categories = []
     campaign.seed_csv = None
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     from gtm_engine.models import DiscoveredCompany
 
     async def fake_discover(_campaign, _progress=None):
@@ -151,7 +151,7 @@ async def test_exclude_chains_drops_branded_outlets(campaign, settings, defaults
     campaign.geography.cities = ["Islamabad"]
     campaign.exclude_chains = True
     campaign.osm_categories = []
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     from gtm_engine.models import DiscoveredCompany
 
     async def fake_discover(_c, _p=None):

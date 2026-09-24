@@ -41,7 +41,7 @@ def _leads(n: int) -> list[Lead]:
 
 @pytest.fixture
 def db(settings, campaign):
-    d = Database(settings.db_path)
+    d = Database(settings.database_url)
     d.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     for l in _leads(10):
         d.save_lead(l, "run", l.domain)
@@ -177,7 +177,7 @@ def test_legacy_untagged_sends_belong_only_to_first_mailbox(tmp_path, osettings,
     ledger.record_sent("x@co.pk", "email_1", "<m>", "l1")
     ledger.data["sent"]["x@co.pk"]["email_1"]["at"] = "2027-02-20T05:00:00+00:00"
     del ledger.data["sent"]["x@co.pk"]["email_1"]["mailbox"]
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
     pool, _ = _pool(osettings, ["old@gmail.com", "new@gmail.com"])
     states = pool.states(db, "test-retail", ledger, "2027-03-01")

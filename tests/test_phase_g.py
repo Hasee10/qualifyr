@@ -123,7 +123,7 @@ def client(settings, tmp_path, monkeypatch):
     camp_dir.mkdir()
     (camp_dir / "t.yaml").write_text("campaign_id: test-retail\nname: T\noffer: x\ngeography:\n  cities: [Lahore]\nosm_categories: [shop=clothes]\n", encoding="utf-8")
     monkeypatch.setattr(m, "CAMPAIGN_DIR", camp_dir)
-    db = Database(settings.db_path)
+    db = Database(settings.database_url)
     for i in range(4):
         db.save_lead(Lead(campaign_id="test-retail", company_name=f"Co {i}", domain=f"co{i}.pk", company_type=CompanyType.BUYER,
                           total_score=80, priority=Priority.HIGH, contact_email=f"a@co{i}.pk", email_status=EmailStatus.MX_VALID,
