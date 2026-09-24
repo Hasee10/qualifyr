@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 !web/.env.local.example
+sheets-api-key.json
+Cred*.pdf
+*.pem
 
 # Data (local engine state and exports; CI publishes leads into leads/)
 data/*
