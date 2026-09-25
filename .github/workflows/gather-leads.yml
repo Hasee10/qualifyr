@@ -73,7 +73,7 @@ jobs:
       - name: Mirror qualified leads to Google Sheets (when configured)
         if: env.GTM_SHEETS_SPREADSHEET_ID != ''
         run: |
-          campaign_id=$(python -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['campaign_id'])" "$CAMPAIGN")
+          campaign_id=$(python -m gtm_engine.cli campaign-id "$CAMPAIGN")
           python -m gtm_engine.cli sheets "$campaign_id" || echo "sheets export failed (non-fatal)"
 
       - name: Save geocode cache
@@ -93,7 +93,7 @@ jobs:
       - name: Commit results into leads/
         if: env.COMMIT_RESULTS == 'true'
         run: |
-          campaign_id=$(python -c "import yaml,sys;print(yaml.safe_load(open(sys.argv[1]))['campaign_id'])" "$CAMPAIGN")
+          campaign_id=$(python -m gtm_engine.cli campaign-id "$CAMPAIGN")
           mkdir -p "leads/$campaign_id"
           cp data/exports/*_qualified.csv "leads/$campaign_id/"
           cp data/exports/*_all.csv "leads/$campaign_id/"

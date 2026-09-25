@@ -74,6 +74,43 @@ def load_campaign(path: str | Path) -> CampaignConfig:
     return CampaignConfig.model_validate(data)
 
 
+def resolve_campaign(arg: str | Path, database_url: str | None = None) -> CampaignConfig:
+    """Load a campaign from either a YAML file path or a campaign_id stored in the DB.
+
+    User-created campaigns live in Postgres (the `campaigns` table), not on disk, so the
+    CLI and the Actions runner must accept an id as readily as a path. A value that names
+    an existing file is read as YAML; anything else is treated as a campaign_id and looked
+    up in the database. This is what lets `gtm run <campaign_id>` work for a campaign a user
+    created in the UI, with no file committed to the repo."""
+    p = Path(arg)
+    if p.exists():
+        return load_campaign(p)
+    from gtm_engine.storage.database import Database
+
+    db = Database(database_url)
+    try:
+        cfg = db.campaign_config(str(arg))
+    finally:
+        db.close()
+    if not cfg:
+        raise FileNotFoundError(f"campaign not found as a file or a DB campaign_id: {arg!r}")
+    return CampaignConfig.model_validate(cfg)
+
+
+def slugify_campaign_id(name: str, existing: set[str] | None = None) -> str:
+    """A stable, unique, url-safe id from a campaign name. 'Retail & Apparel, Lahore' ->
+    'retail-apparel-lahore'; collisions get a -2, -3 suffix."""
+    import re
+
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "campaign"
+    if not existing or base not in existing:
+        return base
+    n = 2
+    while f"{base}-{n}" in existing:
+        n += 1
+    return f"{base}-{n}"
+
+
 def load_defaults(defaults_dir: Path = DEFAULTS_DIR) -> DefaultRules:
     merged: dict = {}
     for file in sorted(defaults_dir.glob("*.yaml")):

@@ -189,6 +189,19 @@ class Database:
         )
         self._commit()
 
+    def list_campaigns(self) -> list[dict]:
+        """Every user-created campaign, newest first. Each carries its full config so the
+        API can list DB campaigns alongside the file-based ones without a second read."""
+        rows = self.conn.execute(
+            "SELECT campaign_id, name, config_json, created_at FROM campaigns ORDER BY created_at DESC"
+        ).fetchall()
+        return [{"campaign_id": r["campaign_id"], "name": r["name"],
+                 "created_at": r["created_at"], "config": json.loads(r["config_json"])} for r in rows]
+
+    def delete_campaign(self, campaign_id: str) -> None:
+        self.conn.execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
+        self._commit()
+
     def start_run(self, run_id: str, campaign_id: str) -> None:
         self.conn.execute(
             "INSERT INTO runs (run_id, campaign_id, started_at, status) VALUES (%s, %s, %s, 'running')",

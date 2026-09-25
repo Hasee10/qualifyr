@@ -19,7 +19,8 @@ from pydantic import BaseModel
 
 from gtm_engine import __version__
 from gtm_engine.api.auth import auth_disabled, verify_request
-from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
+from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
+from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
 from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.export import sheets as sheets_export
@@ -166,26 +167,91 @@ def health() -> dict:
                        "step": o.warmup_step_per_day, "max": o.daily_limit}}
 
 
+def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict:
+    leads = db.list_leads(c.campaign_id)
+    buyers = [l for l in leads if l.company_type == CompanyType.BUYER]
+    return {
+        "campaign_id": c.campaign_id, "name": c.name, "offer": c.offer, "file": file,
+        "cities": c.geography.cities, "countries": c.geography.countries,
+        "min_score": c.min_score, "max_companies": c.max_companies,
+        "leads": len(leads), "buyers": len(buyers),
+        "qualified": sum(1 for l in buyers if l.total_score >= c.min_score),
+        "outreach_ready": sum(1 for l in leads if l.outreach_ready),
+        "last_run": (db.list_runs(c.campaign_id) or [None])[0],
+        "live": db.get_run_progress(c.campaign_id),
+    }
+
+
 @app.get("/campaigns")
 def campaigns() -> list[dict]:
+    """File-based campaigns and user-created (DB) ones together. A file wins if an id exists
+    in both, so editing a shipped example on disk is not shadowed by a stale DB copy."""
     db = _db()
-    out = []
+    out, seen = [], set()
     for cid, path in _campaign_files().items():
-        c = load_campaign(path)
-        leads = db.list_leads(cid)
-        buyers = [l for l in leads if l.company_type == CompanyType.BUYER]
-        out.append({
-            "campaign_id": cid, "name": c.name, "offer": c.offer, "file": path.name,
-            "cities": c.geography.cities, "countries": c.geography.countries,
-            "min_score": c.min_score, "max_companies": c.max_companies,
-            "leads": len(leads), "buyers": len(buyers),
-            "qualified": sum(1 for l in buyers if l.total_score >= c.min_score),
-            "outreach_ready": sum(1 for l in leads if l.outreach_ready),
-            "last_run": (db.list_runs(cid) or [None])[0],
-            "live": db.get_run_progress(cid),
-        })
+        out.append(_campaign_summary(db, load_campaign(path), path.name))
+        seen.add(cid)
+    for row in db.list_campaigns():
+        if row["campaign_id"] in seen:
+            continue
+        try:
+            out.append(_campaign_summary(db, CampaignConfig.model_validate(row["config"]), None))
+        except Exception as exc:  # noqa: BLE001 - one bad stored config must not hide the rest
+            log.warning("skipping DB campaign %s: %s", row["campaign_id"], exc)
     db.close()
     return out
+
+
+class CampaignCreate(BaseModel):
+    name: str
+    offer: str
+    countries: list[str] = []
+    cities: list[str] = []
+    target_industries: list[str] = []
+    buyer_keywords: list[str] = []
+    osm_categories: list[str] = []
+    overture_categories: list[str] = []
+    min_score: int = 70
+    max_companies: int = 60
+
+
+@app.post("/campaigns", status_code=201)
+def create_campaign(body: CampaignCreate) -> dict:
+    """Create a user-defined campaign, stored in the DB (not a file) so it works on the
+    read-only serverless filesystem and can be run by id. The id is slugged from the name
+    and de-duped against both file and DB campaigns."""
+    if not body.name.strip() or not body.offer.strip():
+        raise HTTPException(422, "name and offer are required")
+    db = _db()
+    existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
+    cid = slugify_campaign_id(body.name, existing)
+    try:
+        cfg = CampaignConfig(
+            campaign_id=cid, name=body.name.strip(), offer=body.offer.strip(),
+            geography=GeographyConfig(countries=body.countries, cities=body.cities),
+            target_industries=body.target_industries, buyer_keywords=body.buyer_keywords,
+            osm_categories=body.osm_categories, overture_categories=body.overture_categories,
+            min_score=body.min_score, max_companies=body.max_companies,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface pydantic's message
+        db.close()
+        raise HTTPException(422, str(exc))
+    db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"))
+    db.close()
+    return {"campaign_id": cfg.campaign_id, "name": cfg.name}
+
+
+@app.delete("/campaigns/{campaign_id}", status_code=204)
+def delete_campaign(campaign_id: str) -> None:
+    """Delete a user-created campaign. File-based example campaigns cannot be deleted here."""
+    if campaign_id in _campaign_files():
+        raise HTTPException(400, "this is a file-based example campaign; delete its YAML instead")
+    db = _db()
+    if not db.campaign_config(campaign_id):
+        db.close()
+        raise HTTPException(404, f"campaign '{campaign_id}' not found")
+    db.delete_campaign(campaign_id)
+    db.close()
 
 
 @app.get("/campaigns/{campaign_id}")
@@ -208,10 +274,13 @@ def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     db.close()
     if _run_is_active(live):
         raise HTTPException(409, "a run is already in progress for this campaign")
+    # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
+    # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
+    campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
     dispatch_workflow(
         "gather-leads.yml",
         {
-            "campaign": _workflow_campaign_path(campaign_id),
+            "campaign": campaign_input,
             "max_companies": str(req.max_companies or campaign.max_companies),
         },
     )

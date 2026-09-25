@@ -8,7 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gtm_engine.config import load_campaign, load_defaults, load_settings
+from gtm_engine.config import load_defaults, load_settings, resolve_campaign
 from gtm_engine.export.csv_export import export_path, write_csv
 from gtm_engine.models import CompanyType
 from gtm_engine.outreach.cli import add_outreach_parser
@@ -40,7 +40,7 @@ async def _run(args: argparse.Namespace) -> int:
     settings = load_settings()
     _setup_logging(args.log_level or settings.log_level)
     defaults = load_defaults()
-    campaign = load_campaign(args.campaign)
+    campaign = resolve_campaign(args.campaign, settings.database_url)
     if args.max_companies:
         campaign.max_companies = args.max_companies
     db = Database(settings.database_url)
@@ -115,12 +115,20 @@ def _runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _campaign_id(args: argparse.Namespace) -> int:
+    """Print the campaign_id for a YAML path or a DB id, so a workflow can name its output
+    folder without re-parsing the input (which fails when the input is an id, not a file)."""
+    settings = load_settings()
+    print(resolve_campaign(args.campaign, settings.database_url).campaign_id)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="gtm", description="Buyer-only GTM lead engine")
     sub = p.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="run a campaign end-to-end and export CSVs")
-    run.add_argument("campaign", help="path to campaign YAML")
+    run.add_argument("campaign", help="campaign YAML path, or a campaign_id stored in the DB")
     run.add_argument("--max-companies", type=int, default=None)
     run.add_argument("--log-level", default=None)
     run.set_defaults(func=lambda a: asyncio.run(_run(a)))
@@ -148,6 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
     runs = sub.add_parser("runs", help="list past runs")
     runs.add_argument("--campaign-id", default=None)
     runs.set_defaults(func=_runs)
+
+    cid = sub.add_parser("campaign-id", help="print the campaign_id for a YAML path or DB id")
+    cid.add_argument("campaign", help="campaign YAML path, or a campaign_id stored in the DB")
+    cid.set_defaults(func=_campaign_id)
 
     add_outreach_parser(sub)
     return p
