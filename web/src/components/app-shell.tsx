@@ -3,17 +3,18 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Users, Send, Radar, Moon, Sun, Menu, Settings } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { LayoutDashboard, Users, Send, Radar, Menu, Settings } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import { CampaignProvider, useCampaign } from "@/components/campaign-context"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 const nav = [
-  { icon: LayoutDashboard, label: "Dashboard", href: "/" },
+  // "/" is the public landing page now; the dashboard lives at /dashboard.
+  { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Radar, label: "Campaigns", href: "/campaigns" },
   { icon: Users, label: "Leads", href: "/leads" },
   { icon: Send, label: "Outreach", href: "/outreach" },
@@ -37,7 +38,7 @@ function SidebarContent() {
       <nav className="flex-1 overflow-y-auto px-4 py-4">
         <div className="flex flex-col gap-1">
           {nav.map((item) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+            const active = pathname.startsWith(item.href)
             return (
               <Link
                 key={item.href}
@@ -102,11 +103,7 @@ function CampaignPicker() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const [darkMode, setDarkMode] = React.useState(false)
   const [open, setOpen] = React.useState(false)
-  React.useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode)
-  }, [darkMode])
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -128,10 +125,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <span className="text-xs uppercase tracking-wide text-muted-foreground">Campaign</span>
             <CampaignPicker />
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setDarkMode(!darkMode)}>
-            {darkMode ? <Sun className="size-5" /> : <Moon className="size-5" />}
-            <span className="sr-only">Toggle dark mode</span>
-          </Button>
+          <ThemeToggle />
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>

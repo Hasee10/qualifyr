@@ -23,6 +23,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-muted: var(--brand-muted);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -64,6 +67,13 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* The one accent in an otherwise neutral palette: CTAs, links, the hero accent word,
+     step numerals. Never a surface colour - the greyscale base is what makes it read.
+     Jade rather than the usual B2B indigo, and it carries the right meaning for a
+     product whose whole claim is "qualified". */
+  --brand: oklch(0.58 0.13 168);
+  --brand-foreground: oklch(0.985 0 0);
+  --brand-muted: oklch(0.58 0.13 168 / 12%);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -99,6 +109,11 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* Lifted and slightly desaturated: the light-mode jade is too dark to clear contrast
+     against the near-black background. */
+  --brand: oklch(0.72 0.13 168);
+  --brand-foreground: oklch(0.205 0 0);
+  --brand-muted: oklch(0.72 0.13 168 / 15%);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
