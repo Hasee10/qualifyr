@@ -114,6 +114,11 @@ class DefaultRules(BaseModel):
     geography_tiers: dict[str, list[str]] = Field(default_factory=dict)
     intent_rfq_phrases: list[str] = Field(default_factory=list)
     intent_hiring_roles: list[str] = Field(default_factory=list)
+    # GTM intelligence (job boards / GitHub / press): phrases matched against press/RSS
+    # entry titles, grouped by what kind of event they signal.
+    press_signal_keywords: dict[str, list[str]] = Field(default_factory=dict)
+    # Job-board roles that imply growth/budget rather than routine backfill.
+    job_growth_roles: list[str] = Field(default_factory=list)
 
 
 class EngineSettings(BaseModel):
@@ -165,4 +170,12 @@ class EngineSettings(BaseModel):
     llm_provider: str = "auto"      # auto | ollama | groq | gemini
     llm_model: str | None = None
     enable_intent_signals: bool = True
+    # GTM intelligence (all keyless, budget-limited like domain age / news): job-board
+    # postings (Greenhouse/Lever), GitHub org activity, press/RSS mentions.
+    enable_job_board_signals: bool = True
+    job_board_max_companies_per_run: int = 40
+    enable_github_signals: bool = True
+    github_max_companies_per_run: int = 30
+    enable_press_signals: bool = True
+    press_max_companies_per_run: int = 40
     log_level: str = "INFO"

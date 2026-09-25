@@ -30,4 +30,12 @@ enable_llm: false
 llm_provider: auto
 llm_model: null
 enable_intent_signals: true     # PPRA tender match + RFQ/hiring phrases on company pages
+# GTM intelligence: job-board postings (Greenhouse/Lever), GitHub org activity, press/RSS
+# mentions. All keyless public APIs; budget-limited per run like domain age / news.
+enable_job_board_signals: true
+job_board_max_companies_per_run: 40
+enable_github_signals: true
+github_max_companies_per_run: 30
+enable_press_signals: true
+press_max_companies_per_run: 40
 log_level: INFO

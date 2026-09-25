@@ -115,6 +115,10 @@ class Signals(BaseModel):
     intent: list[dict] = Field(default_factory=list)        # IntentSignal dicts
     domain_age_years: float | None = None
     domain_age_note: str | None = None
+    # GTM intelligence: open roles on Greenhouse/Lever, GitHub org activity, press/RSS hits.
+    job_openings: list[dict] = Field(default_factory=list)      # [{title,location,url,board,growth_role}]
+    github_activity: dict | None = None                          # {org,url,public_repos,last_pushed_at,stars_total}
+    press_mentions: list[dict] = Field(default_factory=list)    # [{title,url,date,kind}]
 
 
 class CompanyQuality(BaseModel):
@@ -188,6 +192,9 @@ class Lead(BaseModel):
     news_mentions: list[dict] = Field(default_factory=list)
     domain_age_years: float | None = None
     intent_signals: list[dict] = Field(default_factory=list)   # IntentSignal dicts
+    job_openings: list[dict] = Field(default_factory=list)
+    github_activity: dict | None = None
+    press_mentions: list[dict] = Field(default_factory=list)
     review_verdict: str | None = None       # correct | wrong_company | wrong_person | wrong_email (human)
     reviewed_at: datetime | None = None
     # Which source produced each important field: {"contact_email": "contact page mailto", ...}

@@ -85,3 +85,47 @@ technology_markers:
     - crisp.chat
     - intercom
     - tidio
+
+# Press/RSS entry titles matched against these phrases (Phase: GTM Intelligence).
+# Each group is a distinct kind of buying-window event.
+press_signal_keywords:
+  product_launch:
+    - launches
+    - launch of
+    - introducing
+    - unveils
+    - new product
+    - now available
+  funding:
+    - raises
+    - funding round
+    - series a
+    - series b
+    - series c
+    - seed round
+    - investment from
+    - secures funding
+  partnership:
+    - partners with
+    - partnership with
+    - collaborates with
+    - strategic alliance
+  expansion_press:
+    - expands to
+    - opens new
+    - enters the market
+    - new office
+    - new facility
+
+# Job-board postings for these roles imply growth/budget, not routine backfill.
+job_growth_roles:
+  - procurement
+  - purchasing
+  - supply chain
+  - operations manager
+  - business development
+  - country manager
+  - regional manager
+  - sales manager
+  - expansion
+  - growth

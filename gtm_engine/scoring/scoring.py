@@ -133,6 +133,20 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     if sig.domain_age_years is not None and sig.domain_age_years < 2:
         bs += 1.5
         reasons.append(f"young domain ({sig.domain_age_years} y): new or recently relaunched business")
+    if sig.job_openings:
+        growth = [j for j in sig.job_openings if j.get("growth_role")]
+        bs += 2.5 if growth else min(len(sig.job_openings), 3) * 0.75
+        board = sig.job_openings[0].get("board", "job board")
+        reasons.append(f"{len(sig.job_openings)} open role(s) on {board}"
+                        + (f", incl. growth role: {growth[0]['title']}" if growth else ""))
+    if sig.github_activity:
+        bs += 1.5
+        reasons.append(f"active GitHub org ({sig.github_activity.get('public_repos')} public repos, "
+                        f"last push {sig.github_activity.get('last_pushed_at')})")
+    if sig.press_mentions:
+        bonus = 3 if any(p.get("kind") == "funding" for p in sig.press_mentions) else 2
+        bs += bonus
+        reasons.append(f"press/RSS: {sig.press_mentions[0]['kind']} – {sig.press_mentions[0]['title'][:60]}")
     if sig.buying:
         reasons.append("buying signals: " + ", ".join(sig.buying))
     if sig.pain:

@@ -18,6 +18,9 @@ from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
 from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
+from gtm_engine.enrichment.github_signals import github_activity
+from gtm_engine.enrichment.job_signals import job_board_signals
+from gtm_engine.enrichment.press_signals import press_mentions
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
@@ -104,6 +107,16 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
         facts.append(f"recently in the news ({signals.news[0].get('source', '')})")
     if signals.domain_age_years is not None and signals.domain_age_years < 2:
         facts.append("recently launched online")
+    if signals.job_openings:
+        growth = [j for j in signals.job_openings if j.get("growth_role")]
+        if growth:
+            facts.append(f"hiring for {growth[0]['title']}")
+        else:
+            facts.append(f"{len(signals.job_openings)} open role(s) posted")
+    if signals.press_mentions:
+        facts.append(f"{signals.press_mentions[0]['kind'].replace('_', ' ')}: {signals.press_mentions[0]['title'][:60]}")
+    if signals.github_activity:
+        facts.append("actively engineering (public GitHub org)")
     return "; ".join(facts) if facts else None
 
 
@@ -121,6 +134,9 @@ class Pipeline:
         self.website_finder = WebsiteFinder(fetcher, settings)
         self.news = NewsChecker(fetcher)
         self._news_budget = settings.news_max_companies_per_run
+        self._job_board_budget = settings.job_board_max_companies_per_run
+        self._github_budget = settings.github_max_companies_per_run
+        self._press_budget = settings.press_max_companies_per_run
         self.ppra = PPRATenders(fetcher, settings)
         self.llm = build_llm(settings.llm_provider, settings.llm_model) if settings.enable_llm else None
         if self.llm:
@@ -324,6 +340,36 @@ class Pipeline:
                     signals.buying.setdefault("news_mention", []).extend(m.title for m in mentions[:2])
                     provenance["news"] = f"gdelt: {len(mentions)} article(s), latest {mentions[0].date}"
 
+            # GTM intelligence: job-board postings, GitHub activity, press/RSS mentions.
+            if self.settings.enable_job_board_signals and self._job_board_budget > 0:
+                self._job_board_budget -= 1
+                jb = await job_board_signals(self.fetcher, company.name, domain, self.defaults)
+                if jb.postings:
+                    signals.job_openings = [p.__dict__ for p in jb.postings]
+                    growth = [p for p in jb.postings if p.growth_role]
+                    label = "growth-role hiring" if growth else "hiring"
+                    signals.buying.setdefault("job_openings", []).append(
+                        f"{len(jb.postings)} open role(s) on {jb.board} ({label})")
+                    provenance["job_openings"] = f"{jb.board}: {len(jb.postings)} posting(s), slug '{jb.slug}'"
+
+            if self.settings.enable_github_signals and self._github_budget > 0:
+                self._github_budget -= 1
+                gh = await github_activity(self.fetcher, company.name, domain)
+                if gh:
+                    signals.github_activity = gh.__dict__
+                    signals.buying.setdefault("github_activity", []).append(
+                        f"{gh.public_repos} public repo(s), last pushed {gh.last_pushed_at}")
+                    provenance["github_activity"] = f"github: org '{gh.org}', {gh.public_repos} repo(s)"
+
+            if self.settings.enable_press_signals and self._press_budget > 0:
+                self._press_budget -= 1
+                press = await press_mentions(self.fetcher, snapshot.final_url or website, self.defaults)
+                if press:
+                    signals.press_mentions = [p.__dict__ for p in press]
+                    signals.buying.setdefault("press_mention", []).extend(
+                        f"{p.kind}: {p.title[:60]}" for p in press[:2])
+                    provenance["press_mentions"] = f"rss: {len(press)} entr(y/ies), latest '{press[0].title[:60]}'"
+
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
         suppressed = self.db.is_suppressed(domain, contact.email)
@@ -360,6 +406,9 @@ class Pipeline:
             news_mentions=signals.news,
             domain_age_years=signals.domain_age_years,
             intent_signals=signals.intent,
+            job_openings=signals.job_openings,
+            github_activity=signals.github_activity,
+            press_mentions=signals.press_mentions,
             provenance=provenance,
             linkedin_or_public_profile_url=contact.profile_url,
             pain_signal=pain,
