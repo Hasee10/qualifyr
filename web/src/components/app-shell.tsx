@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import { CampaignProvider, useCampaign } from "@/components/campaign-context"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { SignOutButton } from "@/components/sign-out-button"
 
 const nav = [
   // "/" is the public landing page now; the dashboard lives at /dashboard.
@@ -126,6 +127,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <CampaignPicker />
           </div>
           <ThemeToggle />
+          <SignOutButton />
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>

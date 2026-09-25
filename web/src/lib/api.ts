@@ -1,5 +1,8 @@
 // Thin client for the FastAPI backend. Base URL comes from NEXT_PUBLIC_API_URL.
 
+import { createClient } from "@/lib/supabase/client"
+import { supabaseConfigured } from "@/lib/supabase/config"
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export type CompanyType = "BUYER" | "VENDOR" | "UNKNOWN"
@@ -158,13 +161,39 @@ export interface SendReport {
   mailboxes?: Record<string, MailboxState>
 }
 
+/** The current Supabase access token, or null when signed out.
+ *
+ * Read per request rather than captured once: the SDK rotates the token in the background,
+ * and a stale copy would start 401ing an hour into a session. getSession() reads local
+ * storage and refreshes only when needed, so this is not a network call in the common case.
+ */
+async function accessToken(): Promise<string | null> {
+  if (typeof window === "undefined" || !supabaseConfigured) return null
+  try {
+    const { data } = await createClient().auth.getSession()
+    return data.session?.access_token ?? null
+  } catch {
+    return null
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await accessToken()
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
     cache: "no-store",
   })
   if (!res.ok) {
+    // A 401 means the session lapsed while the tab was open. Send them to sign in rather
+    // than surfacing "missing bearer token" inside a table cell, and return them after.
+    if (res.status === 401 && typeof window !== "undefined") {
+      window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname)}`)
+    }
     let detail = res.statusText
     try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail))

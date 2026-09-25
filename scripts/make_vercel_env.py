@@ -24,6 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # secret to a host that never uses it is pure downside.
 VERCEL_KEYS = [
     "GTM_DATABASE_URL",
+    # Auth. GTM_SUPABASE_URL is what the API verifies bearer tokens against; without it
+    # every request 500s by design. The NEXT_PUBLIC_* pair is inlined into the browser
+    # bundle at build time, so Vercel needs a redeploy after these are added.
+    "GTM_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
     "GTM_GITHUB_TOKEN",
     "GTM_GITHUB_REPO",
     "GTM_GITHUB_REF",

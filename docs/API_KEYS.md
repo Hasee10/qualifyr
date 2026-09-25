@@ -25,6 +25,10 @@ the repo. **Status** is updated as keys are added.
 | `GTM_GITHUB_TOKEN` | GitHub PAT (repo-scoped, `actions:write`) | Lets the deployed API trigger `gather-leads.yml` / `outreach.yml` via `workflow_dispatch` instead of running them in-request. Also raises the GitHub REST API rate limit used for org-activity signals (`gtm_engine/enrichment/github_signals.py`) from 60/hr to 5000/hr | free | required on Vercel; optional for GitHub signals (works keyless, just rate-limited) | ⏳ not set |
 | `GTM_GITHUB_REPO` | — | `owner/repo` for the dispatch call above | n/a | required on Vercel | ⏳ not set |
 | `GTM_GITHUB_REF` | — | Branch to run the dispatched workflow from; defaults to `main` | n/a | optional | — |
+| `GTM_SUPABASE_URL` | Supabase (same project as the database) | Where the API fetches the public JWKS to verify bearer tokens. Every route except `/health` needs one. Not a secret — it is a hostname. Unset means every request 500s **on purpose**: an unset variable must never reopen the API | free | **yes, wherever the API runs** | ⏳ not set |
+| `GTM_AUTH_DISABLED` | — | Local dev only: skips the token check. An opt-*out*, so a typo leaves auth on. Never set this on a deployment | n/a | optional | — |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase | Frontend sign-in. Belongs in `web/.env.local` and in Vercel, not in the root `.env` | free | **yes on Vercel** | ⏳ not set |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase | Publishable key, designed to sit in a browser bundle. Inlined at **build** time, so it needs a redeploy to take effect | free | **yes on Vercel** | ⏳ not set |
 
 Note: Supabase's **service-role/anon API keys are not used** by this engine — storage
 goes over plain SQL via `psycopg` against `GTM_DATABASE_URL`, not the Supabase REST/client
