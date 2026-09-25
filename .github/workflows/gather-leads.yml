@@ -109,10 +109,18 @@ jobs:
           # so a bare push fails non-fast-forward and reds the job *after* the pipeline
           # already succeeded - losing the CSVs for a reason unrelated to the run.
           # Each run writes only leads/<its own campaign>/, so rebasing is safe.
-          for attempt in 1 2 3; do
-            git pull --rebase --autostash origin "$GITHUB_REF_NAME" && git push && exit 0
-            echo "push attempt $attempt failed, retrying"
-            sleep 5
+          #
+          # Retry generously with growing backoff: a burst of pushes (a dev pushing several
+          # commits while the crawl runs) can lose several races in a row, and three quick
+          # tries over ~15s is not enough to outlast it. Six tries with a widening gap ride
+          # out a burst without ever failing a run whose real work already succeeded.
+          for attempt in 1 2 3 4 5 6; do
+            if git pull --rebase --autostash origin "$GITHUB_REF_NAME" && git push; then
+              echo "leads pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
+            sleep $((attempt * 4))
           done
-          echo "could not push leads after 3 attempts" >&2
+          echo "could not push leads after 6 attempts" >&2
           exit 1

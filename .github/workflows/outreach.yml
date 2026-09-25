@@ -107,5 +107,16 @@ jobs:
           git add leads/*/outreach_ledger.json 2>/dev/null || true
           git diff --cached --quiet && echo "ledger unchanged" && exit 0
           git commit -m "outreach: $CAMPAIGN_ID ledger run ${{ github.run_number }} [skip ci]"
-          git pull --rebase origin main
-          git push
+          # main moves under a long send. Retry the rebase-and-push with growing backoff so
+          # a race against other pushes never reds a run whose sends already went out - the
+          # ledger records real emails and must not be lost to a non-fast-forward.
+          for attempt in 1 2 3 4 5 6; do
+            if git pull --rebase --autostash origin main && git push; then
+              echo "ledger pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
+            sleep $((attempt * 4))
+          done
+          echo "could not push ledger after 6 attempts" >&2
+          exit 1
