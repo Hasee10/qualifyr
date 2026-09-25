@@ -1,5 +1,6 @@
 "use client"
 
+import { MessageCircleQuestion } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 const faqs = [
@@ -25,21 +26,44 @@ const faqs = [
   },
 ]
 
+/** A two-column pairing, not a single centred list: the accordion answers the searchable
+ *  questions, the card beside it is for the one question no FAQ ever covers. The
+ *  reference's radial ring diagram was considered and dropped deliberately - it is
+ *  unusable on mobile (no room for eight orbiting nodes) and hostile to screen readers
+ *  (no meaningful DOM order), which a plain accordion does not have to compromise on. */
 export function Faq() {
   return (
-    <section id="faq" className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-      <div className="text-center">
+    <section id="faq" className="mx-auto max-w-6xl px-4 py-24 sm:px-6">
+      <div className="mx-auto max-w-2xl text-center">
         <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Frequently asked</h2>
       </div>
 
-      <Accordion className="mt-10" defaultValue={[]}>
-        {faqs.map((f) => (
-          <AccordionItem key={f.q} value={f.q}>
-            <AccordionTrigger className="text-base">{f.q}</AccordionTrigger>
-            <AccordionContent className="text-muted-foreground">{f.a}</AccordionContent>
-          </AccordionItem>
-        ))}
-      </Accordion>
+      <div className="mt-14 grid gap-10 lg:grid-cols-[2fr_1fr] lg:items-start">
+        <Accordion defaultValue={[]}>
+          {faqs.map((f) => (
+            <AccordionItem key={f.q} value={f.q}>
+              <AccordionTrigger className="text-base">{f.q}</AccordionTrigger>
+              <AccordionContent className="text-muted-foreground">{f.a}</AccordionContent>
+            </AccordionItem>
+          ))}
+        </Accordion>
+
+        <div className="rounded-xl border border-border/60 bg-card p-6">
+          <span className="flex size-10 items-center justify-center rounded-lg bg-brand-muted">
+            <MessageCircleQuestion className="size-5 text-brand" />
+          </span>
+          <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Email us directly and we&rsquo;ll answer before we set up your account.
+          </p>
+          <a
+            href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20question"
+            className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
+          >
+            ihaseebarshad10@gmail.com
+          </a>
+        </div>
+      </div>
     </section>
   )
 }
