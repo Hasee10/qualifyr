@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Radar, ShieldCheck, Gauge, UserSearch } from "lucide-react";
+import { ShieldCheck, Gauge, UserSearch } from "lucide-react";
+import { QualifyrMark } from "@/components/qualifyr-mark";
 
 /** Split-screen auth chrome: brand panel on the left, form on the right.
  *
@@ -32,7 +33,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
         <Link href="/" className="relative flex items-center gap-2 font-semibold">
           <span className="flex size-8 items-center justify-center rounded-lg bg-brand-foreground/15">
-            <Radar className="size-4" />
+            <QualifyrMark className="size-5" />
           </span>
           Qualifyr
         </Link>

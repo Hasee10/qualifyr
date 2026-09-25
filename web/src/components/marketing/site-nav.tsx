@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Radar, Menu, X } from "lucide-react"
+import { Menu, X } from "lucide-react"
+import { QualifyrMark } from "@/components/qualifyr-mark"
 
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -38,7 +39,7 @@ export function SiteNav() {
       <nav className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <span className="flex size-8 items-center justify-center rounded-lg bg-brand">
-            <Radar className="size-4 text-brand-foreground" />
+            <QualifyrMark className="size-5 text-brand-foreground" />
           </span>
           Qualifyr
         </Link>

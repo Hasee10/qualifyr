@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Radar } from "lucide-react"
+import { QualifyrMark } from "@/components/qualifyr-mark"
 
 const columns = [
   {
@@ -27,7 +27,7 @@ export function SiteFooter() {
         <div className="max-w-sm">
           <Link href="/" className="flex items-center gap-2 font-semibold">
             <span className="flex size-8 items-center justify-center rounded-lg bg-brand">
-              <Radar className="size-4 text-brand-foreground" />
+              <QualifyrMark className="size-5 text-brand-foreground" />
             </span>
             Qualifyr
           </Link>
