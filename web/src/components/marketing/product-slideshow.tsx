@@ -11,26 +11,75 @@ import { cn } from "@/lib/utils"
  *  view settles in - the deliberate pacing (read, move, click, read) reads as a product
  *  tour rather than a slideshow. `route` is the real app path, so the address bar matches
  *  the routes in app/(app)/ instead of an invented "/overview". */
+
+function initials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+}
+
+function Avatar({ name }: { name: string }) {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand-muted text-[11px] font-semibold text-brand">
+      {initials(name)}
+    </span>
+  )
+}
+
+// High score = confident buyer. Colour the badge by tier so the table reads at a glance.
+function scoreTone(s: number) {
+  if (s >= 80) return "bg-emerald-500/15 text-emerald-500"
+  if (s >= 70) return "bg-brand-muted text-brand"
+  return "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+}
+
 const frames = [
   {
     label: "Overview",
     route: "dashboard",
     render: () => (
-      <div className="grid grid-cols-3 gap-2.5 p-5">
-        {["Qualified buyers", "Emails sent", "Replies"].map((t, i) => (
-          <div key={t} className="qf-rise rounded-lg bg-muted p-3" style={{ animationDelay: `${i * 70}ms` }}>
-            <p className="text-[10px] text-muted-foreground">{t}</p>
-            <p className="mt-1 text-lg font-semibold">{[42, 118, 9][i]}</p>
-          </div>
-        ))}
-        <div className="qf-rise col-span-3 mt-1 flex h-24 items-end gap-1.5 rounded-lg bg-muted p-3" style={{ animationDelay: "220ms" }}>
-          {[30, 55, 40, 70, 90, 60, 45].map((h, i) => (
+      <div className="flex h-full flex-col gap-3 p-6">
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { t: "Qualified buyers", v: "42", d: "+12%" },
+            { t: "Emails sent", v: "118", d: "+8%" },
+            { t: "Replies", v: "9", d: "+3" },
+          ].map((s, i) => (
             <div
-              key={i}
-              className="flex-1 rounded-sm bg-brand/60"
-              style={{ height: `${h}%`, animationDelay: `${280 + i * 45}ms` }}
-            />
+              key={s.t}
+              className="qf-rise rounded-xl border border-border/60 bg-muted/60 p-4"
+              style={{ animationDelay: `${i * 70}ms` }}
+            >
+              <p className="text-[11px] text-muted-foreground">{s.t}</p>
+              <div className="mt-1.5 flex items-end justify-between">
+                <p className="text-3xl font-semibold leading-none tracking-tight">{s.v}</p>
+                <span className="mb-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+                  ▲ {s.d}
+                </span>
+              </div>
+            </div>
           ))}
+        </div>
+        <div
+          className="qf-rise flex flex-1 flex-col rounded-xl border border-border/60 bg-muted/60 p-4"
+          style={{ animationDelay: "220ms" }}
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[11px] font-medium">Qualified buyers · last 7 days</p>
+            <p className="text-[10px] text-muted-foreground">Mon – Sun</p>
+          </div>
+          <div className="flex flex-1 items-end gap-2">
+            {[30, 55, 40, 70, 92, 60, 45].map((h, i) => (
+              <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
+                <div
+                  className={cn(
+                    "w-full rounded-md bg-gradient-to-t transition-colors",
+                    h === 92 ? "from-brand to-brand/70" : "from-brand/45 to-brand/20"
+                  )}
+                  style={{ height: `${h}%` }}
+                />
+                <span className="text-[9px] text-muted-foreground">{["M", "T", "W", "T", "F", "S", "S"][i]}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     ),
@@ -39,23 +88,30 @@ const frames = [
     label: "Campaigns",
     route: "campaigns",
     render: () => (
-      <div className="flex flex-col gap-2.5 p-5">
+      <div className="flex h-full flex-col justify-center gap-3 p-6">
         {[
-          { name: "Retail & ecommerce, Islamabad", status: "Running", n: 96 },
-          { name: "Live PPRA tenders, inventory", status: "Running", n: 24 },
-          { name: "Textile & garment, Karachi", status: "Paused", n: 58 },
+          { name: "Retail & ecommerce", sub: "Islamabad · shops, brands", status: "Running", n: 96 },
+          { name: "Live PPRA tenders", sub: "Inventory & supply", status: "Running", n: 24 },
+          { name: "Textile & garment", sub: "Karachi · manufacturers", status: "Paused", n: 58 },
         ].map((c, i) => (
           <div
             key={c.name}
-            className="qf-rise flex items-center justify-between rounded-lg bg-muted px-3 py-2.5"
+            className="qf-rise flex items-center gap-3 rounded-xl border border-border/60 bg-muted/60 px-4 py-3.5"
             style={{ animationDelay: `${i * 90}ms` }}
           >
-            <span className="truncate text-xs font-medium">{c.name}</span>
-            <span className="flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
-              {c.n} leads
-              <span className={cn("rounded-full px-1.5 py-0.5", c.status === "Running" ? "bg-brand-muted text-brand" : "bg-secondary")}>
-                {c.status}
-              </span>
+            <span className={cn("size-2.5 shrink-0 rounded-full", c.status === "Running" ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{c.name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{c.sub}</p>
+            </div>
+            <span className="shrink-0 text-xs text-muted-foreground">{c.n} leads</span>
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                c.status === "Running" ? "bg-emerald-500/15 text-emerald-500" : "bg-secondary text-muted-foreground"
+              )}
+            >
+              {c.status}
             </span>
           </div>
         ))}
@@ -66,24 +122,30 @@ const frames = [
     label: "Leads",
     route: "leads",
     render: () => (
-      <div className="p-5">
-        <div className="overflow-hidden rounded-lg bg-muted">
-          <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border/60 px-3 py-2 text-[10px] text-muted-foreground">
-            <span>Company</span><span>Score</span><span>Type</span>
+      <div className="flex h-full flex-col justify-center p-6">
+        <div className="overflow-hidden rounded-xl border border-border/60">
+          <div className="grid grid-cols-[1fr_auto_auto] gap-4 border-b border-border/60 bg-muted/40 px-4 py-2.5 text-[11px] font-medium text-muted-foreground">
+            <span>Company</span><span className="text-center">Score</span><span>Type</span>
           </div>
           {[
-            { n: "RBS Interiors", s: 84, t: "BUYER" },
-            { n: "Ittefaq Electronics", s: 77, t: "BUYER" },
-            { n: "Al-Fateh Traders", s: 71, t: "BUYER" },
+            { n: "RBS Interiors", city: "Lahore", s: 84 },
+            { n: "Ittefaq Electronics", city: "Karachi", s: 77 },
+            { n: "Al-Fateh Traders", city: "Faisalabad", s: 71 },
           ].map((l, i) => (
             <div
               key={l.n}
-              className="qf-rise grid grid-cols-[1fr_auto_auto] items-center gap-3 px-3 py-2.5 text-xs"
+              className="qf-rise grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-border/40 bg-muted/20 px-4 py-3 last:border-0"
               style={{ animationDelay: `${i * 90}ms` }}
             >
-              <span className="truncate">{l.n}</span>
-              <span className="justify-self-center rounded-full bg-brand-muted px-1.5 py-0.5 text-[10px] font-medium text-brand">{l.s}</span>
-              <span className="text-[10px] text-muted-foreground">{l.t}</span>
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar name={l.n} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{l.n}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{l.city}, Pakistan</p>
+                </div>
+              </div>
+              <span className={cn("justify-self-center rounded-full px-2 py-0.5 text-xs font-semibold", scoreTone(l.s))}>{l.s}</span>
+              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">BUYER</span>
             </div>
           ))}
         </div>
@@ -94,21 +156,33 @@ const frames = [
     label: "Outreach",
     route: "outreach",
     render: () => (
-      <div className="flex flex-col gap-2.5 p-5">
-        <div className="qf-rise flex items-center justify-between rounded-lg bg-muted px-3 py-2.5">
-          <span className="text-xs font-medium">3 drafts awaiting approval</span>
-          <span className="rounded-full bg-brand px-2 py-0.5 text-[10px] font-medium text-brand-foreground">Review</span>
+      <div className="flex h-full flex-col justify-center gap-3 p-6">
+        <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/60 px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-6 place-items-center rounded-full bg-brand text-[11px] font-bold text-brand-foreground">3</span>
+            <span className="text-sm font-medium">drafts awaiting approval</span>
+          </div>
+          <span className="rounded-full bg-brand px-3 py-1 text-[11px] font-medium text-brand-foreground">Review</span>
         </div>
         {[
-          "Hi Ahmed, noticed RBS Interiors is hiring for retail ops...",
-          "Hi Sana, saw Ittefaq just opened a second Lahore branch...",
-        ].map((t, i) => (
+          { to: "Ahmed Raza", co: "RBS Interiors", body: "noticed RBS Interiors is hiring for retail ops — quick idea on sourcing…" },
+          { to: "Sana Malik", co: "Ittefaq Electronics", body: "saw Ittefaq just opened a second Lahore branch — congrats. One thought…" },
+        ].map((d, i) => (
           <div
-            key={t}
-            className="qf-rise rounded-lg border border-border/60 px-3 py-2.5 text-[11px] text-muted-foreground"
+            key={d.to}
+            className="qf-rise flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-3"
             style={{ animationDelay: `${(i + 1) * 90}ms` }}
           >
-            {t}
+            <Avatar name={d.to} />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium">
+                {d.to} <span className="font-normal text-muted-foreground">· {d.co}</span>
+              </p>
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">Hi {d.to.split(" ")[0]}, {d.body}</p>
+            </div>
+            <span className="mt-0.5 shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              Draft
+            </span>
           </div>
         ))}
       </div>
@@ -118,8 +192,8 @@ const frames = [
 
 // Deliberate, unhurried pacing. Read the view, then the cursor travels and clicks.
 const DWELL_MS = 3600      // time to read the current view before moving on
-const TRAVEL_MS = 900      // cursor glide to the next tab
-const CLICK_MS = 260       // press-and-release before the view switches
+const TRAVEL_MS = 950      // cursor glide to the next tab
+const CLICK_MS = 280       // press-and-release before the view switches
 
 export function ProductSlideshow() {
   const [active, setActive] = React.useState(0)
@@ -130,8 +204,10 @@ export function ProductSlideshow() {
 
   const frameRef = React.useRef<HTMLDivElement>(null)
   const tabRefs = React.useRef<(HTMLButtonElement | null)[]>([])
+  // Mirrors `active` for the timeout-driven tour to read without re-subscribing. Synced in
+  // a layout effect (not during render): it runs before the driver's timers can fire.
   const activeRef = React.useRef(0)
-  activeRef.current = active
+  React.useLayoutEffect(() => { activeRef.current = active }, [active])
 
   // Centre of a tab, in coordinates local to the demo frame.
   const tabCenter = React.useCallback((i: number) => {
@@ -188,7 +264,7 @@ export function ProductSlideshow() {
 
   return (
     <div
-      className="relative mx-auto max-w-3xl"
+      className="relative mx-auto max-w-4xl"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -197,23 +273,27 @@ export function ProductSlideshow() {
       {/* Soft brand glow so the pane reads as a lit surface, not a flat card. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -inset-x-8 -top-10 bottom-0 -z-10 opacity-60 blur-3xl"
-        style={{ background: "radial-gradient(60% 60% at 50% 0%, var(--brand-muted), transparent 70%)" }}
+        className="pointer-events-none absolute -inset-x-10 -top-12 bottom-0 -z-10 opacity-70 blur-3xl"
+        style={{ background: "radial-gradient(55% 55% at 50% 0%, var(--brand-muted), transparent 70%)" }}
       />
 
       {/* Browser-chrome frame */}
-      <div ref={frameRef} className="relative overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl shadow-black/20 ring-1 ring-black/5">
-        <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/50 px-3 py-2.5">
-          <span className="size-2.5 rounded-full bg-red-400/70" />
-          <span className="size-2.5 rounded-full bg-amber-400/70" />
-          <span className="size-2.5 rounded-full bg-green-400/70" />
-          <span className="ml-2 flex-1 truncate rounded-md bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
+      <div ref={frameRef} className="relative overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/25 ring-1 ring-black/5">
+        <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/50 px-4 py-3">
+          <span className="size-3 rounded-full bg-red-400/70" />
+          <span className="size-3 rounded-full bg-amber-400/70" />
+          <span className="size-3 rounded-full bg-green-400/70" />
+          <span className="ml-3 flex flex-1 items-center gap-1.5 truncate rounded-md bg-background px-3 py-1.5 text-[11px] text-muted-foreground">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" className="shrink-0 opacity-70">
+              <rect x="5" y="11" width="14" height="9" rx="2" className="fill-current" />
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2" />
+            </svg>
             app.qualifyr.com/{frames[active].route}
           </span>
         </div>
 
         {/* Tab bar - the cursor's targets, and real manual controls. */}
-        <div role="tablist" aria-label="Product views" className="flex gap-1 border-b border-border/60 bg-muted/30 px-2 py-1.5">
+        <div role="tablist" aria-label="Product views" className="flex gap-1 border-b border-border/60 bg-muted/30 px-2.5 py-2">
           {frames.map((f, i) => (
             <button
               key={f.label}
@@ -223,7 +303,7 @@ export function ProductSlideshow() {
               aria-selected={i === active}
               onClick={() => jumpTo(i)}
               className={cn(
-                "rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors",
+                "rounded-lg px-3.5 py-2 text-xs font-medium transition-colors",
                 i === active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -233,7 +313,7 @@ export function ProductSlideshow() {
         </div>
 
         {/* Content - fixed height so the pane never jumps as views change. */}
-        <div className="h-[248px]">
+        <div className="h-[300px] sm:h-[340px]">
           <div key={active} className="h-full">
             {frames[active].render()}
           </div>
@@ -250,14 +330,20 @@ export function ProductSlideshow() {
               transition: `transform ${TRAVEL_MS}ms cubic-bezier(0.5, 0, 0.2, 1)`,
             }}
           >
-            <div className="relative -translate-x-[3px] -translate-y-[2px]">
+            <div className="relative -translate-x-[4px] -translate-y-[3px]">
               <span
                 className={cn(
-                  "absolute left-0 top-0 size-7 -translate-x-1/2 -translate-y-1/2 rounded-full border border-brand/50 transition-all duration-200",
-                  clicking ? "scale-100 opacity-60" : "scale-0 opacity-0"
+                  "absolute left-0 top-0 size-9 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/25 transition-all duration-200",
+                  clicking ? "scale-100 opacity-100" : "scale-0 opacity-0"
                 )}
               />
-              <svg width="20" height="20" viewBox="0 0 20 20" className={cn("drop-shadow-md transition-transform duration-150", clicking && "scale-90")}>
+              <span
+                className={cn(
+                  "absolute left-0 top-0 size-9 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand/60 transition-all duration-300",
+                  clicking ? "scale-125 opacity-0" : "scale-50 opacity-0"
+                )}
+              />
+              <svg width="26" height="26" viewBox="0 0 20 20" className={cn("drop-shadow-lg transition-transform duration-150", clicking && "scale-90")}>
                 <path d="M3 2l5.5 13 2-5 5-2L3 2z" className="fill-foreground stroke-background" strokeWidth="1.25" strokeLinejoin="round" />
               </svg>
             </div>
@@ -266,7 +352,7 @@ export function ProductSlideshow() {
       </div>
 
       {/* Progress dots - reflect the tour, and stay clickable. */}
-      <div className="mt-5 flex items-center justify-center gap-2">
+      <div className="mt-6 flex items-center justify-center gap-2">
         {frames.map((f, i) => (
           <button
             key={f.label}
@@ -275,8 +361,8 @@ export function ProductSlideshow() {
             aria-label={`Show ${f.label}`}
             aria-current={i === active}
             className={cn(
-              "h-1.5 rounded-full transition-all",
-              i === active ? "w-6 bg-brand" : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50"
+              "h-2 rounded-full transition-all",
+              i === active ? "w-7 bg-brand" : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50"
             )}
           />
         ))}
