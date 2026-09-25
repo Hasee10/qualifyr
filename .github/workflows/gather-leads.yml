@@ -44,6 +44,11 @@ jobs:
       # them the crawl silently downgrades: no mailbox confirmation, no LLM layer.
       GTM_HUNTER_API_KEY: ${{ secrets.GTM_HUNTER_API_KEY }}
       GTM_GROQ_API_KEY: ${{ secrets.GTM_GROQ_API_KEY }}
+      # Read-only, no scopes: raises the GitHub REST rate limit used by
+      # enrichment/github_signals.py from 60/hr to 5000/hr. Deliberately not
+      # GTM_GITHUB_TOKEN - that PAT has actions:write and triggers our own workflows;
+      # it has no business being handed to a job that only reads third-party orgs.
+      GTM_GITHUB_READ_TOKEN: ${{ secrets.GTM_GITHUB_READ_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 

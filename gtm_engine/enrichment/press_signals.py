@@ -14,10 +14,11 @@ from xml.etree import ElementTree as ET
 from gtm_engine.config.schema import DefaultRules
 from gtm_engine.scraping.fetcher import Fetcher
 
-FEED_PATHS = [
-    "/feed", "/feed/", "/rss.xml", "/rss", "/blog/feed", "/blog/rss.xml",
-    "/news/rss", "/press/rss", "/atom.xml", "/index.xml",
-]
+# Kept short: a site with no feed pays for every miss, and these four cover the
+# overwhelming majority of WordPress, Ghost and hand-rolled blogs. The other six from the
+# original list (/feed/, /rss, /blog/rss.xml, /news/rss, /press/rss, /index.xml) matched
+# almost nothing extra in practice and cost ~20s of robots-gated requests per site for it.
+FEED_PATHS = ["/feed", "/rss.xml", "/blog/feed", "/atom.xml"]
 
 _TAG_RE = re.compile(r"\{[^}]*\}")
 
@@ -70,7 +71,9 @@ async def press_mentions(fetcher: Fetcher, base_url: str | None, defaults: Defau
         return []
     base = base_url.rstrip("/")
     for path in FEED_PATHS:
-        result = await fetcher.get(base + path, api=True)
+        # No api=True here: this is a path on the prospect's own site, not a programmatic
+        # endpoint, so it is subject to the same respect_robots policy as the crawl itself.
+        result = await fetcher.get(base + path)
         if not result.ok or "<" not in (result.text or ""):
             continue
         entries = _parse_entries(result.text)

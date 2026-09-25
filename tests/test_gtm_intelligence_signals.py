@@ -67,6 +67,10 @@ async def test_job_board_miss_is_silent(settings, defaults):
 
 @respx.mock
 async def test_github_activity_found(settings):
+    # The org's own profile must confirm ownership (its `blog` matches the company's
+    # domain) before its repos are even fetched.
+    respx.get("https://api.github.com/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "blog": "https://acme.com"}))
     respx.get(url__startswith="https://api.github.com/orgs/acme/repos").mock(
         return_value=httpx.Response(200, json=[
             {"pushed_at": "2026-09-01T00:00:00Z", "stargazers_count": 10},
@@ -81,6 +85,28 @@ async def test_github_activity_found(settings):
 @respx.mock
 async def test_github_activity_no_org_is_silent(settings):
     respx.get(url__startswith="https://api.github.com/orgs/").mock(return_value=httpx.Response(404))
+    async with HttpFetcher(settings) as fetcher:
+        gh = await github_activity(fetcher, "Acme", "acme.com")
+    assert gh is None
+
+
+@respx.mock
+async def test_github_activity_rejects_an_unrelated_org_with_the_same_slug(settings):
+    """Org names are first-come-first-served: "acme" existing is not proof it is *our*
+    Acme. A profile whose `blog` points somewhere else must not be scored."""
+    respx.get("https://api.github.com/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "blog": "https://unrelated-acme.io"}))
+    respx.get(url__startswith="https://api.github.com/orgs/acme/repos").mock(
+        return_value=httpx.Response(200, json=[{"pushed_at": "2026-09-01T00:00:00Z", "stargazers_count": 10}]))
+    async with HttpFetcher(settings) as fetcher:
+        gh = await github_activity(fetcher, "Acme", "acme.com")
+    assert gh is None
+
+
+@respx.mock
+async def test_github_activity_no_blog_on_profile_is_unverified(settings):
+    respx.get("https://api.github.com/orgs/acme").mock(
+        return_value=httpx.Response(200, json={"login": "acme", "blog": ""}))
     async with HttpFetcher(settings) as fetcher:
         gh = await github_activity(fetcher, "Acme", "acme.com")
     assert gh is None
@@ -101,9 +127,7 @@ async def test_press_mentions_rss_classified(settings, defaults):
 @respx.mock
 async def test_press_mentions_falls_back_across_feed_paths(settings, defaults):
     respx.get("https://acme.pk/feed").mock(return_value=httpx.Response(404))
-    respx.get("https://acme.pk/feed/").mock(return_value=httpx.Response(404))
     respx.get("https://acme.pk/rss.xml").mock(return_value=httpx.Response(404))
-    respx.get("https://acme.pk/rss").mock(return_value=httpx.Response(404))
     respx.get("https://acme.pk/blog/feed").mock(return_value=httpx.Response(200, text=ATOM_FEED, headers={"content-type": "application/atom+xml"}))
     async with HttpFetcher(settings) as fetcher:
         mentions = await press_mentions(fetcher, "https://acme.pk", defaults)

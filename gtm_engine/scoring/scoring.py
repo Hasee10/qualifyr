@@ -13,6 +13,14 @@ from gtm_engine.models import (
 )
 
 
+# sig.buying categories that also carry their own explicit, differentiated bonus below
+# (intent's tender/rfq split, job_openings' growth-role weighting, ...). Counting these
+# again in the generic "2.5 per category present" sum double-pays them - measured, a
+# press mention alone scored 6 instead of the intended 3. news_mention and hiring have
+# no second bonus and stay in the generic count.
+_EXPLICITLY_SCORED_BUYING_KEYS = frozenset({"intent", "job_openings", "github_activity", "press_mention"})
+
+
 @dataclass
 class ScoreInputs:
     company: DiscoveredCompany
@@ -119,7 +127,8 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     cp_pts = _scale(cp, w.contact_quality, 10)
 
     # --- Buying / pain signals (default 10)
-    bs = 2.5 * len(sig.buying) + 1.5 * len(sig.pain)
+    generic_buying = [k for k in sig.buying if k not in _EXPLICITLY_SCORED_BUYING_KEYS]
+    bs = 2.5 * len(generic_buying) + 1.5 * len(sig.pain)
     ecommerce_tech = [t for t in sig.technologies if t in ("shopify", "woocommerce", "magento")]
     if ecommerce_tech:
         bs += 2
