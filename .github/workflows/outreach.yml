@@ -111,10 +111,18 @@ jobs:
           # a race against other pushes never reds a run whose sends already went out - the
           # ledger records real emails and must not be lost to a non-fast-forward.
           for attempt in 1 2 3 4 5 6; do
-            if git pull --rebase --autostash origin main && git push; then
+            git fetch origin main || true
+            # Replay our ledger commit onto the latest ref. Outreach runs are globally
+            # serialized (concurrency: outreach), so no other run edits this ledger at the
+            # same time - the only failure is a non-fast-forward from unrelated pushes, which
+            # this rides out. -X theirs keeps our just-recorded sends if anything collides,
+            # and a failed rebase is aborted so the next attempt starts clean rather than
+            # deadlocking on unmerged files. The DB remains the authoritative send record.
+            if git rebase -X theirs origin/main && git push; then
               echo "ledger pushed on attempt $attempt"
               exit 0
             fi
+            git rebase --abort 2>/dev/null || true
             echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
             sleep $((attempt * 4))
           done

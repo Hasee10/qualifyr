@@ -115,10 +115,20 @@ jobs:
           # tries over ~15s is not enough to outlast it. Six tries with a widening gap ride
           # out a burst without ever failing a run whose real work already succeeded.
           for attempt in 1 2 3 4 5 6; do
-            if git pull --rebase --autostash origin "$GITHUB_REF_NAME" && git push; then
+            git fetch origin "$GITHUB_REF_NAME" || true
+            # Replay our leads commit onto the latest ref. latest_qualified.csv is a
+            # whole-file "latest pointer" that every run of this campaign rewrites, so back-
+            # to-back runs always collide on exactly that file - a plain rebase then stops
+            # with a conflict and leaves unmerged files, which no number of retries can clear.
+            # Our run owns that pointer (it is the newest export), so -X theirs makes the
+            # commit being replayed (ours) win the colliding hunk; the unique timestamped
+            # CSVs never conflict. Any other failure (a genuine race) aborts the half-done
+            # rebase so the next attempt starts from a clean tree instead of deadlocking.
+            if git rebase -X theirs "origin/$GITHUB_REF_NAME" && git push; then
               echo "leads pushed on attempt $attempt"
               exit 0
             fi
+            git rebase --abort 2>/dev/null || true
             echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
             sleep $((attempt * 4))
           done
