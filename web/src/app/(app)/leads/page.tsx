@@ -136,6 +136,8 @@ export default function LeadsPage() {
   const [minScore, setMinScore] = React.useState("0")
   const [search, setSearch] = React.useState("")
   const [selected, setSelected] = React.useState<string | null>(null)
+  const [page, setPage] = React.useState(1)
+  const pageSize = 25
   const campaign = campaigns.find((c) => c.campaign_id === campaignId)
 
   const load = React.useCallback(() => {
@@ -147,6 +149,12 @@ export default function LeadsPage() {
 
   const q = search.toLowerCase()
   const visible = leads.filter((l) => !q || l.company_name.toLowerCase().includes(q) || (l.domain ?? "").includes(q) || (l.contact_email ?? "").includes(q))
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const pageItems = visible.slice((safePage - 1) * pageSize, safePage * pageSize)
+  const firstShown = visible.length === 0 ? 0 : (safePage - 1) * pageSize + 1
+  const lastShown = Math.min(safePage * pageSize, visible.length)
 
   return (
     <div className="grid gap-6">
@@ -165,7 +173,7 @@ export default function LeadsPage() {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
-            <Tabs value={type} onValueChange={(v) => setType(String(v))}>
+            <Tabs value={type} onValueChange={(v) => { setType(String(v)); setPage(1) }}>
               <TabsList>
                 <TabsTrigger value="BUYER">Buyers</TabsTrigger>
                 <TabsTrigger value="UNKNOWN">Unknown</TabsTrigger>
@@ -175,10 +183,10 @@ export default function LeadsPage() {
             </Tabs>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Min score</span>
-              <Input className="w-20" value={minScore} onChange={(e) => setMinScore(e.target.value)} />
+              <Input className="w-20" value={minScore} onChange={(e) => { setMinScore(e.target.value); setPage(1) }} />
             </div>
-            <Input className="max-w-xs" placeholder="Search company, domain, email…" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <CardDescription className="ml-auto">{visible.length} shown</CardDescription>
+            <Input className="max-w-xs" placeholder="Search company, domain, email…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
+            <CardDescription className="ml-auto">{visible.length === 0 ? "0 shown" : `${firstShown}–${lastShown} of ${visible.length}`}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -194,7 +202,7 @@ export default function LeadsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.map((l) => (
+              {pageItems.map((l) => (
                 <TableRow key={l.lead_id} className="cursor-pointer" onClick={() => setSelected(l.lead_id)}>
                   <TableCell>
                     <div className="flex flex-col">
@@ -224,6 +232,16 @@ export default function LeadsPage() {
               )}
             </TableBody>
           </Table>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-4 border-t pt-4 text-sm">
+              <span className="text-muted-foreground">Showing {firstShown}–{lastShown} of {visible.length}</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Previous</Button>
+                <span className="text-muted-foreground">Page {safePage} of {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
