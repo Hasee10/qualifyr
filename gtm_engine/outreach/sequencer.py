@@ -124,7 +124,12 @@ def due_leads(db: Database, campaign_id: str, now: datetime | None = None) -> li
     now = now or utcnow()
     out: list[Lead] = []
     for lead in db.leads_by_status(campaign_id, [s.value for s in ACTIVE]):
-        if lead.next_contact_at is None or lead.next_contact_at <= now:
+        # A QUEUED lead is Email 1 - reviewable the moment it is queued; next_contact_at
+        # gating exists for follow-ups (wait N days after a send), not the first touch. So
+        # a queued lead is always due, regardless of any next_contact_at value on it; only
+        # sent-and-waiting statuses are held until their next_contact_at passes.
+        due = lead.sequence_status == SequenceStatus.QUEUED or lead.next_contact_at is None or lead.next_contact_at <= now
+        if due:
             out.append(lead)
     # Follow-ups first (a promise inside an existing thread, oldest due first), then new
     # conversations with whatever budget is left.
@@ -303,10 +308,15 @@ def prepare_drafts(db: Database, campaign: CampaignConfig, settings: OutreachSet
     queue: one row per due (lead, step) with the current draft and its status."""
     queue: list[dict] = []
     for lead in due_leads(db, campaign.campaign_id, now):
-        step, _ = NEXT_STEP[lead.sequence_status]
-        draft = db.get_draft(lead.lead_id, step)
-        if draft is None:
-            rendered = render(step, lead, campaign, settings, templates)
-            draft = db.upsert_draft(lead.lead_id, step, rendered.subject, rendered.body)
-        queue.append({"lead": lead, "step": step, "draft": draft})
+        # One lead that fails to render (an unexpected template/data edge) must not blank
+        # the whole review queue - skip it, log it, and keep serving the rest.
+        try:
+            step, _ = NEXT_STEP[lead.sequence_status]
+            draft = db.get_draft(lead.lead_id, step)
+            if draft is None:
+                rendered = render(step, lead, campaign, settings, templates)
+                draft = db.upsert_draft(lead.lead_id, step, rendered.subject, rendered.body)
+            queue.append({"lead": lead, "step": step, "draft": draft})
+        except Exception:
+            log.exception("could not prepare a draft for %s (%s)", lead.company_name, lead.lead_id)
     return queue
