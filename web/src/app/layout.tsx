@@ -8,9 +8,29 @@ const inter = Inter({
   subsets: ["latin"],
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://qualifyr.vercel.app";
+
 export const metadata: Metadata = {
-  title: "Qualifyr",
-  description: "Buyer-only GTM lead engine",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "Qualifyr — See who actually buys",
+    template: "%s · Qualifyr",
+  },
+  description:
+    "Qualifyr discovers companies from free public sources, rejects the agencies and vendors, finds a decision-maker, and scores every lead 0–100 with a reason you can read.",
+  openGraph: {
+    type: "website",
+    siteName: "Qualifyr",
+    title: "Qualifyr — See who actually buys",
+    description:
+      "A buyer-only B2B lead engine for Pakistan and the GCC. Finds companies that buy, rejects the ones that sell, and explains every score.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Qualifyr — See who actually buys",
+    description:
+      "A buyer-only B2B lead engine for Pakistan and the GCC. Finds companies that buy, rejects the ones that sell, and explains every score.",
+  },
 };
 
 /** Root layout: fonts, theme, nothing else.
