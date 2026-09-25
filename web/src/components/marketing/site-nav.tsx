@@ -66,9 +66,9 @@ export function SiteNav() {
             size="sm"
             nativeButton={false}
             className="hidden bg-brand text-brand-foreground hover:bg-brand/90 sm:inline-flex"
-            render={<a href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20access" />}
+            render={<Link href="/sign-up" />}
           >
-            Request access
+            Get started free
           </Button>
           <Button
             variant="ghost"

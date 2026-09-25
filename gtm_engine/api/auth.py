@@ -10,8 +10,12 @@ This project's Supabase issues **ES256** tokens signed with a rotating key publi
 public key and verify locally. Local verification matters on serverless: a round-trip to
 Supabase on every request would add latency to every cold start.
 
-Single-operator by design. A valid token means "the operator", not "user X" - no table in
-this schema carries an owner, so there is nothing to scope a request to.
+Not multi-tenant. A valid token grants full access to the same shared dataset - no table
+in this schema carries an owner, so there is nothing to scope a request to by user. Signup
+is open (Supabase's own signup flow), so this is an explicit tradeoff: anyone who creates
+an account can see every lead and trigger outreach sends, not just "the operator" who set
+the project up. Revisit before this matters (e.g. a `user_id`/`org_id` column and
+row-level scoping) if that stops being acceptable.
 """
 
 from __future__ import annotations

@@ -11,10 +11,12 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
+  const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up"
+
   // Nothing to check, and nothing we could check with. Note this only affects *navigation*:
   // the API refuses unauthenticated requests regardless, so an unconfigured deploy shows an
   // empty dashboard rather than leaking anything.
-  if (!supabaseConfigured || (!isProtected && pathname !== "/sign-in")) {
+  if (!supabaseConfigured || (!isProtected && !isAuthPage)) {
     return NextResponse.next()
   }
 
@@ -48,7 +50,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (pathname === "/sign-in" && user) {
+  if (isAuthPage && user) {
     const url = request.nextUrl.clone()
     url.pathname = "/dashboard"
     url.search = ""

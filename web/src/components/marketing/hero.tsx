@@ -31,9 +31,9 @@ export function Hero() {
             size="lg"
             nativeButton={false}
             className="bg-brand text-brand-foreground hover:bg-brand/90"
-            render={<a href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20access" />}
+            render={<Link href="/sign-up" />}
           >
-            Request access
+            Get started free
           </Button>
           <Button size="lg" variant="outline" nativeButton={false} render={<Link href="/sign-in" />}>
             Sign in
@@ -41,7 +41,7 @@ export function Hero() {
         </div>
 
         <p className="mt-4 text-xs text-muted-foreground">
-          No self-serve signup &mdash; every account is provisioned by hand.
+          Free to start &mdash; no credit card required.
         </p>
       </div>
 

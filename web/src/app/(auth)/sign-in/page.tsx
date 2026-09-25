@@ -27,13 +27,10 @@ export default function SignInPage() {
       </div>
 
       <p className="mt-8 text-sm text-muted-foreground">
-        Access is invite-only.{" "}
-        <a
-          href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20access"
-          className="text-brand underline-offset-4 hover:underline"
-        >
-          Request an account
-        </a>
+        Don&rsquo;t have an account?{" "}
+        <Link href="/sign-up" className="text-brand underline-offset-4 hover:underline">
+          Sign up
+        </Link>
         .
       </p>
 

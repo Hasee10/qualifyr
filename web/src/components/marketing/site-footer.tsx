@@ -12,10 +12,10 @@ const columns = [
     ],
   },
   {
-    title: "Access",
+    title: "Account",
     links: [
       { label: "Sign in", href: "/sign-in" },
-      { label: "Request access", href: "mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20access" },
+      { label: "Get started free", href: "/sign-up" },
     ],
   },
 ]

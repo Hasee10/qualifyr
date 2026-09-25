@@ -61,7 +61,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         <p className="relative text-sm text-brand-foreground/70">
-          Access is invite-only while the engine is in alpha.
+          Free to start &mdash; no credit card required.
         </p>
       </aside>
 

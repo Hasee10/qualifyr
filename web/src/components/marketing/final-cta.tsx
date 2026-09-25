@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
 export function FinalCta() {
@@ -8,16 +9,16 @@ export function FinalCta() {
           Stop guessing who to reach out to
         </h2>
         <p className="mt-4 text-brand-foreground/80">
-          Tell us your target market and we&rsquo;ll set your account up.
+          Create your account and start qualifying leads in minutes.
         </p>
         <div className="mt-8">
           <Button
             size="lg"
             nativeButton={false}
             className="bg-brand-foreground text-brand hover:bg-brand-foreground/90"
-            render={<a href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20access" />}
+            render={<Link href="/sign-up" />}
           >
-            Request access
+            Get started free
           </Button>
         </div>
       </div>

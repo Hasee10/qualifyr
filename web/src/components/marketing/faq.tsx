@@ -5,8 +5,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 
 const faqs = [
   {
-    q: "Is this multi-tenant — can my team sign up?",
-    a: "Not yet. Every account today is a single operator, provisioned by hand. There is no self-serve signup; use \"Request access\" and we'll set one up.",
+    q: "Can I just sign up?",
+    a: "Yes — create an account and you're in. There's no waitlist and no sales call.",
   },
   {
     q: "Where does the company data come from?",
@@ -54,7 +54,7 @@ export function Faq() {
           </span>
           <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Email us directly and we&rsquo;ll answer before we set up your account.
+            Email us directly and we&rsquo;ll get back to you.
           </p>
           <a
             href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20question"
