@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = ["fastapi>=0.115", "uvicorn>=0.30"]
+# pyjwt[crypto]: Supabase signs access tokens with ES256, which needs `cryptography`.
+api = ["fastapi>=0.115", "uvicorn>=0.30", "pyjwt[crypto]>=2.9"]
 overture = ["duckdb>=1.0"]
 browser = ["playwright>=1.45"]
 sheets = ["google-auth>=2.30"]

@@ -1,5 +1,7 @@
-"""FastAPI backend for the web UI. No auth (single operator, local). Every send goes
-through the human-approval queue: preview -> edit -> approve -> send."""
+"""FastAPI backend for the web UI. Single operator: every route except /health requires a
+valid Supabase bearer token (see api/auth.py), but a token means "the operator" rather than
+a particular user - nothing in this schema is owned. Every send goes through the
+human-approval queue: preview -> edit -> approve -> send."""
 
 from __future__ import annotations
 
@@ -10,12 +12,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from gtm_engine import __version__
+from gtm_engine.api.auth import auth_disabled, verify_request
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
 from gtm_engine.export.csv_export import export_path, write_csv
@@ -31,7 +34,17 @@ from gtm_engine.outreach.templates import render
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
-app = FastAPI(title="GTM Lead Engine", version=__version__)
+# Applied app-wide rather than per-route: a route added later is then protected by default
+# instead of open by default. auth.PUBLIC_PATHS names the only exceptions.
+#
+# The docs are switched off rather than guarded. FastAPI registers /docs and /openapi.json
+# in its own setup(), which runs outside these dependencies - they stayed public on the
+# first attempt, publishing all 35 routes. Guarding them would not help much either: a
+# browser hitting /docs cannot send a bearer header. So they exist only in local dev,
+# where auth is explicitly disabled.
+_docs = {} if auth_disabled() else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+app = FastAPI(title="GTM Lead Engine", version=__version__,
+              dependencies=[Depends(verify_request)], **_docs)
 _extra_origins = [o.strip() for o in os.environ.get("GTM_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,

@@ -122,6 +122,20 @@ def settings(tmp_path: Path, pg_schema) -> EngineSettings:
     )
 
 
+def bypass_auth(api_main, monkeypatch) -> None:
+    """Let an API test reach the routes it is actually testing.
+
+    Every route now sits behind a Supabase bearer token. These tests are about campaign
+    and lead behaviour, not the gate, and minting a real ES256 token in each of them would
+    only test PyJWT again - tests/test_api_auth.py covers the gate itself, against the real
+    verifier. Overriding the dependency is narrower than setting GTM_AUTH_DISABLED, which
+    would also switch the OpenAPI routes back on and change what is being tested.
+    """
+    from gtm_engine.api.auth import verify_request
+
+    monkeypatch.setitem(api_main.app.dependency_overrides, verify_request, lambda: None)
+
+
 @pytest.fixture(autouse=True)
 def isolate_credentials(monkeypatch):
     """Tests must never see a developer's real .env: the engine loads one automatically, and

@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 
+from conftest import bypass_auth
 from gtm_engine.config.loader import load_defaults
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRA_URL, PPRATenders, clean_org, matches_campaign, parse_ppra
@@ -130,6 +131,7 @@ def client(settings, tmp_path, monkeypatch):
                           outreach_ready=True, intent_signals=[{"kind": "tender", "text": "x"}] if i == 0 else []), "r", f"co{i}.pk")
     ids = [l.lead_id for l in db.list_leads("test-retail")]
     db.close()
+    bypass_auth(m, monkeypatch)
     return TestClient(m.app), ids
 
 

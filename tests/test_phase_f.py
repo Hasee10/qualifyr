@@ -3,6 +3,7 @@
 import httpx
 import pytest
 
+from conftest import bypass_auth
 from gtm_engine.export.sheets import EXTRA_COLUMNS, SheetsExporter, rows_for
 from gtm_engine.models import CSV_COLUMNS, CompanyType, EmailStatus, Lead, Priority
 from gtm_engine.storage.database import Database
@@ -61,6 +62,7 @@ def client(settings, tmp_path, monkeypatch):
     camp_dir.mkdir()
     (camp_dir / "one.yaml").write_text("campaign_id: one\nname: One\noffer: x\ngeography:\n  cities: [Lahore]\nosm_categories: [shop=clothes]\n", encoding="utf-8")
     monkeypatch.setattr(m, "CAMPAIGN_DIR", camp_dir)
+    bypass_auth(m, monkeypatch)
     return TestClient(m.app), camp_dir
 
 
