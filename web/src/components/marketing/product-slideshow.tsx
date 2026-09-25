@@ -190,10 +190,10 @@ const frames = [
   },
 ]
 
-// Deliberate, unhurried pacing. Read the view, then the cursor travels and clicks.
-const DWELL_MS = 3600      // time to read the current view before moving on
-const TRAVEL_MS = 950      // cursor glide to the next tab
-const CLICK_MS = 280       // press-and-release before the view switches
+// Brisk but still readable: read the view, then the cursor travels and clicks.
+const DWELL_MS = 2600      // time to read the current view before moving on
+const TRAVEL_MS = 760      // cursor glide to the next tab
+const CLICK_MS = 240       // press-and-release before the view switches
 
 export function ProductSlideshow() {
   const [active, setActive] = React.useState(0)
