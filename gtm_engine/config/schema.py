@@ -10,12 +10,27 @@ from pydantic import BaseModel, Field, field_validator
 
 class GeographyConfig(BaseModel):
     countries: list[str] = Field(default_factory=lambda: ["Pakistan"])
+    # Provinces / states, searched as broader areas than a single city (a province geocodes
+    # to a bbox that covers many towns). Optional middle tier between country and city.
+    provinces: list[str] = Field(default_factory=list)
     cities: list[str] = Field(default_factory=list)
 
-    @field_validator("countries", "cities")
+    @field_validator("countries", "provinces", "cities")
     @classmethod
     def _strip(cls, values: list[str]) -> list[str]:
         return [v.strip() for v in values if v and v.strip()]
+
+    def search_areas(self) -> list[str]:
+        """Places to geocode into search bboxes: provinces first (broader), then cities.
+        De-duped, order preserved, so a run does not scan the same area twice."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for area in [*self.provinces, *self.cities]:
+            key = area.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(area)
+        return out
 
 
 class ScoringWeights(BaseModel):

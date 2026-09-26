@@ -206,6 +206,7 @@ class CampaignCreate(BaseModel):
     name: str
     offer: str
     countries: list[str] = []
+    provinces: list[str] = []
     cities: list[str] = []
     target_industries: list[str] = []
     buyer_keywords: list[str] = []
@@ -228,7 +229,7 @@ def create_campaign(body: CampaignCreate) -> dict:
     try:
         cfg = CampaignConfig(
             campaign_id=cid, name=body.name.strip(), offer=body.offer.strip(),
-            geography=GeographyConfig(countries=body.countries, cities=body.cities),
+            geography=GeographyConfig(countries=body.countries, provinces=body.provinces, cities=body.cities),
             target_industries=body.target_industries, buyer_keywords=body.buyer_keywords,
             osm_categories=body.osm_categories, overture_categories=body.overture_categories,
             min_score=body.min_score, max_companies=body.max_companies,

@@ -85,6 +85,7 @@ export interface CampaignCreate {
   name: string
   offer: string
   countries: string[]
+  provinces: string[]
   cities: string[]
   target_industries: string[]
   buyer_keywords: string[]

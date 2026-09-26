@@ -120,14 +120,20 @@ class OvertureDiscovery:
         if not campaign.overture_categories:
             log.info("overture: campaign has no overture_categories; skipping")
             return
-        country = campaign.geography.countries[0] if campaign.geography.countries else ""
-        for city in campaign.geography.cities:
-            bbox = await self.geocoder.bbox(city, country)
+        countries = campaign.geography.countries or [""]
+        for area in campaign.geography.search_areas():
+            bbox, country = None, countries[0]
+            for c in countries:
+                bbox = await self.geocoder.bbox(area, c or None)
+                if bbox is not None:
+                    country = c
+                    break
             if bbox is None:
+                log.warning("overture: could not geocode %s; skipping", area)
                 continue
             rows = await asyncio.to_thread(self._query, bbox, campaign.overture_categories)
-            log.info("overture: %s -> %d places", city, len(rows))
+            log.info("overture: %s -> %d places", area, len(rows))
             for row in rows:
-                company = row_to_company(row, city, country)
+                company = row_to_company(row, area, country or "")
                 if company:
                     yield company

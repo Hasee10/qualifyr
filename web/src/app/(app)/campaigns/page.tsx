@@ -19,6 +19,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const [name, setName] = React.useState("")
   const [offer, setOffer] = React.useState("")
   const [countries, setCountries] = React.useState("Pakistan")
+  const [provinces, setProvinces] = React.useState("")
   const [cities, setCities] = React.useState("")
   const [industries, setIndustries] = React.useState("")
   const [buyerKeywords, setBuyerKeywords] = React.useState("")
@@ -36,7 +37,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     try {
       await api.createCampaign({
         name: name.trim(), offer: offer.trim(),
-        countries: csv(countries), cities: csv(cities),
+        countries: csv(countries), provinces: csv(provinces), cities: csv(cities),
         target_industries: csv(industries), buyer_keywords: csv(buyerKeywords),
         osm_categories: csv(osm), overture_categories: csv(overture),
         min_score: Number(minScore) || 70, max_companies: Number(maxCompanies) || 60,
@@ -59,10 +60,15 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
             <Textarea rows={2} value={offer} onChange={(e) => setOffer(e.target.value)} placeholder="Order-management and inventory software for growing retailers" />
             <p className="text-xs text-muted-foreground">Used for context and personalization. Keyword generation will build on this.</p>
           </div>
+          <div className="grid gap-1.5">
+            <Label>Countries</Label>
+            <Input value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="Pakistan" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5"><Label>Countries</Label><Input value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="Pakistan" /></div>
+            <div className="grid gap-1.5"><Label>Provinces / states</Label><Input value={provinces} onChange={(e) => setProvinces(e.target.value)} placeholder="Punjab, Sindh" /></div>
             <div className="grid gap-1.5"><Label>Cities</Label><Input value={cities} onChange={(e) => setCities(e.target.value)} placeholder="Lahore, Karachi" /></div>
           </div>
+          <p className="text-xs text-muted-foreground">Comma-separated. A province is searched as a broad area; a city is narrower. Leave provinces blank to search only the named cities.</p>
           <div className="grid gap-1.5">
             <Label>Target industries</Label>
             <Input value={industries} onChange={(e) => setIndustries(e.target.value)} placeholder="retail, clothing, fashion" />

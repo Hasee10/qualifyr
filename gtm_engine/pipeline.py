@@ -152,9 +152,9 @@ class Pipeline:
 
     async def discover(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> list[DiscoveredCompany]:
         sources = []
-        if campaign.overture_categories and campaign.geography.cities:
+        if campaign.overture_categories and campaign.geography.search_areas():
             sources.append(OvertureDiscovery(self.fetcher, self.settings))
-        if campaign.osm_categories and campaign.geography.cities:
+        if campaign.osm_categories and campaign.geography.search_areas():
             sources.append(OSMDiscovery(self.fetcher, self.settings))
         if "kcci" in campaign.chamber_sources:
             sources.append(KCCIDirectory(self.fetcher, self.settings))

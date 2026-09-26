@@ -92,19 +92,29 @@ class OSMDiscovery:
         if not campaign.osm_categories:
             log.info("osm: campaign has no osm_categories; skipping")
             return
-        country = campaign.geography.countries[0] if campaign.geography.countries else None
-        for city in campaign.geography.cities:
-            bbox = await self.geocoder.bbox(city, country)
+        countries = campaign.geography.countries or [None]
+        for area in campaign.geography.search_areas():
+            bbox, country = await self._geocode_area(area, countries)
             if bbox is None:
-                log.warning("osm: could not geocode %s; skipping", city)
+                log.warning("osm: could not geocode %s; skipping", area)
                 continue
             query = build_query(bbox, campaign.osm_categories, self.settings.overpass_timeout_s)
             elements = await self._run_query(query)
-            log.info("osm: %s -> %d elements", city, len(elements))
+            log.info("osm: %s -> %d elements", area, len(elements))
             for el in elements:
-                company = element_to_company(el, city, country or "", None)
+                company = element_to_company(el, area, country or "", None)
                 if company:
                     yield company
+
+    async def _geocode_area(self, area: str, countries: list[str | None]):
+        """Resolve an area to a bbox, trying each configured country as a hint. Lets one
+        campaign span countries (e.g. 'Lahore' under Pakistan and 'Dubai' under UAE) - the
+        first country in which the name resolves wins."""
+        for country in countries:
+            bbox = await self.geocoder.bbox(area, country)
+            if bbox is not None:
+                return bbox, country
+        return None, countries[0] if countries else None
 
     async def _run_query(self, query: str) -> list[dict]:
         # Overpass instances are shared and often overloaded; fall through the mirror list.
