@@ -10,17 +10,49 @@ The LLM is never needed here — the point is a trustworthy summary, not prose."
 
 from __future__ import annotations
 
-from gtm_engine.models import Classification, Contact, DiscoveredCompany, EmailStatus, Signals
+from gtm_engine.models import Classification, CompanyQuality, Contact, DiscoveredCompany, EmailStatus, Signals
 
 
 def _sentence(parts: list[str]) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+def _web_presence(quality: CompanyQuality | None) -> str | None:
+    """The Section-6 website activity/quality point, stated plainly — including the 'reachable
+    but almost nothing public' case (e.g. a single-page site with no about/contact/email), which
+    is itself a strong outreach signal and must not be hidden."""
+    if quality is None:
+        return None
+    if quality.website_mismatch:
+        return "Web presence: the site found did not appear to belong to this company, so its details were not used."
+    if not quality.reachable:
+        return "Web presence: no reachable website found."
+    bits = ["single-page site" if quality.page_count <= 1 else f"{quality.page_count} pages",
+            "HTTPS" if quality.https else "no HTTPS"]
+    missing = [name for present, name in (
+        (quality.has_about_page, "about"), (quality.has_contact_page, "contact")) if not present]
+    if missing:
+        bits.append("no " + "/".join(missing) + " page")
+    if not (quality.has_public_email or quality.has_phone):
+        bits.append("no public email or phone")
+    if quality.mobile_friendly is False:
+        bits.append("not mobile-friendly")
+    if quality.copyright_year:
+        bits.append(f"footer year {quality.copyright_year}")
+    line = "Web presence: " + "; ".join(bits) + "."
+    if quality.page_count <= 1 and not quality.has_about_page and not quality.has_contact_page \
+            and not quality.has_public_email:
+        line += " Limited public information available."
+    return line
+
+
 def build_research_brief(company: DiscoveredCompany, cls: Classification, contact: Contact,
                          signals: Signals, *, city: str | None = None,
-                         industry: str | None = None, description: str | None = None) -> str:
-    """A few grounded lines about the company, its signals and its decision-maker."""
+                         industry: str | None = None, description: str | None = None,
+                         quality: CompanyQuality | None = None) -> str:
+    """A grounded per-company account covering the Section-6 research checklist: what the company
+    is, its web presence, whether it plausibly needs the offer (intent), the buying signals, the
+    technologies, and who to talk to — every line built from observed fields, nothing invented."""
     lines: list[str] = []
 
     where = ", ".join(x for x in (city or company.city, company.country) if x)
@@ -32,6 +64,16 @@ def build_research_brief(company: DiscoveredCompany, cls: Classification, contac
         f". {description.strip().rstrip('.')}." if description else ".",
     ])
     lines.append(head)
+
+    web = _web_presence(quality)
+    if web:
+        lines.append(web)
+
+    # Whether it plausibly needs the offer — the intent verdict leads when the LLM judged it.
+    if cls.intent_buyer is not None:
+        verdict = "likely a buyer" if cls.intent_buyer else "no evident need for the offer"
+        lines.append(f"Intent: {verdict} ({cls.intent_confidence:.0%})"
+                     + (f" — {cls.intent_reason}" if cls.intent_reason else "") + ".")
 
     # Why it is (or is not yet) a buyer.
     if cls.company_type.value == "BUYER" and cls.reasons:
@@ -52,6 +94,9 @@ def build_research_brief(company: DiscoveredCompany, cls: Classification, contac
     if reasons:
         lines.append("Signals: " + "; ".join(reasons) + ".")
 
+    if signals.technologies:
+        lines.append("Tech: " + ", ".join(signals.technologies[:6]) + ".")
+
     # Who to talk to.
     if contact.name:
         who = _sentence([
@@ -71,5 +116,8 @@ def build_research_brief(company: DiscoveredCompany, cls: Classification, contac
         lines.append(f"Contact: {contact.email} ({contact.email_status.value}); no named decision-maker found.")
     else:
         lines.append("No public contact found yet.")
+
+    if company.source:
+        lines.append(f"Source: {company.source}" + (f" ({company.source_url})" if company.source_url else "") + ".")
 
     return "\n".join(lines)

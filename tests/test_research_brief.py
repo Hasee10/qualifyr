@@ -1,7 +1,9 @@
 """P5: the per-company research brief is grounded and covers the decision-maker."""
 
 from gtm_engine.enrichment.research import build_research_brief
-from gtm_engine.models import Classification, CompanyType, Contact, DiscoveredCompany, EmailStatus, Signals
+from gtm_engine.models import (
+    Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Signals,
+)
 
 
 def _company(**kw):
@@ -36,3 +38,30 @@ def test_brief_notes_unverified_email_without_a_name():
     contact = Contact(email="info@rakht.pk", email_status=EmailStatus.GENERIC)
     brief = build_research_brief(_company(), Classification(company_type=CompanyType.BUYER), contact, Signals())
     assert "info@rakht.pk" in brief and "generic" in brief and "no named decision-maker" in brief.lower()
+
+
+def test_brief_flags_a_thin_single_page_site_with_no_public_detail():
+    """The Rizvi Dental case: reachable but a single page with no about/contact/email."""
+    quality = CompanyQuality(reachable=True, https=True, page_count=1,
+                             has_about_page=False, has_contact_page=False, has_public_email=False)
+    brief = build_research_brief(_company(), Classification(company_type=CompanyType.UNKNOWN),
+                                 Contact(), Signals(), quality=quality)
+    assert "Web presence:" in brief and "single-page site" in brief
+    assert "Limited public information available." in brief
+
+
+def test_brief_reports_a_missing_website():
+    brief = build_research_brief(_company(), Classification(company_type=CompanyType.UNKNOWN),
+                                 Contact(), Signals(), quality=CompanyQuality(reachable=False))
+    assert "no reachable website" in brief.lower()
+
+
+def test_brief_surfaces_the_intent_verdict_and_tech_and_source():
+    cls = Classification(company_type=CompanyType.BUYER, intent_buyer=True, intent_confidence=0.9,
+                         intent_reason="runs multiple outlets, manual stock")
+    signals = Signals(technologies=["shopify", "google-analytics"])
+    company = _company(source_url="https://osm.org/x")
+    brief = build_research_brief(company, cls, Contact(), signals, quality=CompanyQuality(reachable=True))
+    assert "Intent: likely a buyer (90%)" in brief and "manual stock" in brief
+    assert "Tech: shopify" in brief
+    assert "Source: osm" in brief
