@@ -27,11 +27,12 @@ const faqs = [
   },
 ]
 
-/** Heading pairs with an illustration (image right on desktop, below the heading on
- *  mobile — text stays first in reading order at every width). The accordion below is
- *  unchanged: it answers the searchable questions, the card beside it is for the one
- *  question no FAQ ever covers, and it now carries its own small illustration instead of
- *  a bare icon square. The reference's radial ring diagram was considered and dropped
+/** Heading pairs with one illustration (image right on desktop, below the heading on
+ *  mobile — text stays first in reading order at every width). A second illustration was
+ *  tried on the support card below but dropped: two similar figures stacked in one
+ *  section read as repetitive rather than rich, so the card keeps its plain icon. The
+ *  accordion answers the searchable questions; the card beside it is for the one question
+ *  no FAQ ever covers. The reference's radial ring diagram was considered and dropped
  *  deliberately - it is unusable on mobile (no room for eight orbiting nodes) and hostile
  *  to screen readers (no meaningful DOM order), which this layout does not have to
  *  compromise on. */
@@ -64,29 +65,20 @@ export function Faq() {
           ))}
         </Accordion>
 
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-          <Illustration
-            src="/brand/faq-support-side.png"
-            alt="A support agent standing by to help"
-            width={1448}
-            height={1086}
-            className="aspect-[4/3] w-full rounded-none border-0 border-b border-border/60"
-          />
-          <div className="p-6">
-            <span className="flex size-10 items-center justify-center rounded-lg bg-brand-muted">
-              <MessageCircleQuestion className="size-5 text-brand" />
-            </span>
-            <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Email us directly and we&rsquo;ll get back to you.
-            </p>
-            <a
-              href="mailto:outreach.grydin@gmail.com?subject=Qualifyr%20question"
-              className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
-            >
-              outreach.grydin@gmail.com
-            </a>
-          </div>
+        <div className="rounded-xl border border-border/60 bg-card p-6">
+          <span className="flex size-10 items-center justify-center rounded-lg bg-brand-muted">
+            <MessageCircleQuestion className="size-5 text-brand" />
+          </span>
+          <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Email us directly and we&rsquo;ll get back to you.
+          </p>
+          <a
+            href="mailto:outreach.grydin@gmail.com?subject=Qualifyr%20question"
+            className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
+          >
+            outreach.grydin@gmail.com
+          </a>
         </div>
       </div>
     </section>
