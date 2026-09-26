@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-09-26 (E2 web-search discovery done; bento edge-glow shipped)
+Last updated: 2026-09-26 (E2 verified + interleave fix; E4 async DB / token pacing / reconnect / Nominatim / cron-alert all done)
 
 ---
 
@@ -114,16 +114,21 @@ categories discovered nothing, silently.
 - **E3 — competitor-analysis flow** ⬜. The unbuilt 2nd core job: describe a product → find
   competitors → surface their hiring/press/funding. Different flow, larger build. **CEO earlier
   said park it — reconfirm before building.**
-- **E4 — optimize** ⬜, deliberately LAST (hardening the wrong shape is waste):
-  - LLM token pacing: measured Groq free limit ≈ **8,000 tokens/min** (~11 judge_intent calls/
-    min sustainable). Only reactive 429-retry exists; add a proactive token bucket for LLM calls.
-  - DB is a **single SYNC `psycopg` connection**, no `to_thread`/lock → `concurrency=4` does NOT
-    parallelize DB calls, and every write blocks the event loop. Wrap in `to_thread` or go async.
-  - No DB **reconnection** if the connection drops mid-run (a long run + pooler recycle → the
-    rest of the run silently fails as "0 leads, N errors"). Add reconnect-with-backoff.
-  - Nominatim policy is **4 req/min for scheduled/regular scripts** (code targets 1/sec).
-    Mitigated by the disk geocode cache, but P3 adds more first-time area lookups.
-  - No failure alerting on the weekly `gather-leads` cron beyond GitHub's default email.
+- **E4 — optimize** ✅ **mostly DONE** (was deliberately last):
+  - **Proactive LLM token pacing** ✅ — `llm/client.TokenBucket` paces GroqLLM calls under the
+    ~8k tokens/min free budget up front (was reactive 429-retry only). `GTM_GROQ_TOKENS_PER_MIN`.
+  - **Async DB** ✅ — per-company DB calls run off the event loop via `pipeline._db_call`
+    (`to_thread` + an asyncio lock; the single connection is not thread-safe). Progress writes
+    get their OWN connection in `cli.py` so they never share the pipeline's under threads.
+  - **DB reconnection** ✅ — every statement goes through `Database._execute`, which reconnects
+    (backoff, search_path re-applied) once on a dropped connection; `_commit` recovers too.
+  - **Nominatim** ✅ — explicit `geocode.NOMINATIM_DELAY_S` (1.1s, under the 1/sec public cap;
+    disk-cached), `GTM_NOMINATIM_DELAY_S` to override for a self-hosted instance.
+  - **Cron failure alert** ✅ — `gather-leads.yml` opens (or comments on) a `crawl-failure` issue
+    on failure (keyless GITHUB_TOKEN).
+  - ⬜ **Still open:** no in-code **Brave monthly spend counter** (documented in `docs/API_KEYS.md`);
+    the async-DB win is real but DB calls are still **serialised** (one connection) — a true
+    connection pool would parallelise them, if throughput ever demands it.
 
 ---
 
