@@ -14,6 +14,7 @@ Rules that keep it honest:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -24,6 +25,36 @@ from typing import Protocol
 import httpx
 
 log = logging.getLogger(__name__)
+
+
+async def _post_with_retry(client: httpx.AsyncClient, url: str, *, headers: dict | None = None,
+                           json: dict | None = None, retries: int = 3, base_delay: float = 0.6) -> httpx.Response:
+    """POST that retries transient failures — HTTP 429 / 5xx and network errors — with
+    exponential backoff, honouring a Retry-After header when present. Rate limiting on a free
+    tier is the common case, and one dropped call silently loses a verdict (e.g. a company's
+    intent judgment), so a few backed-off retries are worth the wait. A non-transient response
+    (any other 4xx) is returned immediately for the caller to handle."""
+    response: httpx.Response | None = None
+    for attempt in range(retries):
+        try:
+            response = await client.post(url, headers=headers, json=json)
+        except httpx.TransportError as exc:  # connect/read/timeout
+            if attempt == retries - 1:
+                raise
+            log.debug("llm post transient error (attempt %d): %s", attempt + 1, exc)
+            await asyncio.sleep(base_delay * (2 ** attempt))
+            continue
+        if (response.status_code == 429 or response.status_code >= 500) and attempt < retries - 1:
+            try:
+                delay = float(response.headers.get("retry-after", ""))
+            except ValueError:
+                delay = base_delay * (2 ** attempt)
+            log.debug("llm rate-limited/5xx %s (attempt %d), backing off %.1fs",
+                      response.status_code, attempt + 1, delay)
+            await asyncio.sleep(min(delay, 8.0))
+            continue
+        return response
+    return response  # exhausted; caller's raise_for_status surfaces the final status
 
 
 class LLM(Protocol):
@@ -56,10 +87,11 @@ class GroqLLM:
 
     async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
         async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post("https://api.groq.com/openai/v1/chat/completions",
-                             headers={"Authorization": f"Bearer {self.api_key}"},
-                             json={"model": self.model, "temperature": 0, "max_tokens": max_tokens,
-                                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+            r = await _post_with_retry(
+                c, "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "temperature": 0, "max_tokens": max_tokens,
+                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
 

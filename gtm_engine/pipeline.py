@@ -130,16 +130,34 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 INTENT_THRESHOLD = 0.6
 
 
-def _intent_evidence(company, bundle) -> str:
-    """The company's own text that the intent judge reasons over: name, category, description
-    and about/body copy. Deliberately its own words, so the verdict is about evident need, not
-    about our keywords."""
+def _intent_evidence(company, bundle, signals=None) -> str:
+    """The company's own evidence the intent judge reasons over: name, category, description,
+    the observed operating signals, and about/body copy. Feeding the signals (multiple outlets,
+    ecommerce, hiring, tech, tenders) alongside the page text stops a real multi-outlet buyer
+    with a sparse homepage from being under-rated on marketing copy alone. Still its own
+    evidence, so the verdict is about evident need, not about our keywords."""
     parts = [
         company.name or "",
         f"Category: {company.category}" if company.category else "",
         bundle.description or "",
-        (bundle.about_text or bundle.body_text or "")[:2500],
     ]
+    if signals is not None:
+        facts: list[str] = []
+        for group in (signals.buying or {}).values():
+            facts += list(group)
+        for group in (signals.pain or {}).values():
+            facts += list(group)
+        if facts:
+            parts.append("Observed signals: " + "; ".join(facts[:8]))
+        if signals.technologies:
+            parts.append("Technologies: " + ", ".join(signals.technologies[:8]))
+        if signals.job_openings:
+            titles = [j.get("title", "") for j in signals.job_openings[:5] if j.get("title")]
+            if titles:
+                parts.append("Hiring: " + ", ".join(titles))
+        for s in (signals.intent or [])[:3]:
+            parts.append(f"Intent signal ({s.get('kind')}): {s.get('text', '')[:120]}")
+    parts.append((bundle.about_text or bundle.body_text or "")[:3500])
     return "\n".join(p for p in parts if p).strip()
 
 
@@ -456,7 +474,7 @@ class Pipeline:
         # confident buyer promotes an UNKNOWN. VENDOR (agency/competitor) is a hard reject and
         # is never promoted. Without the LLM this is skipped and the keyword path stands.
         if self.llm and cls.company_type != CompanyType.VENDOR:
-            verdict = await judge_intent(self.llm, campaign.offer, _intent_evidence(company, bundle))
+            verdict = await judge_intent(self.llm, campaign.offer, _intent_evidence(company, bundle, signals))
             if verdict:
                 provenance["intent_fit"] = apply_intent_verdict(cls, verdict)
 
