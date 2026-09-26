@@ -298,7 +298,7 @@ export const api = {
   validateCampaign: (yaml: string) =>
     request<{ ok: boolean; error?: string; campaign_id: string; name: string; sources: string[] }>("/campaigns/validate", { method: "POST", body: JSON.stringify({ yaml }) }),
   saveCampaignYaml: (id: string, yaml: string) =>
-    request<{ ok: boolean; file: string }>(`/campaigns/${id}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
+    request<{ ok: boolean; file: string | null; campaign_id?: string }>(`/campaigns/${id}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
   sheetsStatus: () => request<{ configured: boolean; spreadsheet_id: string | null }>("/sheets/status"),
   exportSheets: (id: string) => request<{ rows: number; tab: string; url: string }>(`/campaigns/${id}/export/sheets`, { method: "POST" }),
   review: (leadId: string, verdict: string) =>

@@ -145,7 +145,7 @@ function CampaignEditor() {
       const v = await api.validateCampaign(text)
       if (!v.ok) { setStatus({ ok: false, message: v.error ?? "invalid" }); return }
       const r = await api.saveCampaignYaml(v.campaign_id, text)
-      setStatus({ ok: true, message: `Saved ${r.file}` })
+      setStatus({ ok: true, message: `Saved ${r.file ?? r.campaign_id ?? v.campaign_id}` })
       await refresh()
       setSelected(v.campaign_id)
     } catch (e) { setStatus({ ok: false, message: (e as Error).message }) } finally { setBusy(false) }
@@ -157,7 +157,7 @@ function CampaignEditor() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <CardTitle>Campaign editor</CardTitle>
-            <CardDescription>Edit <code>config/campaigns/*.yaml</code> here. Validation runs the same schema the engine uses.</CardDescription>
+            <CardDescription>Create or edit a campaign here — a new one is saved to your account. Validation runs the same schema the engine uses.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <select className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm" value={selected} onChange={(e) => setSelected(e.target.value)}>

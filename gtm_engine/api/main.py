@@ -502,9 +502,18 @@ def mailboxes(campaign_id: str | None = None) -> list[dict]:
 @app.get("/campaigns/{campaign_id}/yaml", dependencies=[Depends(require_campaign_access)])
 def campaign_yaml(campaign_id: str) -> dict:
     path = _campaign_files().get(campaign_id)
-    if not path:
-        raise HTTPException(404, "campaign file not found")
-    return {"campaign_id": campaign_id, "file": path.name, "yaml": path.read_text(encoding="utf-8")}
+    if path:
+        return {"campaign_id": campaign_id, "file": path.name, "yaml": path.read_text(encoding="utf-8")}
+    # A user-created campaign lives in the DB, not on disk: serialise its stored config to YAML
+    # so it can be loaded and edited in the same editor as the shipped examples.
+    import yaml as _yaml
+    db = _db()
+    cfg = db.campaign_config(campaign_id)
+    db.close()
+    if not cfg:
+        raise HTTPException(404, f"campaign '{campaign_id}' not found")
+    return {"campaign_id": campaign_id, "file": None,
+            "yaml": _yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)}
 
 
 class YamlBody(BaseModel):
@@ -524,9 +533,13 @@ def validate_campaign_yaml(body: YamlBody) -> dict:
                                         ("kcci", "kcci" in cfg.chamber_sources), ("seed_csv", bool(cfg.seed_csv))) if on]}
 
 
-@app.put("/campaigns/{campaign_id}/yaml", dependencies=[Depends(require_campaign_access)])
-def save_campaign_yaml(campaign_id: str, body: YamlBody) -> dict:
-    """Validate, then write. A new campaign_id creates config/campaigns/<id>.yaml."""
+@app.put("/campaigns/{campaign_id}/yaml")
+def save_campaign_yaml(campaign_id: str, body: YamlBody,
+                       user_id: str | None = Depends(current_user_id)) -> dict:
+    """Validate, then persist. A user campaign is stored in the DB (works on the read-only
+    serverless filesystem and is per-owner), created if new and updated if it already exists;
+    another owner's campaign is 404. A shipped example (a file) is written to disk in local dev
+    and refused on the hosted app, where the bundle is read-only."""
     import yaml as _yaml
     try:
         cfg = CampaignConfig.model_validate(_yaml.safe_load(body.yaml) or {})
@@ -534,9 +547,23 @@ def save_campaign_yaml(campaign_id: str, body: YamlBody) -> dict:
         raise HTTPException(422, str(exc))
     if cfg.campaign_id != campaign_id:
         raise HTTPException(422, f"campaign_id in YAML ({cfg.campaign_id}) must match the URL ({campaign_id})")
-    path = _campaign_files().get(campaign_id) or (CAMPAIGN_DIR / f"{campaign_id}.yaml")
-    path.write_text(body.yaml, encoding="utf-8")
-    return {"ok": True, "file": path.name}
+    if campaign_id in _campaign_files():
+        if is_serverless():
+            raise HTTPException(400, "shipped example campaigns are read-only in the hosted app; "
+                                     "create a new campaign instead")
+        path = _campaign_files()[campaign_id]
+        path.write_text(body.yaml, encoding="utf-8")
+        return {"ok": True, "file": path.name}
+    db = _db()
+    try:
+        owner = db.campaign_owner(campaign_id)
+        exists = owner is not None or db.campaign_config(campaign_id) is not None
+        if exists and owner not in (None, user_id):
+            raise HTTPException(404, f"campaign '{campaign_id}' not found")
+        db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
+    finally:
+        db.close()
+    return {"ok": True, "file": None, "campaign_id": cfg.campaign_id}
 
 
 @app.get("/sheets/status")

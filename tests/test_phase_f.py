@@ -76,10 +76,13 @@ def test_campaign_yaml_roundtrip_and_validation(client):
     assert ok["ok"] and ok["sources"] == ["kcci"]
     # mismatch between URL and YAML is refused
     assert c.put("/campaigns/one/yaml", json={"yaml": "campaign_id: two\nname: Two\noffer: x"}).status_code == 422
-    # new campaign file is created
+    # a new campaign_id is created as a DB campaign (not a file), so it works on the read-only
+    # serverless filesystem; it appears alongside the file-based "one" and reloads from the DB.
     r = c.put("/campaigns/two/yaml", json={"yaml": "campaign_id: two\nname: Two\noffer: x\ngeography:\n  cities: [Karachi]\nchamber_sources: [kcci]\n"})
-    assert r.status_code == 200 and (camp_dir / "two.yaml").exists()
+    assert r.status_code == 200 and r.json()["file"] is None
+    assert not (camp_dir / "two.yaml").exists()
     assert {x["campaign_id"] for x in c.get("/campaigns").json()} == {"one", "two"}
+    assert "two" in c.get("/campaigns/two/yaml").json()["yaml"]   # round-trips from the DB
 
 
 def test_suppression_endpoints(client):
