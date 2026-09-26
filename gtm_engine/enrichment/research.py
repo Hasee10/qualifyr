@@ -64,6 +64,8 @@ def build_research_brief(company: DiscoveredCompany, cls: Classification, contac
             who += f", {contact.email} ({contact.email_status.value})"
         if contact.phone:
             who += f", {contact.phone}" + (f" ({contact.phone_type})" if contact.phone_type else "")
+        if contact.profile_url and "/in/" in contact.profile_url:
+            who += f", {contact.profile_url}"
         lines.append(who + ".")
     elif contact.email:
         lines.append(f"Contact: {contact.email} ({contact.email_status.value}); no named decision-maker found.")

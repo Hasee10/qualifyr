@@ -42,6 +42,21 @@ def role_rank(role: str, campaign: CampaignConfig, defaults: DefaultRules) -> in
     return score
 
 
+def _match_personal_profile(name: str, profiles: list[str]) -> str | None:
+    """A decision-maker's own LinkedIn, matched by name. Requires BOTH the first and last
+    name in the /in/ slug so we never attach a stranger's profile — a missed match just
+    falls back to the company page, which is the safe failure."""
+    parts = [p for p in name.lower().replace(".", " ").split() if p.isalpha()]
+    if len(parts) < 2:
+        return None
+    first, last = parts[0], parts[-1]
+    for url in profiles:
+        slug = url.rsplit("/in/", 1)[-1].lower()
+        if first in slug and last in slug:
+            return url
+    return None
+
+
 def _match_personal_email(name: str, emails: list[str], generic: list[str]) -> str | None:
     """first.last@ / flast@ / first@ patterns against public emails found on the site."""
     parts = [p for p in name.lower().replace(".", " ").split() if p.isalpha()]
@@ -82,11 +97,13 @@ def choose_contact(snapshot: SiteSnapshot, campaign: CampaignConfig, defaults: D
         personal = _match_personal_email(name, emails, defaults.generic_email_prefixes)
         fallback = next((e for e in emails), None)
         chosen = personal or fallback
+        # Prefer the decision-maker's own LinkedIn over the company page when we can match it.
+        person_profile = _match_personal_profile(name, snapshot.profiles) or profile
         return Contact(
             name=name, role=role, email=chosen,
             email_status=EmailStatus.UNVERIFIED if chosen else EmailStatus.NONE,
             email_source=_email_source(chosen, snapshot, personal is not None),
-            profile_url=profile, source_url=source_url, is_decision_maker=True,
+            profile_url=person_profile, source_url=source_url, is_decision_maker=True,
             evidence=f"'{name}' listed as '{role}' on {source_url}", **phone_kw,
         )
 

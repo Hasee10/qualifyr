@@ -77,6 +77,18 @@ class SiteSnapshot:
         return merged
 
     @property
+    def profiles(self) -> list[str]:
+        """Every personal LinkedIn profile across the crawled pages, de-duped."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for p in self.pages.values():
+            for url in p.profiles:
+                if url.lower() not in seen:
+                    seen.add(url.lower())
+                    out.append(url)
+        return out
+
+    @property
     def team(self) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for kind in ("team", "about", "home"):

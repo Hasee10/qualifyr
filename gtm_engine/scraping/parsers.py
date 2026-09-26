@@ -53,6 +53,7 @@ class ParsedPage:
     source_emails: list[str] = field(default_factory=list)   # only in raw HTML (scripts, licences, credits)
     phones: list[str] = field(default_factory=list)
     social: dict[str, str] = field(default_factory=dict)
+    profiles: list[str] = field(default_factory=list)              # personal linkedin /in/ links
     internal_links: dict[str, str] = field(default_factory=dict)  # kind -> absolute url
     team: list[tuple[str, str]] = field(default_factory=list)      # (name, role)
 
@@ -107,6 +108,23 @@ def social_links(html: str) -> dict[str, str]:
         m = pattern.search(html)
         if m:
             out[name] = "https://" + m.group(0)
+    return out
+
+
+_PERSONAL_LINKEDIN = re.compile(r"(?:www\.)?linkedin\.com/in/[a-z0-9%\-_.]+", re.I)
+
+
+def personal_profiles(html: str) -> list[str]:
+    """Every personal LinkedIn (/in/<slug>) link on the page — a person's profile, not the
+    company's (/company/) page. Used to attach a decision-maker's own profile to them."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _PERSONAL_LINKEDIN.finditer(html or ""):
+        url = "https://" + m.group(0).lstrip("wW.")
+        key = url.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(url)
     return out
 
 
@@ -220,5 +238,5 @@ def parse_page(url: str, html: str) -> ParsedPage:
     return ParsedPage(
         url=url, title=title, description=description, text=text[:20000],
         emails=emails, source_emails=source_emails, phones=phones, social=social,
-        internal_links=links, team=team,
+        profiles=personal_profiles(html or ""), internal_links=links, team=team,
     )
