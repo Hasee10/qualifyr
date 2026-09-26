@@ -32,6 +32,22 @@ qualified company returns with a research brief and a matched decision-maker.
 
 **Multi-tenancy** ✅ (built 2026-09-26) — campaigns carry an `owner_id` (migrated in via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`); set on create from the Supabase token's `sub` (`current_user_id`), preserved on re-upsert via `COALESCE` so a pipeline run never blanks it. Every `/campaigns/{id}/...` route is guarded by `require_campaign_access` and every `/leads/{id}/...` route by `require_lead_access` (lead → campaign → owner), both attached as `dependencies=[...]` on the decorator so new routes are guarded by adding it there. A campaign the caller may not see is **404, not 403** (existence not leaked). `GET /campaigns` and `list_campaigns(owner_id)` return only the caller's own DB campaigns plus shared ones. **Shared by design:** file-based example campaigns and legacy NULL-owner DB campaigns. **No scoping** when auth is off/bypassed (local operator, tests) — `current_user_id` is None. Suppressions + mailboxes remain global (operator-level infra, not per-user data) — revisit if that changes. Tests: `tests/test_multitenancy.py` (5 DB-backed). Full suite green locally (203 pass / 91 DB-skip); the 5 new tests run in CI against the postgres service.
 
+**Full-platform test pass (2026-09-26)** — ran regression + adversarial + in-process load
+testing against a real Postgres (throwaway PG16 on :5433 via the installed D:\PostgreSQL\16
+binaries with trust auth — the machine's own `postgresql-16-D` cluster's password is unknown;
+CI uses its own postgres service). **342 tests pass, 0 skipped.** Three lapses found and fixed:
+1. A campaign/lead id with a NUL byte → 500 (psycopg rejects NUL); guards now 404 it first.
+2. `GET /campaigns/{id}/outreach/activity` used SQLite `?` placeholders → 500 on every call; now `%s`.
+3. Cold-start DDL race: concurrent `CREATE TABLE IF NOT EXISTS` on a fresh DB → `pg_type`
+   unique violation; `Database.__init__` now serialises schema creation with a
+   transaction-scoped advisory lock (`pg_advisory_xact_lock`), pooler-safe.
+New test files: `tests/test_multitenancy.py`, `tests/test_multitenancy_adversarial.py`
+(every scoped route 404s for a non-owner; hostile ids → clean 404, never 500),
+`tests/test_load_concurrency.py` (isolation under load, unique ids under concurrent create,
+run-dispatch stampede never 500s, bulk listing, connection-pool safety). Known best-effort
+(not a bug, documented in the test): the active-run 409 guard is a read-then-dispatch, so a
+dispatch stampede can let more than one through — never crashes.
+
 **Remaining:**
 - Nothing on the reframe priorities. Open non-code items: CEO sign-off on multi-country scope (P3); real API keys (Sheets, Hunter/Reacher, Groq, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
 
