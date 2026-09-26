@@ -23,11 +23,14 @@ dns_timeout_s: 5.0
 email_verification: auto
 reacher_url: null              # e.g. http://localhost:8080 for a self-hosted Reacher
 discover_decision_maker_email: true
-# Optional LLM layer: Ollama locally (no key) or GTM_GROQ_API_KEY / GTM_GEMINI_API_KEY.
-# Used only for requirement extraction, unlabelled-reply second opinion and hook drafting;
-# outputs are grounded in observed text and labelled llm:.
-enable_llm: false
-llm_provider: auto
+# LLM layer: Ollama locally (no key) or GTM_GROQ_API_KEY / GTM_GEMINI_API_KEY. Used for the
+# per-company intent verdict (qualify by need, not keywords), requirement extraction, the
+# unlabelled-reply second opinion and hook drafting; outputs are grounded in observed text and
+# labelled llm:. On -- but if no provider/key is reachable it degrades to the keyword path, so
+# it never breaks a run. Set provider to groq so the runner does not probe a local Ollama first;
+# GTM_GROQ_API_KEY must be a GitHub Actions secret for the intent layer to run there.
+enable_llm: true
+llm_provider: groq
 llm_model: null
 enable_intent_signals: true     # PPRA tender match + RFQ/hiring phrases on company pages
 # GTM intelligence: job-board postings (Greenhouse/Lever), GitHub org activity, press/RSS

@@ -48,8 +48,18 @@ run-dispatch stampede never 500s, bulk listing, connection-pool safety). Known b
 (not a bug, documented in the test): the active-run 409 guard is a read-then-dispatch, so a
 dispatch stampede can let more than one through — never crashes.
 
+**Intent-based matching (CEO 2026-09-26): "leads strictly by our intent, not keywords".** Confirmed the "7 points" against the proposal (`GTM_Lead_Engine_Claude_Code_Spec.docx`): Section 6 = the per-company research checklist (incl. web activity/quality — the Rizvi Dental case), Section 8 = the 5 scoring dims. Competitor analysis parked per CEO. Built in 4 slices, all pushed + CI green:
+- **S1** `llm/tasks.judge_intent(offer, evidence)` → grounded `{buyer, confidence, reason}`; None without an LLM. Live-verified on Groq (Khaadi 0.92, Imtiaz 0.7, agency rejected 0.9).
+- **S2** wired into `pipeline._process_company` via `apply_intent_verdict(cls, verdict)` (threshold 0.6): confident non-buyer demotes a keyword-only BUYER→UNKNOWN, confident buyer promotes UNKNOWN→BUYER, VENDOR never promoted; `scoring.score_lead` rewards evident need (×confidence). Stored on Lead: `intent_fit/intent_confidence/intent_reason`.
+- **S3** `enrichment/research.build_research_brief` deepened to the Section-6 checklist — web-presence verdict (flags the thin single-page/no-public-detail case + missing site), intent line, tech, source. Takes `quality`.
+- **S4** UI: intent badge + reason in the lead detail (`web/.../leads/page.tsx`, `Lead` type in `api.ts`).
+- **Enabled the LLM layer:** `config/engine.yaml` now `enable_llm: true`, `llm_provider: groq`. ⚠️ **GTM_GROQ_API_KEY must be a GitHub Actions secret** for intent to run in the gather-leads job; without it the engine degrades to the keyword path (never breaks). Intent adds one Groq call per non-vendor company (bounded by the run cap).
+
+**Also fixed 2026-09-26 (deployed-app bugs):** CSV download now uses an authenticated fetch (`api.downloadExport`, was a bare <a> → "missing bearer token") and honours the type + min-score filters; `/campaigns` sped up by replacing per-campaign full-lead loads with a SQL aggregate (`Database.campaign_counts`).
+
 **Remaining:**
-- Nothing on the reframe priorities. Open non-code items: CEO sign-off on multi-country scope (P3); real API keys (Sheets, Hunter/Reacher, Groq, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
+- Verify GTM_GROQ_API_KEY is in the repo's GitHub Actions secrets, then run a real campaign to see intent-driven leads live.
+- Open non-code items: CEO sign-off on multi-country scope (P3); other API keys (Sheets, Hunter/Reacher, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
 
 **Support email** in the landing FAQ is `outreach.grydin@gmail.com`.
 
