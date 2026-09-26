@@ -121,6 +121,10 @@ CREATE TABLE IF NOT EXISTS run_progress (
 # an otherwise trivial read; once per process (warm serverless container) is enough.
 _SCHEMA_READY: set[str] = set()
 
+# A fixed key for the advisory lock that serialises schema creation (see __init__). Any
+# constant works - it only ever guards the DDL below, which is idempotent and rare.
+_SCHEMA_LOCK_KEY = 0x67746D5F736368  # "gtm_sch"
+
 
 def _search_path_of(dsn: str) -> str | None:
     """The schema named by `?options=-csearch_path=NAME` in a DSN, if any.
@@ -170,6 +174,13 @@ class Database:
         if ensure_schema is None:
             ensure_schema = dsn not in _SCHEMA_READY
         if ensure_schema:
+            # `CREATE TABLE IF NOT EXISTS` is not atomic against a concurrent create: two
+            # connections can both find a table absent and both try to create it, and one
+            # then fails on the pg_type unique index (seen when a burst of requests hits a
+            # cold, empty database at once). A transaction-scoped advisory lock serialises
+            # this DDL across connections; it releases on commit, so it is safe through a
+            # transaction-mode pooler (PgBouncer) too.
+            self.conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
             self.conn.execute(SCHEMA)
             self.conn.commit()
             _SCHEMA_READY.add(dsn)
