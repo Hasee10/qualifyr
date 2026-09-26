@@ -204,6 +204,12 @@ class Pipeline:
         self.settings = settings
         self.defaults = defaults
         self.db = db
+        # The DB is one sync psycopg connection (not thread-safe). Run its calls in a worker
+        # thread so a slow query does not freeze the event loop for every other concurrent
+        # company, and serialise them with a lock so the single connection is only ever touched
+        # by one thread at a time. Net effect: concurrency=N genuinely overlaps the network-bound
+        # work (crawl, LLM) instead of stalling on each blocking DB call.
+        self._db_lock = asyncio.Lock()
         self.fetcher = fetcher
         self.mx = mx if mx is not None else MXChecker(settings.dns_timeout_s)
         self.resolver = resolver if resolver is not None else HostResolver(settings.dns_timeout_s)
@@ -250,6 +256,12 @@ class Pipeline:
         return self.verifier
 
     # -- discovery ---------------------------------------------------------------
+
+    async def _db_call(self, fn, *args, **kwargs):
+        """Run a blocking DB method off the event loop, one at a time (the single connection is
+        not thread-safe). Used for the per-company writes/reads that run under concurrency."""
+        async with self._db_lock:
+            return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def discover(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> list[DiscoveredCompany]:
         sources = []
@@ -302,9 +314,9 @@ class Pipeline:
                 log.info("skipping %s: %s already processed this run", company.name, key)
                 return None
             seen_keys.add(key)
-        self.db.upsert_company(key, campaign.campaign_id, company.name, domain=domain, website=website,
-                               country=company.country, city=company.city, source=company.source,
-                               source_url=company.source_url, raw=company.model_dump(mode="json"))
+        await self._db_call(self.db.upsert_company, key, campaign.campaign_id, company.name, domain=domain,
+                            website=website, country=company.country, city=company.city, source=company.source,
+                            source_url=company.source_url, raw=company.model_dump(mode="json"))
 
         provenance: dict[str, str] = {"company": f"{company.source}: {company.source_url or 'record'}"}
         if not website:
@@ -334,7 +346,7 @@ class Pipeline:
                     stats.rejected_sites += 1
                     provenance["website_rejected"] = f"{snapshot.integrity_reason}: {snapshot.integrity_detail}"
             for kind, page in snapshot.pages.items():
-                self.db.save_page(key, page.url, kind, 200, page.title, page.text[:5000])
+                await self._db_call(self.db.save_page, key, page.url, kind, 200, page.title, page.text[:5000])
 
         home = snapshot.pages.get("home")
         about = snapshot.pages.get("about")
@@ -503,7 +515,7 @@ class Pipeline:
 
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
-        suppressed = self.db.is_suppressed(domain, contact.email)
+        suppressed = await self._db_call(self.db.is_suppressed, domain, contact.email)
         if suppressed:
             ready = False
             stats.suppressed += 1
@@ -567,12 +579,12 @@ class Pipeline:
             },
         )
         # One lead per company per campaign: reuse the id so re-runs update in place.
-        previous = self.db.lead_for_company(campaign.campaign_id, key)
+        previous = await self._db_call(self.db.lead_for_company, campaign.campaign_id, key)
         if previous:
             lead.lead_id = previous.lead_id
             lead.review_verdict, lead.reviewed_at = previous.review_verdict, previous.reviewed_at
             lead.sequence_status = previous.sequence_status if previous.sequence_status != SequenceStatus.NOT_QUEUED else lead.sequence_status
-        self.db.save_lead(lead, run_id, key)
+        await self._db_call(self.db.save_lead, lead, run_id, key)
         return lead
 
     async def _take_live(self, companies: list[DiscoveredCompany], limit: int | None,

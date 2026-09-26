@@ -44,15 +44,21 @@ async def _run(args: argparse.Namespace) -> int:
     if args.max_companies:
         campaign.max_companies = args.max_companies
     db = Database(settings.database_url)
+    # The pipeline runs its per-company DB writes off the event loop in worker threads; a psycopg
+    # connection is not safe for concurrent use, so progress writes (which fire on the main thread
+    # from the same run) get their OWN connection rather than sharing the pipeline's.
+    progress_db = Database(settings.database_url, ensure_schema=False)
     try:
         async with build_fetcher(settings) as fetcher:
             pipeline = Pipeline(settings, defaults, db, fetcher)
-            result = await pipeline.run(campaign, progress=_make_progress(db, campaign.campaign_id))
+            result = await pipeline.run(campaign, progress=_make_progress(progress_db, campaign.campaign_id))
     except Exception as exc:
-        db.set_run_progress(campaign.campaign_id, None, "failed", 0, 0, str(exc))
+        progress_db.set_run_progress(campaign.campaign_id, None, "failed", 0, 0, str(exc))
+        progress_db.close()
         db.close()
         raise
-    db.set_run_progress(campaign.campaign_id, result.run_id, "completed", 0, 0, "done")
+    progress_db.set_run_progress(campaign.campaign_id, result.run_id, "completed", 0, 0, "done")
+    progress_db.close()
     if getattr(fetcher, "fallbacks", 0):
         print(f"  browser fallback rendered {fetcher.fallbacks} page(s)")
 

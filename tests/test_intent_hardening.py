@@ -2,11 +2,13 @@
 
 Offline — the LLM HTTP calls are mocked with respx; no live network."""
 
+import time
+
 import httpx
 import pytest
 import respx
 
-from gtm_engine.llm.client import GroqLLM, _post_with_retry
+from gtm_engine.llm.client import GroqLLM, TokenBucket, _estimate_tokens, _post_with_retry
 from gtm_engine.models import DiscoveredCompany, Signals
 from gtm_engine.pipeline import _intent_evidence
 from gtm_engine.qualification.buyer_classifier import TextBundle
@@ -67,6 +69,28 @@ async def test_groq_complete_retries_a_rate_limit_then_succeeds():
         httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]}),
     ])
     assert await GroqLLM("k").complete("s", "u") == "hi"
+
+
+# --- proactive token pacing --------------------------------------------------------------
+
+async def test_token_bucket_allows_calls_within_budget_without_waiting():
+    bucket = TokenBucket(tokens_per_min=6000)   # starts full
+    t0 = time.monotonic()
+    await bucket.acquire(1000)
+    await bucket.acquire(1000)
+    assert time.monotonic() - t0 < 0.1
+
+
+async def test_token_bucket_waits_once_the_budget_is_spent():
+    bucket = TokenBucket(tokens_per_min=6000)   # 100 tokens/sec refill
+    await bucket.acquire(6000)                   # drain it
+    t0 = time.monotonic()
+    await bucket.acquire(50)                      # ~0.5s to refill 50 at 100/sec
+    assert time.monotonic() - t0 >= 0.4
+
+
+def test_token_estimate_counts_prompt_and_output_ceiling():
+    assert _estimate_tokens("a" * 400, "b" * 400, 300) == 200 + 300
 
 
 # --- richer intent evidence --------------------------------------------------------------

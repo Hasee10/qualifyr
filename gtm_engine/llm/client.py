@@ -19,12 +19,55 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+
+class TokenBucket:
+    """Async token bucket that paces calls to stay under a tokens-per-minute budget. Reactive
+    429-retry recovers *after* a rate-limit; this avoids the rate-limit in the first place, which
+    matters when several companies are judged at once and would otherwise burst past the limit."""
+
+    def __init__(self, tokens_per_min: int):
+        self.capacity = max(1, tokens_per_min)
+        self.refill_per_sec = self.capacity / 60.0
+        self.tokens = float(self.capacity)
+        self.updated = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, amount: int) -> None:
+        amount = min(max(amount, 0), self.capacity)
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self.tokens = min(self.capacity, self.tokens + (now - self.updated) * self.refill_per_sec)
+                self.updated = now
+                if self.tokens >= amount:
+                    self.tokens -= amount
+                    return
+                await asyncio.sleep((amount - self.tokens) / self.refill_per_sec)
+
+
+# Groq free tier's binding limit is ~8,000 tokens/min (verified). One shared bucket paces every
+# GroqLLM call in the process; override with GTM_GROQ_TOKENS_PER_MIN.
+def _groq_tpm() -> int:
+    try:
+        return int(os.environ.get("GTM_GROQ_TOKENS_PER_MIN", "8000"))
+    except ValueError:
+        return 8000
+
+
+_GROQ_BUCKET = TokenBucket(_groq_tpm())
+
+
+def _estimate_tokens(system: str, user: str, max_tokens: int) -> int:
+    """Upper-bound token estimate for pacing: ~4 chars/token of prompt plus the output ceiling."""
+    return (len(system) + len(user)) // 4 + max_tokens
 
 
 async def _post_with_retry(client: httpx.AsyncClient, url: str, *, headers: dict | None = None,
@@ -86,6 +129,7 @@ class GroqLLM:
     name: str = "groq"
 
     async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
+        await _GROQ_BUCKET.acquire(_estimate_tokens(system, user, max_tokens))
         async with httpx.AsyncClient(timeout=60) as c:
             r = await _post_with_retry(
                 c, "https://api.groq.com/openai/v1/chat/completions",
