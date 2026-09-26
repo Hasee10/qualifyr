@@ -1,7 +1,9 @@
-"""FastAPI backend for the web UI. Single operator: every route except /health requires a
-valid Supabase bearer token (see api/auth.py), but a token means "the operator" rather than
-a particular user - nothing in this schema is owned. Every send goes through the
-human-approval queue: preview -> edit -> approve -> send."""
+"""FastAPI backend for the web UI. Every route except /health requires a valid Supabase
+bearer token (see api/auth.py). Multi-tenant: campaigns are owned by the account that
+created them, and campaign- and lead-scoped routes are guarded by require_campaign_access /
+require_lead_access so one account never sees another's data (file-based example campaigns
+and legacy NULL-owner campaigns stay shared; with auth off there is no scoping). Every send
+goes through the human-approval queue: preview -> edit -> approve -> send."""
 
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from gtm_engine import __version__
-from gtm_engine.api.auth import auth_disabled, verify_request
+from gtm_engine.api.auth import auth_disabled, current_user_id, verify_request
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
@@ -144,6 +146,48 @@ def _campaign_files() -> dict[str, Path]:
     return out
 
 
+def _require_access(campaign_id: str, user_id: str | None) -> None:
+    """Guard a campaign-scoped route. A file-based example is shared; a DB campaign is
+    reachable by its owner (or anyone while it has no owner - legacy/shared). user_id is None
+    when auth is off (local operator, tests), which sees everything, so nothing changes for
+    single-operator use. A campaign the caller may not see is reported as 404, not 403, so its
+    existence is not leaked."""
+    if user_id is None or campaign_id in _campaign_files():
+        return
+    db = _db()
+    try:
+        owner = db.campaign_owner(campaign_id)
+        exists = owner is not None or db.campaign_config(campaign_id) is not None
+    finally:
+        db.close()
+    if not exists:
+        raise HTTPException(404, f"campaign '{campaign_id}' not found")
+    if owner not in (None, user_id):
+        raise HTTPException(404, f"campaign '{campaign_id}' not found")
+
+
+def require_campaign_access(campaign_id: str, user_id: str | None = Depends(current_user_id)) -> None:
+    """Route dependency: 404 unless the caller may see this campaign. Attached to every
+    `/campaigns/{campaign_id}/...` route via `dependencies=[...]`, so a route added later is
+    guarded by adding it there rather than by remembering to call the guard in the body."""
+    _require_access(campaign_id, user_id)
+
+
+def require_lead_access(lead_id: str, user_id: str | None = Depends(current_user_id)) -> None:
+    """Route dependency for `/leads/{lead_id}/...`: resolve the lead's campaign, then apply the
+    same ownership check. A lead the caller may not see is 404, so its existence is not leaked."""
+    if user_id is None:
+        return
+    db = _db()
+    try:
+        campaign_id = db.campaign_of_lead(lead_id)
+    finally:
+        db.close()
+    if campaign_id is None:
+        raise HTTPException(404, "lead not found")
+    _require_access(campaign_id, user_id)
+
+
 def _campaign(campaign_id: str) -> CampaignConfig:
     path = _campaign_files().get(campaign_id)
     if path:
@@ -193,15 +237,16 @@ def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict
 
 
 @app.get("/campaigns")
-def campaigns() -> list[dict]:
-    """File-based campaigns and user-created (DB) ones together. A file wins if an id exists
-    in both, so editing a shipped example on disk is not shadowed by a stale DB copy."""
+def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
+    """File-based example campaigns (shared) plus the caller's own DB campaigns. A file wins
+    if an id exists in both, so editing a shipped example on disk is not shadowed by a stale
+    DB copy. With no signed-in user (local operator) every DB campaign is returned."""
     db = _db()
     out, seen = [], set()
     for cid, path in _campaign_files().items():
         out.append(_campaign_summary(db, load_campaign(path), path.name))
         seen.add(cid)
-    for row in db.list_campaigns():
+    for row in db.list_campaigns(user_id):
         if row["campaign_id"] in seen:
             continue
         try:
@@ -227,13 +272,15 @@ class CampaignCreate(BaseModel):
 
 
 @app.post("/campaigns", status_code=201)
-def create_campaign(body: CampaignCreate) -> dict:
+def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_user_id)) -> dict:
     """Create a user-defined campaign, stored in the DB (not a file) so it works on the
-    read-only serverless filesystem and can be run by id. The id is slugged from the name
-    and de-duped against both file and DB campaigns."""
+    read-only serverless filesystem and can be run by id. It is owned by the caller, so only
+    they see it and its leads. The id is slugged from the name and de-duped globally."""
     if not body.name.strip() or not body.offer.strip():
         raise HTTPException(422, "name and offer are required")
     db = _db()
+    # De-dupe the id against all campaigns (every owner + files), so ids stay globally unique
+    # even though visibility is per-owner.
     existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
     cid = slugify_campaign_id(body.name, existing)
     try:
@@ -247,12 +294,12 @@ def create_campaign(body: CampaignCreate) -> dict:
     except Exception as exc:  # noqa: BLE001 - surface pydantic's message
         db.close()
         raise HTTPException(422, str(exc))
-    db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"))
+    db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
     db.close()
     return {"campaign_id": cfg.campaign_id, "name": cfg.name}
 
 
-@app.delete("/campaigns/{campaign_id}", status_code=204)
+@app.delete("/campaigns/{campaign_id}", status_code=204, dependencies=[Depends(require_campaign_access)])
 def delete_campaign(campaign_id: str) -> None:
     """Delete a user-created campaign. File-based example campaigns cannot be deleted here."""
     if campaign_id in _campaign_files():
@@ -265,7 +312,7 @@ def delete_campaign(campaign_id: str) -> None:
     db.close()
 
 
-@app.get("/campaigns/{campaign_id}")
+@app.get("/campaigns/{campaign_id}", dependencies=[Depends(require_campaign_access)])
 def campaign_detail(campaign_id: str) -> dict:
     return _campaign(campaign_id).model_dump(mode="json")
 
@@ -274,7 +321,7 @@ class RunRequest(BaseModel):
     max_companies: int | None = None
 
 
-@app.post("/campaigns/{campaign_id}/run")
+@app.post("/campaigns/{campaign_id}/run", dependencies=[Depends(require_campaign_access)])
 def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     """Dispatches the crawl to GitHub Actions (gather-leads.yml) rather than running it
     in-request: a full campaign run is minutes-to-hours, far past any serverless timeout.
@@ -302,7 +349,7 @@ def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     return ticket
 
 
-@app.get("/campaigns/{campaign_id}/progress")
+@app.get("/campaigns/{campaign_id}/progress", dependencies=[Depends(require_campaign_access)])
 def progress(campaign_id: str) -> dict:
     db = _db()
     live = db.get_run_progress(campaign_id)
@@ -310,7 +357,7 @@ def progress(campaign_id: str) -> dict:
     return live or {"stage": "idle"}
 
 
-@app.get("/campaigns/{campaign_id}/stats")
+@app.get("/campaigns/{campaign_id}/stats", dependencies=[Depends(require_campaign_access)])
 def stats(campaign_id: str) -> dict:
     campaign = _campaign(campaign_id)
     db = _db()
@@ -345,7 +392,7 @@ def stats(campaign_id: str) -> dict:
 
 # -- leads --------------------------------------------------------------------------------
 
-@app.get("/campaigns/{campaign_id}/leads")
+@app.get("/campaigns/{campaign_id}/leads", dependencies=[Depends(require_campaign_access)])
 def leads(campaign_id: str, min_score: int = 0, company_type: str | None = None,
           outreach_ready: bool | None = None, limit: int = 500) -> list[dict]:
     db = _db()
@@ -360,7 +407,7 @@ def _lead_summary(l) -> dict:
     return d
 
 
-@app.get("/leads/{lead_id}")
+@app.get("/leads/{lead_id}", dependencies=[Depends(require_lead_access)])
 def lead_detail(lead_id: str) -> dict:
     db = _db()
     l = db.get_lead(lead_id)
@@ -380,7 +427,7 @@ class SuppressRequest(BaseModel):
     reason: str | None = None
 
 
-@app.post("/leads/{lead_id}/suppress")
+@app.post("/leads/{lead_id}/suppress", dependencies=[Depends(require_lead_access)])
 def suppress(lead_id: str, req: SuppressRequest) -> dict:
     db = _db()
     l = db.get_lead(lead_id)
@@ -447,7 +494,7 @@ def mailboxes(campaign_id: str | None = None) -> list[dict]:
     return [st.as_dict() for st in states.values()]
 
 
-@app.get("/campaigns/{campaign_id}/yaml")
+@app.get("/campaigns/{campaign_id}/yaml", dependencies=[Depends(require_campaign_access)])
 def campaign_yaml(campaign_id: str) -> dict:
     path = _campaign_files().get(campaign_id)
     if not path:
@@ -472,7 +519,7 @@ def validate_campaign_yaml(body: YamlBody) -> dict:
                                         ("kcci", "kcci" in cfg.chamber_sources), ("seed_csv", bool(cfg.seed_csv))) if on]}
 
 
-@app.put("/campaigns/{campaign_id}/yaml")
+@app.put("/campaigns/{campaign_id}/yaml", dependencies=[Depends(require_campaign_access)])
 def save_campaign_yaml(campaign_id: str, body: YamlBody) -> dict:
     """Validate, then write. A new campaign_id creates config/campaigns/<id>.yaml."""
     import yaml as _yaml
@@ -493,7 +540,7 @@ def sheets_status() -> dict:
             "spreadsheet_id": (__import__("os").environ.get("GTM_SHEETS_SPREADSHEET_ID") or None)}
 
 
-@app.post("/campaigns/{campaign_id}/export/sheets")
+@app.post("/campaigns/{campaign_id}/export/sheets", dependencies=[Depends(require_campaign_access)])
 def export_to_sheets(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> dict:
     if not sheets_export.configured():
         raise HTTPException(400, "Google Sheets not configured (GTM_SHEETS_CREDENTIALS_JSON, GTM_SHEETS_SPREADSHEET_ID)")
@@ -510,7 +557,7 @@ class ReviewBody(BaseModel):
     verdict: str  # correct | wrong_company | wrong_person | wrong_email | clear
 
 
-@app.post("/leads/{lead_id}/review")
+@app.post("/leads/{lead_id}/review", dependencies=[Depends(require_lead_access)])
 def review_lead(lead_id: str, body: ReviewBody) -> dict:
     """The success metric the CEO asked for: a human says whether this lead is right."""
     if body.verdict not in ("correct", "wrong_company", "wrong_person", "wrong_email", "clear"):
@@ -534,7 +581,7 @@ class ReferralAction(BaseModel):
     accept: bool = True
 
 
-@app.post("/leads/{lead_id}/referral")
+@app.post("/leads/{lead_id}/referral", dependencies=[Depends(require_lead_access)])
 def act_on_referral(lead_id: str, req: ReferralAction) -> dict:
     """Accept: the referred person becomes the contact and the lead re-enters the queue
     for a fresh Email 1 (which still needs approval). Decline: referral is dismissed."""
@@ -568,7 +615,7 @@ def act_on_referral(lead_id: str, req: ReferralAction) -> dict:
     return {"ok": True, "referred_contact": ref, "previous_contact": previous}
 
 
-@app.get("/campaigns/{campaign_id}/export")
+@app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(require_campaign_access)])
 def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> FileResponse:
     db = _db()
     rows = db.list_leads(campaign_id, min_score=min_score,
@@ -582,7 +629,7 @@ def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> F
 
 # -- outreach: approval queue ------------------------------------------------------------
 
-@app.get("/campaigns/{campaign_id}/outreach/queue")
+@app.get("/campaigns/{campaign_id}/outreach/queue", dependencies=[Depends(require_campaign_access)])
 def outreach_queue(campaign_id: str) -> dict:
     """Everything due now, each with its draft (rendered on first view)."""
     campaign = _campaign(campaign_id)
@@ -614,7 +661,7 @@ class DraftUpdate(BaseModel):
     body: str
 
 
-@app.get("/leads/{lead_id}/drafts/{step}")
+@app.get("/leads/{lead_id}/drafts/{step}", dependencies=[Depends(require_lead_access)])
 def get_draft(lead_id: str, step: str) -> dict:
     db = _db()
     l = db.get_lead(lead_id)
@@ -630,7 +677,7 @@ def get_draft(lead_id: str, step: str) -> dict:
     return draft
 
 
-@app.put("/leads/{lead_id}/drafts/{step}")
+@app.put("/leads/{lead_id}/drafts/{step}", dependencies=[Depends(require_lead_access)])
 def update_draft(lead_id: str, step: str, req: DraftUpdate) -> dict:
     db = _db()
     existing = db.get_draft(lead_id, step)
@@ -645,7 +692,7 @@ def update_draft(lead_id: str, step: str, req: DraftUpdate) -> dict:
     return draft
 
 
-@app.post("/leads/{lead_id}/drafts/{step}/approve")
+@app.post("/leads/{lead_id}/drafts/{step}/approve", dependencies=[Depends(require_lead_access)])
 def approve_draft(lead_id: str, step: str) -> dict:
     db = _db()
     d = db.get_draft(lead_id, step)
@@ -662,7 +709,7 @@ def approve_draft(lead_id: str, step: str) -> dict:
     return out
 
 
-@app.post("/leads/{lead_id}/drafts/{step}/reject")
+@app.post("/leads/{lead_id}/drafts/{step}/reject", dependencies=[Depends(require_lead_access)])
 def reject_draft(lead_id: str, step: str) -> dict:
     db = _db()
     if not db.get_draft(lead_id, step):
@@ -675,7 +722,7 @@ def reject_draft(lead_id: str, step: str) -> dict:
     return out
 
 
-@app.post("/leads/{lead_id}/drafts/{step}/reset")
+@app.post("/leads/{lead_id}/drafts/{step}/reset", dependencies=[Depends(require_lead_access)])
 def reset_draft(lead_id: str, step: str) -> dict:
     """Discard edits and re-render from the template."""
     db = _db()
@@ -695,7 +742,7 @@ class SendRequest(BaseModel):
     ignore_window: bool = False
 
 
-@app.post("/campaigns/{campaign_id}/outreach/send")
+@app.post("/campaigns/{campaign_id}/outreach/send", dependencies=[Depends(require_campaign_access)])
 def outreach_send(campaign_id: str, req: SendRequest) -> dict:
     """Send approved, due emails. A real send is dispatched to GitHub Actions
     (outreach.yml): sender-protection jitter spaces sends 30-120s apart, which a batch
@@ -730,7 +777,7 @@ def outreach_send(campaign_id: str, req: SendRequest) -> dict:
             "mode": pool.name, "sync": None, "mailboxes": report.mailboxes}
 
 
-@app.post("/campaigns/{campaign_id}/outreach/sync")
+@app.post("/campaigns/{campaign_id}/outreach/sync", dependencies=[Depends(require_campaign_access)])
 def outreach_sync(campaign_id: str) -> dict:
     osettings = load_outreach_settings()
     if not osettings.credentials_present:
@@ -743,7 +790,7 @@ def outreach_sync(campaign_id: str) -> dict:
             "wrong_person": r.wrong_person, "auto_reply": r.auto_reply, "details": r.details}
 
 
-@app.get("/campaigns/{campaign_id}/outreach/activity")
+@app.get("/campaigns/{campaign_id}/outreach/activity", dependencies=[Depends(require_campaign_access)])
 def outreach_activity(campaign_id: str, limit: int = 100) -> list[dict]:
     db = _db()
     rows = db.conn.execute(
@@ -761,7 +808,7 @@ def outreach_activity(campaign_id: str, limit: int = 100) -> list[dict]:
     return out
 
 
-@app.get("/campaigns/{campaign_id}/outreach/sequence")
+@app.get("/campaigns/{campaign_id}/outreach/sequence", dependencies=[Depends(require_campaign_access)])
 def outreach_sequence(campaign_id: str) -> list[dict]:
     """Every lead that is in or has finished the sequence."""
     db = _db()

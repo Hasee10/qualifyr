@@ -10,12 +10,13 @@ This project's Supabase issues **ES256** tokens signed with a rotating key publi
 public key and verify locally. Local verification matters on serverless: a round-trip to
 Supabase on every request would add latency to every cold start.
 
-Not multi-tenant. A valid token grants full access to the same shared dataset - no table
-in this schema carries an owner, so there is nothing to scope a request to by user. Signup
-is open (Supabase's own signup flow), so this is an explicit tradeoff: anyone who creates
-an account can see every lead and trigger outreach sends, not just "the operator" who set
-the project up. Revisit before this matters (e.g. a `user_id`/`org_id` column and
-row-level scoping) if that stops being acceptable.
+Multi-tenant. The token's `sub` (see `current_user_id`) is the account id, and campaigns
+carry an `owner_id`; routes scope campaigns and their leads to that owner (see
+`require_campaign_access` / `require_lead_access` in `api/main.py`). A campaign created
+before multi-tenancy has a NULL owner and stays visible to everyone (legacy/shared), as do
+the file-based example campaigns. When auth is disabled or bypassed (local operator, tests)
+`current_user_id` is None, which means "no scoping" - the caller sees everything, exactly as
+before multi-tenancy.
 """
 
 from __future__ import annotations
@@ -95,13 +96,16 @@ def verify_request(request: Request) -> dict | None:
 
     try:
         signing_key = jwk_client().get_signing_key_from_jwt(token)
-        return jwt.decode(
+        payload = jwt.decode(
             token,
             signing_key.key,
             algorithms=_ALGORITHMS,
             audience="authenticated",
             issuer=f"{_project_url()}/auth/v1",
         )
+        # Stash the verified user so route handlers can scope data to it without re-decoding.
+        request.state.user = payload
+        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "token expired", headers={"WWW-Authenticate": "Bearer"})
     except jwt.PyJWTError as exc:
@@ -109,3 +113,11 @@ def verify_request(request: Request) -> dict | None:
         # to fix next. The detail goes to the log instead.
         log.info("rejected token on %s: %s", request.url.path, exc)
         raise HTTPException(401, "invalid token", headers={"WWW-Authenticate": "Bearer"})
+
+
+def current_user_id(request: Request) -> str | None:
+    """The signed-in user's id (the token's `sub`), or None when auth is disabled or bypassed
+    (local operator, tests). None means 'no scoping' — the caller sees everything, which keeps
+    single-operator and test behaviour exactly as before multi-tenancy."""
+    user = getattr(request.state, "user", None)
+    return user.get("sub") if isinstance(user, dict) else None

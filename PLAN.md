@@ -103,12 +103,13 @@ list.
 
 ## Deferred — after P1–P5
 
-### Multi-tenant personalisation (auth-scoped data)
-Right now sign-in is not really authentication of *data*: **every account sees the same
-shared leads.** If one person runs a search, everyone sees the results — no table carries a
-`user_id` / `org_id`, and campaigns are shared. Real personalisation means scoping campaigns
-and results to the account that created them. Important, and explicitly **after** the
-priorities above.
+### Multi-tenant personalisation (auth-scoped data) — ✅ built 2026-09-26
+Sign-in now authenticates *data*. Campaigns carry an `owner_id` (the Supabase token's `sub`),
+set on create and preserved across pipeline re-upserts. Campaign- and lead-scoped routes are
+guarded so one account never sees another's campaigns or leads (refused as 404, not 403, so
+existence is not leaked). File-based example campaigns and legacy NULL-owner campaigns stay
+shared; with auth off (local operator) there is no scoping. See `require_campaign_access` /
+`require_lead_access` in `gtm_engine/api/main.py` and `tests/test_multitenancy.py`.
 
 ---
 

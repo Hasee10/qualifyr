@@ -18,8 +18,13 @@ CREATE TABLE IF NOT EXISTS campaigns (
     campaign_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     config_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    owner_id TEXT
 );
+-- Multi-tenancy: scope a campaign (and thus its leads) to the account that created it.
+-- Added by migration so databases created before multi-tenancy pick the column up too;
+-- NULL owner means a shared/legacy campaign, visible to everyone.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id TEXT;
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
@@ -180,23 +185,35 @@ class Database:
 
     # -- campaigns / runs -------------------------------------------------
 
-    def upsert_campaign(self, campaign_id: str, name: str, config: dict) -> None:
+    def upsert_campaign(self, campaign_id: str, name: str, config: dict, owner_id: str | None = None) -> None:
+        # owner_id is set on create and preserved on later updates (a run re-upserts the
+        # campaign but must not blank its owner), so COALESCE keeps the existing owner when
+        # the caller passes None.
         self.conn.execute(
-            "INSERT INTO campaigns (campaign_id, name, config_json, created_at) "
-            "VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (campaign_id) DO UPDATE SET name = EXCLUDED.name, config_json = EXCLUDED.config_json",
-            (campaign_id, name, json.dumps(config, default=str), utcnow().isoformat()),
+            "INSERT INTO campaigns (campaign_id, name, config_json, created_at, owner_id) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (campaign_id) DO UPDATE SET name = EXCLUDED.name, config_json = EXCLUDED.config_json, "
+            "owner_id = COALESCE(campaigns.owner_id, EXCLUDED.owner_id)",
+            (campaign_id, name, json.dumps(config, default=str), utcnow().isoformat(), owner_id),
         )
         self._commit()
 
-    def list_campaigns(self) -> list[dict]:
-        """Every user-created campaign, newest first. Each carries its full config so the
-        API can list DB campaigns alongside the file-based ones without a second read."""
-        rows = self.conn.execute(
-            "SELECT campaign_id, name, config_json, created_at FROM campaigns ORDER BY created_at DESC"
-        ).fetchall()
-        return [{"campaign_id": r["campaign_id"], "name": r["name"],
-                 "created_at": r["created_at"], "config": json.loads(r["config_json"])} for r in rows]
+    def list_campaigns(self, owner_id: str | None = None) -> list[dict]:
+        """User-created campaigns, newest first. With owner_id, only that owner's campaigns
+        plus legacy shared (NULL-owner) ones; without it (local operator), all of them."""
+        sql = "SELECT campaign_id, name, config_json, created_at, owner_id FROM campaigns"
+        params: list = []
+        if owner_id is not None:
+            sql += " WHERE owner_id = %s OR owner_id IS NULL"
+            params.append(owner_id)
+        sql += " ORDER BY created_at DESC"
+        rows = self.conn.execute(sql, params).fetchall()
+        return [{"campaign_id": r["campaign_id"], "name": r["name"], "created_at": r["created_at"],
+                 "owner_id": r["owner_id"], "config": json.loads(r["config_json"])} for r in rows]
+
+    def campaign_owner(self, campaign_id: str) -> str | None:
+        row = self.conn.execute("SELECT owner_id FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
+        return row["owner_id"] if row else None
 
     def delete_campaign(self, campaign_id: str) -> None:
         self.conn.execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
@@ -354,6 +371,12 @@ class Database:
     def campaign_config(self, campaign_id: str) -> dict | None:
         row = self.conn.execute("SELECT config_json FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
         return json.loads(row["config_json"]) if row else None
+
+    def campaign_of_lead(self, lead_id: str) -> str | None:
+        """The campaign a lead belongs to, or None if the lead is unknown. Used to scope
+        lead-level routes to the campaign's owner without deserialising the whole Lead."""
+        row = self.conn.execute("SELECT campaign_id FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
+        return row["campaign_id"] if row else None
 
     def bounced_today(self, campaign_id: str, day: str, mailbox: str | None = None,
                       legacy_mailbox: str | None = None) -> int:

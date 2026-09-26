@@ -30,8 +30,10 @@ qualified company returns with a research brief and a matched decision-maker.
 
 **Test counts:** ~203 pass locally (86 DB-gated skip without a DB), ~286 in CI with the Postgres service.
 
-**Remaining (in build order):**
-- **Multi-tenancy** (deferred to last per the founder) — today all accounts share the same leads/campaigns (no `user_id`/`org_id` on any table). Scope campaigns + leads per account. **IN PROGRESS.**
+**Multi-tenancy** ✅ (built 2026-09-26) — campaigns carry an `owner_id` (migrated in via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`); set on create from the Supabase token's `sub` (`current_user_id`), preserved on re-upsert via `COALESCE` so a pipeline run never blanks it. Every `/campaigns/{id}/...` route is guarded by `require_campaign_access` and every `/leads/{id}/...` route by `require_lead_access` (lead → campaign → owner), both attached as `dependencies=[...]` on the decorator so new routes are guarded by adding it there. A campaign the caller may not see is **404, not 403** (existence not leaked). `GET /campaigns` and `list_campaigns(owner_id)` return only the caller's own DB campaigns plus shared ones. **Shared by design:** file-based example campaigns and legacy NULL-owner DB campaigns. **No scoping** when auth is off/bypassed (local operator, tests) — `current_user_id` is None. Suppressions + mailboxes remain global (operator-level infra, not per-user data) — revisit if that changes. Tests: `tests/test_multitenancy.py` (5 DB-backed). Full suite green locally (203 pass / 91 DB-skip); the 5 new tests run in CI against the postgres service.
+
+**Remaining:**
+- Nothing on the reframe priorities. Open non-code items: CEO sign-off on multi-country scope (P3); real API keys (Sheets, Hunter/Reacher, Groq, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
 
 **Support email** in the landing FAQ is `outreach.grydin@gmail.com`.
 
