@@ -8,17 +8,43 @@ direction and overrides anything here. **`PLAN.md` (2026-09-25 product reframe) 
 direction and supersedes the Phase H framing below** — the website-selling pivot is now just
 one possible "offer" in an offer-agnostic search engine.
 
-Last updated: 2026-09-22 (see PLAN.md for the 2026-09-25 reframe)
+Last updated: 2026-09-26
 
 ---
 
-## Where we are
+## CURRENT STATUS (2026-09-26) — read this first
 
-Phases **A–G complete**, scraping hardened, **213 tests passing**, credentials tested live.
+The 2026-09-25 reframe (PLAN.md) is **built**. Qualifyr is now an offer-agnostic
+market-research search engine: describe what you sell → the LLM derives relevance keywords →
+discovery targets a chosen region under a spend cap → irrelevant signals are filtered → each
+qualified company returns with a research brief and a matched decision-maker.
+
+**Reframe priorities — all done:**
+- **P1 Dynamic campaigns** ✅ — user-created, DB-backed (create/list/delete/run-by-id), a New-campaign form, runs accumulate. `resolve_campaign()` loads by id-or-path; CLI `campaign-id`.
+- **P2 Hard filters + LLM keywords** ✅ — `llm/tasks.generate_keywords(offer)`, `qualification/relevance.relevant_terms`; pipeline gates hiring/RFQ signals by relevance to the offer's *need*-terms (not sector) — the Imtiaz fix; generated keywords also feed PPRA discovery + the classifier; keywords shown as chips; offer-relevant intent scores +3; `stats.intent_dropped_irrelevant` surfaced.
+- **P3 Region filter** ✅ — `GeographyConfig.provinces` + `search_areas()`; OSM/Overture iterate areas and try each country as a geocode hint (one campaign can span countries). ⚠️ tension with "Pakistan only" CEO directive — needs sign-off.
+- **P4 Result caps** ✅ — `max_companies` is the per-run cap ("API cap" in the form); added `website_finder_max_per_run` to bound Brave.
+- **P5 Research depth** ✅ — `enrichment/research.build_research_brief` (grounded per-company summary → `Lead.research_brief`, shown at top of lead detail); decision-maker's own LinkedIn `/in/` profile extracted and matched by name (`parsers.personal_profiles`, `_match_personal_profile`, requires both names — never a stranger's).
+- **Golden-set harness** ✅ — `gtm_engine/eval/golden.py` + `tests/golden/golden_leads.jsonl` (18 rows) + `scripts/golden_eval.py` + `tests/test_golden_set.py` (accuracy floor 0.8, baseline 100%; hard invariants: agency never buyer, retailer never rejected).
+- **CI wired** ✅ — `ci.yml` runs DB-backed tests against a `postgres:16` service (`GTM_TEST_DATABASE_URL`) AND builds the frontend (`npm ci` + `next build`). Both jobs green.
+
+**Test counts:** ~203 pass locally (86 DB-gated skip without a DB), ~286 in CI with the Postgres service.
+
+**Remaining (in build order):**
+- **Multi-tenancy** (deferred to last per the founder) — today all accounts share the same leads/campaigns (no `user_id`/`org_id` on any table). Scope campaigns + leads per account. **IN PROGRESS.**
+
+**Support email** in the landing FAQ is `outreach.grydin@gmail.com`.
+
+Everything below is the **historical Phase-A–G + Phase-H record**, kept for the verified facts.
+The website-selling pivot is now just one possible "offer", not the product.
+
+---
+
+## Where we are (historical, pre-reframe)
+
+Phases **A–G complete**, scraping hardened, credentials tested live.
 Engine runs end to end: discover → crawl → buyer/vendor gate → contacts → verify → score →
 human approval → send → reply sync.
-
-**But the offer changed, and the engine is now pointed the wrong way.**
 
 ---
 
