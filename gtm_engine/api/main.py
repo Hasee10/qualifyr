@@ -795,7 +795,7 @@ def outreach_activity(campaign_id: str, limit: int = 100) -> list[dict]:
     db = _db()
     rows = db.conn.execute(
         "SELECT e.*, l.data_json FROM outreach_events e JOIN leads l ON l.lead_id = e.lead_id "
-        "WHERE l.campaign_id = ? ORDER BY e.event_id DESC LIMIT ?", (campaign_id, limit)
+        "WHERE l.campaign_id = %s ORDER BY e.event_id DESC LIMIT %s", (campaign_id, limit)
     ).fetchall()
     out = []
     for r in rows:

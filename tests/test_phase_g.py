@@ -152,6 +152,31 @@ def test_review_verdicts_drive_accuracy(client):
     assert c.get("/campaigns/test-retail/stats").json()["reviewed"] == 2
 
 
+def test_outreach_activity_endpoint(client, settings):
+    c, ids = client
+    # `settings` here is the same instance the client fixture built on, so this Database
+    # points at the same throwaway schema the API routes read from.
+    db = Database(settings.database_url)
+    db.add_event(ids[0], "sent", step="1", detail="first touch")
+    db.add_event(ids[0], "opened", step="1")
+    db.add_event(ids[1], "sent", step="1")
+    db.close()
+
+    r = c.get("/campaigns/test-retail/outreach/activity")
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 3
+    # newest first (event_id DESC): Co 1's "sent" was inserted last, Co 0's two come after.
+    assert [row["event_type"] for row in rows] == ["sent", "opened", "sent"]
+    assert rows[0]["lead_id"] == ids[1]
+    assert rows[0]["company_name"] == "Co 1" and rows[0]["contact_email"] == "a@co1.pk"
+    assert rows[1]["lead_id"] == ids[0] and rows[1]["company_name"] == "Co 0"
+    assert rows[2]["lead_id"] == ids[0] and rows[2]["contact_email"] == "a@co0.pk"
+    assert "data_json" not in rows[0]
+
+    assert c.get("/campaigns/test-retail/outreach/activity?limit=1").json() == rows[:1]
+
+
 def test_clean_org_names():
     assert clean_org("Pakistan State Oil (PSO) PSO Karachi") == "Pakistan State Oil"
     assert clean_org("State Bank of Pakistan (SBP) State Bank of Pakistan Karachi") == "State Bank of Pakistan"
