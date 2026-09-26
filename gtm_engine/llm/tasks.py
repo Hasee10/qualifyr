@@ -16,6 +16,72 @@ REQUIREMENT_FIELDS = ("need", "quantity", "deadline", "location", "budget")
 REPLY_LABELS = ("interested", "not_interested", "out_of_office", "wrong_person", "unsubscribe", "auto_reply", "reply")
 
 
+async def generate_keywords(llm: LLM | None, offer: str, industries: list[str] | None = None,
+                            max_keywords: int = 20) -> list[str]:
+    """From what the user sells, produce the relevance keywords a candidate's hiring/intent
+    text must match to count. This is the P2 fix for the "Imtiaz was hiring, but not for us"
+    problem: instead of a hardcoded description, the model derives the terms that make a
+    signal relevant to *this* offer (e.g. inventory software -> 'inventory', 'stock', 'erp',
+    'point of sale', 'warehouse', 'supply chain').
+
+    Deterministic fallback (no LLM, or a bad response): the offer's own words plus the target
+    industries. Output is always lowercased, de-duped and capped, so a caller can trust it as
+    a plain keyword list."""
+    base = _fallback_keywords(offer, industries)
+    if llm is None or not offer.strip():
+        return base[:max_keywords]
+    system = ("You expand a short product/offer description into the search keywords that "
+              "identify a company that would BUY it. Output only a JSON array of short "
+              "lowercase keyword strings (1-3 words each), no explanation.")
+    user = (f"Offer: {offer!r}\nTarget industries: {industries or []}\n\n"
+            f"Return up to {max_keywords} keywords a buyer's job posts, tenders or pages would "
+            "contain. Concrete nouns and role/need terms, not marketing words.")
+    try:
+        raw = await llm.complete(system, user, max_tokens=300)
+    except Exception as exc:  # noqa: BLE001 - the LLM is optional
+        log.debug("llm keyword generation failed: %s", exc)
+        return base[:max_keywords]
+    words = _parse_keyword_list(raw)
+    merged = _dedupe_lower([*base, *words]) if words else base
+    return merged[:max_keywords]
+
+
+def _fallback_keywords(offer: str, industries: list[str] | None) -> list[str]:
+    import re
+
+    stop = {"the", "and", "for", "our", "your", "with", "that", "this", "software", "solution",
+            "solutions", "platform", "service", "services", "management", "system", "systems", "tool"}
+    words = [w for w in re.findall(r"[a-z]{4,}", (offer or "").lower()) if w not in stop]
+    return _dedupe_lower([*(industries or []), *words])
+
+
+def _parse_keyword_list(raw: str) -> list[str]:
+    import json
+    import re
+
+    m = re.search(r"\[.*\]", raw or "", re.S)
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+            if isinstance(arr, list):
+                return [str(x) for x in arr]
+        except json.JSONDecodeError:
+            pass
+    # A model that ignored "JSON array" often returns comma/newline-separated terms.
+    return [p for p in re.split(r"[,\n]", raw or "") if p.strip()]
+
+
+def _dedupe_lower(terms: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in terms:
+        t = t.strip().lower().strip("-•*\"' ")
+        if t and 1 < len(t) <= 40 and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 async def extract_requirement(llm: LLM | None, text: str) -> dict | None:
     """Tender/RFQ text -> {need, quantity, deadline, location, budget}; every value must be a
     verbatim span of `text`. Returns None when the LLM is absent or nothing is grounded."""

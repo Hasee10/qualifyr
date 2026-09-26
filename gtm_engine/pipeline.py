@@ -24,7 +24,8 @@ from gtm_engine.enrichment.press_signals import press_mentions
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
-from gtm_engine.llm.tasks import draft_hook, extract_requirement
+from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords
+from gtm_engine.qualification.relevance import relevant_terms
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
@@ -56,6 +57,7 @@ class RunStats:
     unreachable: int = 0
     rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
+    intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
     buyer: int = 0
     vendor: int = 0
     unknown: int = 0
@@ -141,6 +143,29 @@ class Pipeline:
         self.llm = build_llm(settings.llm_provider, settings.llm_model) if settings.enable_llm else None
         if self.llm:
             log.info("llm layer: %s", self.llm.name)
+        # The need-terms a hiring/intent signal must mention to count for this campaign
+        # (what we SELL, not the buyer's sector). Filled per run by _build_relevance_keywords.
+        self._relevance_keywords: list[str] = []
+
+    async def _build_relevance_keywords(self, campaign: CampaignConfig) -> list[str]:
+        """Terms that make a hiring/intent signal relevant to this offer. The campaign's own
+        intent_keywords, plus keywords the LLM derives from the offer (or a deterministic
+        fallback of the offer's words). Deliberately excludes target_industries: the sector a
+        company is in does not make its hiring relevant to what we sell - that is exactly the
+        'Imtiaz was hiring, but for their own retail floor' false positive we are removing."""
+        need = list(campaign.intent_keywords)
+        try:
+            need += await generate_keywords(self.llm, campaign.offer)  # industries omitted on purpose
+        except Exception as exc:  # noqa: BLE001 - relevance is a filter, never fatal
+            log.debug("keyword generation failed: %s", exc)
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in need:
+            t = (t or "").strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
 
     async def _verifier(self) -> EmailVerifier:
         if self.verifier is None:
@@ -312,7 +337,18 @@ class Pipeline:
             if company.extra.get("intent"):
                 intents.append(dict(company.extra["intent"]))
             if trust_site:
-                intents += [s.model_dump(mode="json") for s in intent_from_pages(snapshot, self.defaults)]
+                # Strict relevance (P2): a hiring/RFQ phrase on the company's own pages only
+                # counts if it mentions what we sell. With no relevance keywords (offer blank,
+                # no LLM) the gate is a no-op, preserving the old behaviour.
+                for s in intent_from_pages(snapshot, self.defaults):
+                    rel = relevant_terms(s.text, self._relevance_keywords)
+                    if self._relevance_keywords and not rel:
+                        stats.intent_dropped_irrelevant += 1
+                        continue
+                    sig = s.model_dump(mode="json")
+                    if rel:
+                        sig["relevance"] = rel
+                    intents.append(sig)
             if company.source != "ppra" and ("ppra" in campaign.intent_sources or self.settings.enable_intent_signals):
                 try:
                     intents += [s.model_dump(mode="json") for s in await self.ppra.signals_for(company.name, campaign)]
@@ -496,7 +532,9 @@ class Pipeline:
         stats = RunStats()
         self.db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
         self.db.start_run(run_id, campaign.campaign_id)
-        log.info("run %s started for campaign %s", run_id, campaign.campaign_id)
+        self._relevance_keywords = await self._build_relevance_keywords(campaign)
+        log.info("run %s started for campaign %s; relevance keywords: %s",
+                 run_id, campaign.campaign_id, self._relevance_keywords[:12])
         try:
             discovered = await self.discover(campaign, progress)
             stats.discovered = len(discovered)
