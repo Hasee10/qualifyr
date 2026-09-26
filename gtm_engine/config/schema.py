@@ -193,4 +193,8 @@ class EngineSettings(BaseModel):
     github_max_companies_per_run: int = 30
     enable_press_signals: bool = True
     press_max_companies_per_run: int = 40
+    # Website finder (Brave) is a metered API on a small monthly free credit. Cap the searches
+    # per run so a large max_companies cannot drain the month's budget in one go; companies
+    # past the cap keep whatever website discovery already gave them.
+    website_finder_max_per_run: int = 60
     log_level: str = "INFO"

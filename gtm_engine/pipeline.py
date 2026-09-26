@@ -137,6 +137,7 @@ class Pipeline:
         self.website_finder = WebsiteFinder(fetcher, settings)
         self.news = NewsChecker(fetcher)
         self._news_budget = settings.news_max_companies_per_run
+        self._website_finder_budget = settings.website_finder_max_per_run
         self._job_board_budget = settings.job_board_max_companies_per_run
         self._github_budget = settings.github_max_companies_per_run
         self._press_budget = settings.press_max_companies_per_run
@@ -205,7 +206,8 @@ class Pipeline:
         """Returns None when the company turns out to duplicate one already processed
         in this run (its website, found by search, belongs to an earlier company)."""
         website = company.website
-        if not website:
+        if not website and self._website_finder_budget > 0:
+            self._website_finder_budget -= 1
             website = await self.website_finder.find(company.name, company.city, company.country)
             if website:
                 company = company.model_copy(update={"website": website, "domain": canonical_domain(website),
