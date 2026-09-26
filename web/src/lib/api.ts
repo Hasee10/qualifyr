@@ -102,6 +102,8 @@ export interface Campaign {
   file: string | null
   cities: string[]
   countries: string[]
+  provinces?: string[]
+  relevance_keywords?: string[]
   min_score: number
   max_companies: number
   leads: number

@@ -210,6 +210,13 @@ export default function CampaignsPage() {
             </div>
           </CardHeader>
           <CardContent className="grid gap-4">
+            {c.relevance_keywords && c.relevance_keywords.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Relevance keywords:</span>
+                {c.relevance_keywords.slice(0, 12).map((k) => <Badge key={k} variant="secondary" className="font-normal">{k}</Badge>)}
+                {c.relevance_keywords.length > 12 && <span className="text-xs text-muted-foreground">+{c.relevance_keywords.length - 12}</span>}
+              </div>
+            )}
             <div className="grid gap-2 text-sm sm:grid-cols-4">
               <div><span className="text-muted-foreground">Companies</span><div className="text-xl font-semibold">{c.leads}</div></div>
               <div><span className="text-muted-foreground">Buyers</span><div className="text-xl font-semibold">{c.buyers}</div></div>

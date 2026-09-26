@@ -58,6 +58,7 @@ class RunStats:
     rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
+    relevance_keywords: list[str] = field(default_factory=list)  # the offer's need-terms this run used
     buyer: int = 0
     vendor: int = 0
     unknown: int = 0
@@ -533,6 +534,7 @@ class Pipeline:
         self.db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
         self.db.start_run(run_id, campaign.campaign_id)
         self._relevance_keywords = await self._build_relevance_keywords(campaign)
+        stats.relevance_keywords = self._relevance_keywords
         # Feed the generated keywords into discovery itself, not just the relevance gate: a
         # deep copy (so the caller's config is untouched) whose intent_keywords carry the
         # offer's need-terms, so PPRA tender search/matching and the buyer classifier's

@@ -135,7 +135,16 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
         reasons.append("ecommerce platform detected: " + ", ".join(ecommerce_tech))
     if sig.intent:
         kinds = {s.get("kind") for s in sig.intent}
-        bs += 4 if "tender" in kinds or "rfq" in kinds else 2
+        # A hire/RFQ that survived the relevance gate names what we sell, so it is real
+        # buying intent, not just "this company is hiring". Reward it above a bare signal,
+        # but still below a public tender (a stated requirement with a deadline).
+        offer_relevant = any(s.get("relevance") for s in sig.intent)
+        if "tender" in kinds or "rfq" in kinds:
+            bs += 4
+        elif offer_relevant:
+            bs += 3
+        else:
+            bs += 2
         reasons.append("intent: " + "; ".join(f"{s.get('kind')} – {s.get('text', '')[:50]}" for s in sig.intent[:2]))
     if sig.news:
         reasons.append(f"in the news: {sig.news[0]['title'][:60]} ({sig.news[0]['source']})")

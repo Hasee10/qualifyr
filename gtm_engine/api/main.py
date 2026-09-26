@@ -170,14 +170,24 @@ def health() -> dict:
 def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict:
     leads = db.list_leads(c.campaign_id)
     buyers = [l for l in leads if l.company_type == CompanyType.BUYER]
+    last_run = (db.list_runs(c.campaign_id) or [None])[0]
+    # The offer's generated need-terms the last run actually used, so the UI can show what
+    # the LLM derived rather than leaving it invisible in the logs.
+    relevance_keywords: list[str] = []
+    if last_run and last_run.get("stats_json"):
+        try:
+            relevance_keywords = json.loads(last_run["stats_json"]).get("relevance_keywords") or []
+        except (ValueError, TypeError):
+            relevance_keywords = []
     return {
         "campaign_id": c.campaign_id, "name": c.name, "offer": c.offer, "file": file,
         "cities": c.geography.cities, "countries": c.geography.countries,
+        "provinces": c.geography.provinces, "relevance_keywords": relevance_keywords,
         "min_score": c.min_score, "max_companies": c.max_companies,
         "leads": len(leads), "buyers": len(buyers),
         "qualified": sum(1 for l in buyers if l.total_score >= c.min_score),
         "outreach_ready": sum(1 for l in leads if l.outreach_ready),
-        "last_run": (db.list_runs(c.campaign_id) or [None])[0],
+        "last_run": last_run,
         "live": db.get_run_progress(c.campaign_id),
     }
 
