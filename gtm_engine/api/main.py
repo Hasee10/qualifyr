@@ -223,15 +223,19 @@ def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict
     # The offer's generated need-terms the last run actually used, so the UI can show what
     # the LLM derived rather than leaving it invisible in the logs.
     relevance_keywords: list[str] = []
+    discovery_sectors: list[str] = []
     if last_run and last_run.get("stats_json"):
         try:
-            relevance_keywords = json.loads(last_run["stats_json"]).get("relevance_keywords") or []
+            last_stats = json.loads(last_run["stats_json"])
+            relevance_keywords = last_stats.get("relevance_keywords") or []
+            discovery_sectors = last_stats.get("discovery_sectors") or []
         except (ValueError, TypeError):
-            relevance_keywords = []
+            relevance_keywords, discovery_sectors = [], []
     return {
         "campaign_id": c.campaign_id, "name": c.name, "offer": c.offer, "file": file,
         "cities": c.geography.cities, "countries": c.geography.countries,
         "provinces": c.geography.provinces, "relevance_keywords": relevance_keywords,
+        "discovery_sectors": discovery_sectors,
         "min_score": c.min_score, "max_companies": c.max_companies,
         "leads": counts["leads"], "buyers": counts["buyers"],
         "qualified": counts["qualified"],

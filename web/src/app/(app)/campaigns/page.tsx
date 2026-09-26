@@ -81,7 +81,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
             <div className="grid gap-1.5"><Label>OSM categories</Label><Input value={osm} onChange={(e) => setOsm(e.target.value)} placeholder="shop=clothes" /></div>
             <div className="grid gap-1.5"><Label>Overture categories</Label><Input value={overture} onChange={(e) => setOverture(e.target.value)} placeholder="clothing_store" /></div>
           </div>
-          <p className="text-xs text-muted-foreground">Comma-separated. At least one discovery source (OSM or Overture category) is recommended so the crawl has somewhere to look.</p>
+          <p className="text-xs text-muted-foreground">Comma-separated, and optional — leave them blank and the engine derives the sectors to search from your offer above. Fill them in only to override that.</p>
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5"><Label>Min score</Label><Input value={minScore} onChange={(e) => setMinScore(e.target.value)} /></div>
             <div className="grid gap-1.5"><Label>Companies per run (API cap)</Label><Input value={maxCompanies} onChange={(e) => setMaxCompanies(e.target.value)} /></div>
@@ -210,6 +210,12 @@ export default function CampaignsPage() {
             </div>
           </CardHeader>
           <CardContent className="grid gap-4">
+            {c.discovery_sectors && c.discovery_sectors.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Searching sectors:</span>
+                {c.discovery_sectors.map((s) => <Badge key={s} variant="outline" className="font-normal">{s.replace(/_/g, " ")}</Badge>)}
+              </div>
+            )}
             {c.relevance_keywords && c.relevance_keywords.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs text-muted-foreground">Relevance keywords:</span>

@@ -15,6 +15,7 @@ from gtm_engine.discovery.csv_seed import CSVSeedDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
+from gtm_engine.discovery.targeting import derive_discovery_targets
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
 from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
@@ -60,6 +61,7 @@ class RunStats:
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
     relevance_keywords: list[str] = field(default_factory=list)  # the offer's need-terms this run used
+    discovery_sectors: list[str] = field(default_factory=list)   # sectors derived from the offer (E1)
     buyer: int = 0
     vendor: int = 0
     unknown: int = 0
@@ -619,8 +621,20 @@ class Pipeline:
         if self._relevance_keywords:
             campaign = campaign.model_copy(deep=True)
             campaign.intent_keywords = self._relevance_keywords
-        log.info("run %s started for campaign %s; relevance keywords: %s",
-                 run_id, campaign.campaign_id, self._relevance_keywords[:12])
+        # Offer-driven discovery (E1): if the user did not hand-pick map categories, derive
+        # them from the offer so the campaign still has somewhere to look. Explicit user
+        # categories always win - deriving only fills the gap, never overrides a choice.
+        if not campaign.osm_categories and not campaign.overture_categories and campaign.offer:
+            targets = await derive_discovery_targets(campaign.offer, campaign.target_industries, self.llm)
+            if not targets.empty:
+                # Copy before mutating, unless the relevance step already made a private copy.
+                if not self._relevance_keywords:
+                    campaign = campaign.model_copy(deep=True)
+                campaign.osm_categories = targets.osm_categories
+                campaign.overture_categories = targets.overture_categories
+                stats.discovery_sectors = targets.sectors
+        log.info("run %s started for campaign %s; relevance keywords: %s; sectors: %s",
+                 run_id, campaign.campaign_id, self._relevance_keywords[:12], stats.discovery_sectors)
         try:
             discovered = await self.discover(campaign, progress)
             stats.discovered = len(discovered)

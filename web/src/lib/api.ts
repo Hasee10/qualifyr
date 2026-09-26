@@ -108,6 +108,7 @@ export interface Campaign {
   countries: string[]
   provinces?: string[]
   relevance_keywords?: string[]
+  discovery_sectors?: string[]
   min_score: number
   max_companies: number
   leads: number
