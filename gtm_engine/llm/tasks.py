@@ -46,6 +46,45 @@ async def generate_keywords(llm: LLM | None, offer: str, industries: list[str] |
     return merged[:max_keywords]
 
 
+async def judge_intent(llm: LLM | None, offer: str, evidence: str, max_tokens: int = 400) -> dict | None:
+    """Decide whether a company is a plausible BUYER of `offer`, judged from `evidence` (its
+    own scraped text: name, description, about/services, category, signals) — the CEO's
+    "strictly by intent, not keywords" rule. The model must judge NEED, not sector: a company
+    in a related industry, or one merely hiring, is not a buyer unless the need is evident.
+
+    Returns {"buyer": bool, "confidence": 0-1, "reason": "<grounded phrase>", "by": "llm:..."}
+    or None when there is no LLM, no offer, or no usable evidence — in which case the caller
+    keeps the deterministic keyword classifier, so behaviour is unchanged without the LLM.
+    This is a judgment, so the reason may paraphrase; it is never treated as an extracted fact."""
+    if llm is None or not offer.strip() or not (evidence or "").strip():
+        return None
+    system = (
+        "You decide whether a company is a plausible BUYER of the seller's offer, using ONLY "
+        "the company text provided. A company is a buyer only if it plausibly NEEDS and would "
+        "purchase the offer for its own use. Being in a related industry, or merely hiring, is "
+        "NOT enough on its own — the need must be evident in the text. A company that SELLS or "
+        "PROVIDES something similar (an agency, vendor or competitor) is not a buyer. "
+        'Answer with one JSON object only: {"buyer": true|false, "confidence": 0.0-1.0, '
+        '"reason": "at most 25 words, grounded in the company text"}.'
+    )
+    user = (f"Seller offer: {offer!r}\n\nCompany text:\n\"\"\"\n{evidence[:4000]}\n\"\"\"\n\n"
+            "Judge need, not sector. JSON only.")
+    try:
+        raw = await llm.complete(system, user, max_tokens=max_tokens)
+    except Exception as exc:  # noqa: BLE001 - the LLM is optional
+        log.debug("llm intent judgment failed: %s", exc)
+        return None
+    obj = parse_json_object(raw)
+    if not obj or "buyer" not in obj:
+        return None
+    try:
+        confidence = min(max(float(obj.get("confidence", 0.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    reason = str(obj.get("reason") or "").strip().strip('"').replace("\n", " ")[:220]
+    return {"buyer": bool(obj["buyer"]), "confidence": confidence, "reason": reason, "by": f"llm:{llm.name}"}
+
+
 def _fallback_keywords(offer: str, industries: list[str] | None) -> list[str]:
     import re
 
