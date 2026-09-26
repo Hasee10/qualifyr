@@ -154,6 +154,7 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
           {stats && (
             <p className="text-xs text-muted-foreground">
               discovered {stats.discovered} → {stats.after_dedupe} unique · BUYER {stats.buyer} · VENDOR {stats.vendor} · UNKNOWN {stats.unknown} · qualified {stats.qualified} · outreach-ready {stats.outreach_ready} · unreachable {stats.unreachable}
+              {stats.intent_dropped_irrelevant ? ` · ${stats.intent_dropped_irrelevant} off-offer signal(s) dropped` : ""}
             </p>
           )}
         </div>

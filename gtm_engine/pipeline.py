@@ -533,6 +533,13 @@ class Pipeline:
         self.db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
         self.db.start_run(run_id, campaign.campaign_id)
         self._relevance_keywords = await self._build_relevance_keywords(campaign)
+        # Feed the generated keywords into discovery itself, not just the relevance gate: a
+        # deep copy (so the caller's config is untouched) whose intent_keywords carry the
+        # offer's need-terms, so PPRA tender search/matching and the buyer classifier's
+        # tender evidence all target what this campaign actually sells.
+        if self._relevance_keywords:
+            campaign = campaign.model_copy(deep=True)
+            campaign.intent_keywords = self._relevance_keywords
         log.info("run %s started for campaign %s; relevance keywords: %s",
                  run_id, campaign.campaign_id, self._relevance_keywords[:12])
         try:
