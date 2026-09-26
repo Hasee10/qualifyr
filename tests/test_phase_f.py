@@ -111,7 +111,9 @@ def test_sheets_access_token_wraps_google_refresh_error(monkeypatch):
     """The live failure ('account not found') surfaces as an actionable RuntimeError naming the
     service account, not a raw google-auth traceback."""
     import pytest
-    from google.oauth2 import service_account
+    # google-auth is the optional `sheets` extra; CI's test job installs only [api,dev], so skip
+    # there rather than fail on the import.
+    service_account = pytest.importorskip("google.oauth2.service_account")
     from google.auth.exceptions import RefreshError
     from gtm_engine.export import sheets as sheets_export
 
