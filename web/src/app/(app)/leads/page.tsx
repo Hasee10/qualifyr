@@ -49,6 +49,12 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <TypeBadge type={lead.company_type} />
               <ScoreBadge score={lead.total_score} />
               <Badge variant="outline">{lead.priority.replace("_", " ")}</Badge>
+              {lead.intent_fit !== null && lead.intent_fit !== undefined && (
+                <Badge variant={lead.intent_fit ? "default" : "secondary"}>
+                  {lead.intent_fit ? "Intent: buyer" : "Intent: no need"}
+                  {typeof lead.intent_confidence === "number" ? ` ${Math.round(lead.intent_confidence * 100)}%` : ""}
+                </Badge>
+              )}
               <StatusBadge status={lead.sequence_status} />
               <ReplyLabelBadge label={lead.reply_label} />
             </div>
@@ -99,6 +105,7 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
             </section>
             <section>
               <h3 className="mb-1 text-sm font-semibold">Why this score</h3>
+              <Row label="Intent" value={lead.intent_reason || null} />
               <Row label="Buyer fit" value={lead.buyer_fit_reason} />
               <Row label="Score" value={lead.score_reason} />
               <Row label="Buying signals" value={lead.buying_signal} />

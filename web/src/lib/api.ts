@@ -33,6 +33,9 @@ export interface Lead {
   linkedin_or_public_profile_url: string | null
   personalization_hook: string | null
   research_brief?: string | null
+  intent_fit?: boolean | null
+  intent_confidence?: number
+  intent_reason?: string
   buying_signal: string | null
   pain_signal: string | null
   source: string
