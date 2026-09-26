@@ -133,6 +133,18 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 INTENT_THRESHOLD = 0.6
 
 
+def _round_robin(lists: list[list]) -> list:
+    """Flatten several source lists by taking one from each in turn (source order preserved
+    within a round). Keeps every item; only the order changes, so a downstream cap samples all
+    sources instead of draining the first one."""
+    out: list = []
+    for i in range(max((len(lst) for lst in lists), default=0)):
+        for lst in lists:
+            if i < len(lst):
+                out.append(lst[i])
+    return out
+
+
 def _intent_evidence(company, bundle, signals=None) -> str:
     """The company's own evidence the intent judge reasons over: name, category, description,
     the observed operating signals, and about/body copy. Feeding the signals (multiple outlets,
@@ -255,12 +267,18 @@ class Pipeline:
             sources.append(CSVSeedDiscovery(campaign.seed_csv))
         if not sources:
             log.warning("no discovery sources configured (need osm_categories+cities or seed_csv)")
-        found: list[DiscoveredCompany] = []
+        per_source: list[list[DiscoveredCompany]] = []
         for src in sources:
+            items: list[DiscoveredCompany] = []
             async for company in src.discover(campaign):
-                found.append(company)
-            await _emit(progress, "discover", len(found), 0, f"{src.name}: {len(found)} so far")
-        return found
+                items.append(company)
+            per_source.append(items)
+            await _emit(progress, "discover", sum(len(s) for s in per_source), 0, f"{src.name}: {len(items)}")
+        # Round-robin across sources so a small max_companies cap still samples every source. A
+        # dense source (Overture/OSM returns thousands) would otherwise exhaust the cap before a
+        # single web-search or chamber result is ever processed - which was exactly the case that
+        # made web-search discovery contribute nothing on a real run.
+        return _round_robin(per_source)
 
     # -- single company ----------------------------------------------------------
 

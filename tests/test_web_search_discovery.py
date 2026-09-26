@@ -8,6 +8,7 @@ from gtm_engine.discovery import web_search as ws
 from gtm_engine.discovery.targeting import _seed_queries, derive_discovery_targets, load_taxonomy
 from gtm_engine.discovery.web_search import WebSearchDiscovery, _name_from_domain
 from gtm_engine.llm.tasks import generate_search_queries
+from gtm_engine.pipeline import _round_robin
 
 
 class FakeLLM:
@@ -21,6 +22,16 @@ class FakeLLM:
 
 
 # --- query derivation --------------------------------------------------------------------
+
+def test_round_robin_interleaves_so_a_cap_samples_every_source():
+    # A dense source (many items) must not drain a small cap before the others are reached.
+    dense = [f"osm{i}" for i in range(100)]
+    web = ["web1", "web2"]
+    merged = _round_robin([dense, web])
+    assert merged[:4] == ["osm0", "web1", "osm1", "web2"]   # web-search reached within the first few
+    assert len(merged) == 102 and set(merged) == set(dense) | set(web)   # nothing lost
+    assert _round_robin([]) == [] and _round_robin([[], []]) == []
+
 
 def test_name_from_domain():
     assert _name_from_domain("acme-textiles.pk") == "Acme Textiles"
