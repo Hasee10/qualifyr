@@ -99,6 +99,32 @@ def parse_results(html: str) -> list[tuple[str, str]]:
     return results
 
 
+def search_backend() -> str:
+    return "brave" if os.environ.get("GTM_BRAVE_API_KEY") else "duckduckgo"
+
+
+async def search_web(fetcher: HttpFetcher, settings: EngineSettings, query: str) -> list[tuple[str, str]]:
+    """Run one web search and return (url, title) pairs. Brave when a key is present, else the
+    keyless DuckDuckGo HTML endpoint. Shared by WebsiteFinder (name -> site) and by web-search
+    discovery (query -> companies)."""
+    key = os.environ.get("GTM_BRAVE_API_KEY")
+    if key:
+        result = await fetcher.get(BRAVE_URL.format(q=quote_plus(query)), delay=1.1, api=True,
+                                   headers={"X-Subscription-Token": key, "Accept": "application/json"})
+        if result.ok:
+            try:
+                items = json.loads(result.text).get("web", {}).get("results", [])
+                return [(i.get("url", ""), i.get("title", "")) for i in items]
+            except json.JSONDecodeError:
+                pass
+        log.debug("brave search failed (%s %s); falling back to duckduckgo", result.status_code, result.error)
+    result = await fetcher.get(SEARCH_URL.format(q=quote_plus(query)), delay=settings.search_delay_s, api=True)
+    if not result.ok:
+        log.debug("search: failed for %r (%s)", query, result.error or result.status_code)
+        return []
+    return parse_results(result.text)
+
+
 class WebsiteFinder:
     def __init__(self, fetcher: HttpFetcher, settings: EngineSettings):
         self.fetcher = fetcher
@@ -106,25 +132,10 @@ class WebsiteFinder:
 
     @property
     def backend(self) -> str:
-        return "brave" if os.environ.get("GTM_BRAVE_API_KEY") else "duckduckgo"
+        return search_backend()
 
     async def _results(self, query: str) -> list[tuple[str, str]]:
-        key = os.environ.get("GTM_BRAVE_API_KEY")
-        if key:
-            result = await self.fetcher.get(BRAVE_URL.format(q=quote_plus(query)), delay=1.1, api=True,
-                                            headers={"X-Subscription-Token": key, "Accept": "application/json"})
-            if result.ok:
-                try:
-                    items = json.loads(result.text).get("web", {}).get("results", [])
-                    return [(i.get("url", ""), i.get("title", "")) for i in items]
-                except json.JSONDecodeError:
-                    pass
-            log.debug("brave search failed (%s %s); falling back to duckduckgo", result.status_code, result.error)
-        result = await self.fetcher.get(SEARCH_URL.format(q=quote_plus(query)), delay=self.settings.search_delay_s, api=True)
-        if not result.ok:
-            log.debug("search: failed for %r (%s)", query, result.error or result.status_code)
-            return []
-        return parse_results(result.text)
+        return await search_web(self.fetcher, self.settings, query)
 
     async def find(self, company_name: str, city: str | None, country: str | None) -> str | None:
         if not self.settings.enable_search_fallback:

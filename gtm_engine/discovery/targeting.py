@@ -21,6 +21,7 @@ import yaml
 
 from gtm_engine.config.loader import DEFAULTS_DIR
 from gtm_engine.llm.client import LLM, parse_json_object
+from gtm_engine.llm.tasks import generate_search_queries
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +33,42 @@ class DiscoveryTargets:
     osm_categories: list[str] = field(default_factory=list)
     overture_categories: list[str] = field(default_factory=list)
     sectors: list[str] = field(default_factory=list)
+    search_queries: list[str] = field(default_factory=list)  # E2: queries for web-search discovery
 
     @property
     def empty(self) -> bool:
         return not self.osm_categories and not self.overture_categories
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        norm = (it or "").strip()
+        low = norm.lower()
+        if norm and low not in seen:
+            seen.add(low)
+            out.append(norm)
+    return out
+
+
+def _seed_queries(industries: list[str] | None, cities: list[str] | None,
+                  sectors: list[str], taxonomy: dict, limit: int) -> list[str]:
+    """Deterministic web-search queries from the campaign's industries (or, lacking those, the
+    human term of each matched sector) crossed with up to two cities. Always something to search
+    even without an LLM."""
+    terms = list(industries or [])
+    if not terms:
+        for s in sectors:
+            match = (taxonomy.get(s) or {}).get("match", [])
+            if match:
+                terms.append(match[0])
+    places = (cities or [])[:2] or [None]
+    queries: list[str] = []
+    for term in terms[:4]:
+        for city in places:
+            queries.append(" ".join(p for p in [term, "companies", f"in {city}" if city else None] if p))
+    return _dedupe(queries)[:limit]
 
 
 def load_taxonomy(path: Path | None = None) -> dict:
@@ -95,10 +128,13 @@ async def _llm_sectors(llm: LLM, offer: str, taxonomy: dict) -> list[str]:
 
 
 async def derive_discovery_targets(offer: str, industries: list[str] | None = None,
-                                   llm: LLM | None = None, taxonomy: dict | None = None) -> DiscoveryTargets:
-    """The categories to search for this offer. Deterministic sector-match, optionally widened
-    by the LLM; both draw only from the taxonomy, so every category is valid. Returns empty
-    when there is no offer to work from - the caller then falls back to its own behaviour."""
+                                   llm: LLM | None = None, taxonomy: dict | None = None,
+                                   cities: list[str] | None = None, countries: list[str] | None = None,
+                                   max_search_queries: int = 8) -> DiscoveryTargets:
+    """The categories AND web-search queries to search for this offer. Categories come from the
+    taxonomy (deterministic sector-match, optionally widened by the LLM), so every one is valid.
+    Search queries (E2) are free text: deterministic seeds plus optional LLM queries, both aimed
+    at buyers in the region. Returns empty when there is no offer - the caller then falls back."""
     if not (offer or "").strip():
         return DiscoveryTargets()
     taxonomy = taxonomy if taxonomy is not None else load_taxonomy()
@@ -110,6 +146,13 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
     if not sectors and "general_retail" in taxonomy:
         sectors = ["general_retail"]  # never leave an offer with nothing to search
     targets = _expand(sectors, taxonomy)
-    log.info("derived discovery targets from offer: sectors=%s osm=%d overture=%d",
-             targets.sectors, len(targets.osm_categories), len(targets.overture_categories))
+
+    region = ", ".join((cities or [])[:2] + (countries or [])[:1]) or None
+    queries = _seed_queries(industries, cities, sectors, taxonomy, limit=max_search_queries)
+    queries += await generate_search_queries(llm, offer, region)
+    targets.search_queries = _dedupe(queries)[:max_search_queries]
+
+    log.info("derived discovery targets from offer: sectors=%s osm=%d overture=%d queries=%d",
+             targets.sectors, len(targets.osm_categories), len(targets.overture_categories),
+             len(targets.search_queries))
     return targets

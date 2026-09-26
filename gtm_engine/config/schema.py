@@ -76,6 +76,9 @@ class CampaignConfig(BaseModel):
     osm_categories: list[str] = Field(default_factory=list)
     # Overture category substrings, e.g. ["clothing", "shoe_store", "supermarket"].
     overture_categories: list[str] = Field(default_factory=list)
+    # Web-search discovery queries (E2). Normally derived from the offer at run time; the user
+    # rarely sets these directly.
+    search_queries: list[str] = Field(default_factory=list)
     # Optional seed list of companies/domains supplied by the user.
     seed_csv: Path | None = None
     # Chamber directories (Pakistan): "kcci" today. Member names are filtered by the campaign's
@@ -170,6 +173,10 @@ class EngineSettings(BaseModel):
     overpass_timeout_s: int = 90
     enable_search_fallback: bool = True
     search_delay_s: float = 5.0
+    # Web-search discovery (E2): find companies from the offer's queries, not just map tags.
+    # Bounded per run to cap Brave spend; the run's max_companies still caps what gets processed.
+    enable_web_search_discovery: bool = True
+    web_search_max_queries_per_run: int = 6
     # External signals (all keyless): RDAP domain age, GDELT news mentions (1 req / 5.5 s).
     enable_domain_age: bool = True
     enable_news_signals: bool = True

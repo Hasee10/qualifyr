@@ -46,6 +46,29 @@ async def generate_keywords(llm: LLM | None, offer: str, industries: list[str] |
     return merged[:max_keywords]
 
 
+async def generate_search_queries(llm: LLM | None, offer: str, region: str | None = None,
+                                  max_queries: int = 5) -> list[str]:
+    """Web-search queries that would surface COMPANIES likely to BUY the offer in `region`.
+    Unlike map categories, a search query is free text, so the LLM may write it directly — but
+    it must target buyers (a plausible customer), not the seller's own competitors. Returns []
+    without an LLM; the caller pairs this with deterministic seed queries."""
+    if llm is None or not (offer or "").strip():
+        return []
+    system = ("You write web-search queries that surface COMPANIES which would BUY the seller's "
+              "offer. Target plausible buyers (the customer), never the seller's competitors or "
+              "vendors. Plain queries, no search operators. Output only a JSON array of short "
+              "query strings.")
+    user = (f"Offer: {offer!r}\nRegion: {region or 'any'}\n\n"
+            f"Return up to {max_queries} search queries that would list buyer companies"
+            + (f" in {region}." if region else "."))
+    try:
+        raw = await llm.complete(system, user, max_tokens=300)
+    except Exception as exc:  # noqa: BLE001 - the LLM is optional
+        log.debug("llm search-query generation failed: %s", exc)
+        return []
+    return [q for q in (_parse_keyword_list(raw)) if len(q) >= 4][:max_queries]
+
+
 async def judge_intent(llm: LLM | None, offer: str, evidence: str, max_tokens: int = 400) -> dict | None:
     """Decide whether a company is a plausible BUYER of `offer`, judged from `evidence` (its
     own scraped text: name, description, about/services, category, signals) — the CEO's

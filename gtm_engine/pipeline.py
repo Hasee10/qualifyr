@@ -16,6 +16,7 @@ from gtm_engine.discovery.osm import OSMDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.discovery.targeting import derive_discovery_targets
+from gtm_engine.discovery.web_search import WebSearchDiscovery
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
 from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
@@ -244,6 +245,8 @@ class Pipeline:
             sources.append(OvertureDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.search_areas():
             sources.append(OSMDiscovery(self.fetcher, self.settings))
+        if self.settings.enable_web_search_discovery and campaign.search_queries:
+            sources.append(WebSearchDiscovery(self.fetcher, self.settings))
         if "kcci" in campaign.chamber_sources:
             sources.append(KCCIDirectory(self.fetcher, self.settings))
         if "ppra" in campaign.intent_sources:
@@ -621,18 +624,24 @@ class Pipeline:
         if self._relevance_keywords:
             campaign = campaign.model_copy(deep=True)
             campaign.intent_keywords = self._relevance_keywords
-        # Offer-driven discovery (E1): if the user did not hand-pick map categories, derive
-        # them from the offer so the campaign still has somewhere to look. Explicit user
-        # categories always win - deriving only fills the gap, never overrides a choice.
-        if not campaign.osm_categories and not campaign.overture_categories and campaign.offer:
-            targets = await derive_discovery_targets(campaign.offer, campaign.target_industries, self.llm)
-            if not targets.empty:
+        # Offer-driven discovery (E1 categories + E2 web-search queries). Derive from the offer
+        # to fill map categories the user did not hand-pick and to produce web-search queries.
+        # Explicit user map categories always win - deriving only fills the gap, never overrides.
+        needs_categories = not campaign.osm_categories and not campaign.overture_categories
+        if campaign.offer and (needs_categories or not campaign.search_queries):
+            targets = await derive_discovery_targets(
+                campaign.offer, campaign.target_industries, self.llm,
+                cities=campaign.geography.cities, countries=campaign.geography.countries)
+            if targets.osm_categories or targets.overture_categories or targets.search_queries:
                 # Copy before mutating, unless the relevance step already made a private copy.
                 if not self._relevance_keywords:
                     campaign = campaign.model_copy(deep=True)
-                campaign.osm_categories = targets.osm_categories
-                campaign.overture_categories = targets.overture_categories
-                stats.discovery_sectors = targets.sectors
+                if needs_categories:
+                    campaign.osm_categories = targets.osm_categories
+                    campaign.overture_categories = targets.overture_categories
+                    stats.discovery_sectors = targets.sectors
+                if not campaign.search_queries:
+                    campaign.search_queries = targets.search_queries
         log.info("run %s started for campaign %s; relevance keywords: %s; sectors: %s",
                  run_id, campaign.campaign_id, self._relevance_keywords[:12], stats.discovery_sectors)
         try:

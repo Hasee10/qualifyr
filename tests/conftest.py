@@ -113,6 +113,7 @@ def settings(tmp_path: Path, pg_schema) -> EngineSettings:
         max_retries=0,
         respect_robots=False,
         enable_search_fallback=False,
+        enable_web_search_discovery=False,
         overpass_url="https://overpass.test/api/interpreter",
         overpass_mirrors=[],
         email_verification="off",
