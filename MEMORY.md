@@ -57,11 +57,59 @@ dispatch stampede can let more than one through — never crashes.
 
 **Also fixed 2026-09-26 (deployed-app bugs):** CSV download now uses an authenticated fetch (`api.downloadExport`, was a bare <a> → "missing bearer token") and honours the type + min-score filters; `/campaigns` sped up by replacing per-campaign full-lead loads with a SQL aggregate (`Database.campaign_counts`).
 
-**Remaining:**
-- Verify GTM_GROQ_API_KEY is in the repo's GitHub Actions secrets, then run a real campaign to see intent-driven leads live.
-- Open non-code items: CEO sign-off on multi-country scope (P3); other API keys (Sheets, Hunter/Reacher, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
+**ENGINE FOCUS (2026-09-26) — the current work stream.** Analysis found the reframe was only
+*half*-built: qualification got reframed (relevance gate, judge_intent by need-not-sector,
+research brief) but **discovery was still conventional lead-gen** — gated ONLY on
+user-hand-picked `osm_categories`/`overture_categories`; the offer/LLM keywords only FILTERED
+after discovery, never drove *what* was searched. A campaign with an offer but no categories
+discovered nothing, silently. That is the biggest remaining gap from "describe your offer and
+it searches". Engine plan **E1–E4**:
+- **E1 offer → discovery targets** ✅ **DONE (f2f936b)** — `config/defaults/discovery_taxonomy.yaml`
+  maps 16 business sectors → valid OSM tags + Overture substrings.
+  `discovery/targeting.derive_discovery_targets(offer, industries, llm)` picks sectors
+  deterministically (offer/industry keyword match) and, with the LLM on, widens them — both
+  choosing ONLY from the taxonomy, so every derived category is a real tag (never an invented
+  `shop=apparel` that silently matches nothing). `pipeline.run()` derives categories when the
+  user supplied none; **explicit user categories always win** (deriving only fills the gap).
+  Chosen sectors → `stats.discovery_sectors`, surfaced in the campaign summary + shown as chips;
+  New-campaign form now says categories are optional. Live-verified on Groq (clothing/pharma/
+  restaurant offers → correct sectors → valid tags). Tests: `tests/test_discovery_targeting.py` (7).
+- **E2 web-search discovery** — TODO. Find companies by *what they do* (run the offer's derived
+  search queries via Brave/search, extract names/domains), so the universe includes software
+  firms, services, online brands — anything without a mapped storefront. Second half of
+  "describe your offer and it searches". `WebsiteFinder` today only resolves a known name→URL.
+- **E3 competitor-analysis flow** — TODO. The unbuilt 2nd core job in PLAN.md: describe a
+  product → find competitors → surface their hiring/press/funding. (CEO earlier said park it;
+  reconfirm before building.)
+- **E4 optimize** — TODO, deliberately LAST (hardening the wrong shape is waste). Items:
+  LLM token pacing (measured Groq free limit ≈ **8,000 tokens/min**, ~11 judge_intent calls/min
+  sustainable — currently only reactive 429-retry, no proactive token bucket); DB is a single
+  SYNC psycopg conn with no `to_thread`/lock, so `concurrency=4` does not parallelize DB calls
+  and every write blocks the event loop; no DB reconnection handling if the conn drops mid-run;
+  Nominatim policy is **4 req/min for scheduled/regular scripts** (code targets 1/sec — mitigated
+  by the disk geocode cache, but P3's provinces/multi-country add more first-time lookups); no
+  failure alerting on the weekly gather-leads cron beyond GitHub's default email.
+
+**Landing page (2026-09-26):** staleness pass with a monochrome illustration pack.
+`web/src/components/marketing/illustration.tsx` (one reused theme-adaptive panel) used in
+Features (`feature-qualification-funnel`), How it works (`process-three-step`, wide), Comparison
+(`noise-to-qualified`), FAQ (`faq-woman-inquiring` beside the heading). Two were tried then
+removed as redundant with existing coded UI: `faq-support-side` (support card kept its icon) and
+`mobile-approval` (See-it-in-action kept its coded phone mockups) — those PNGs deleted. Pack's
+SVGs are base64-PNG wrappers, so PNGs used directly via next/image. Hero/stats/marquee/nav/footer
+untouched.
+
+**Remaining (non-engine):**
+- Verify GTM_GROQ_API_KEY is in the repo's GitHub Actions secrets, then run a real campaign to see intent-driven + offer-derived-discovery leads live.
+- Open non-code items: CEO sign-off on multi-country scope (P3) and on E3 competitor analysis; other API keys (Sheets, Hunter/Reacher, mailbox 2); `docs/API_KEYS.md` still has wrong Hunter/Brave quotas and there is no Brave spend counter.
 
 **Support email** in the landing FAQ is `outreach.grydin@gmail.com`.
+
+**API facts re-verified 2026-09-26 (live, against the real key):** Groq `openai/gpt-oss-20b`
+still works and is still on the free tier (a report claimed it left the free tier 2026-09-11 —
+false for us); free rate limit ≈ 1000 req/min but the binding limit is **8000 tokens/min**;
+a judge_intent-sized call ≈ 727 tokens (~90% reasoning). Hunter free = 50 credits/mo (unchanged).
+Overture release auto-discovered at query time (never stale). Overpass has mirror fallback.
 
 Everything below is the **historical Phase-A–G + Phase-H record**, kept for the verified facts.
 The website-selling pivot is now just one possible "offer", not the product.
