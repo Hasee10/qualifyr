@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlencode
@@ -15,6 +16,10 @@ from gtm_engine.scraping.fetcher import HttpFetcher
 log = logging.getLogger(__name__)
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# Nominatim's usage policy caps the public instance at 1 request/second; 1.1s stays under it.
+# Results are also cached to disk (see __init__), so a re-run and repeated cities cost nothing.
+# Override for a self-hosted instance with a higher limit via GTM_NOMINATIM_DELAY_S.
+NOMINATIM_DELAY_S = float(os.environ.get("GTM_NOMINATIM_DELAY_S", "1.1"))
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,7 @@ class Geocoder:
         if key in self._cache:
             return BBox(**self._cache[key])
         params = {"q": f"{city}, {country}" if country else city, "format": "json", "limit": 1}
-        result = await self.fetcher.get(f"{NOMINATIM_URL}?{urlencode(params)}", delay=1.1, api=True)
+        result = await self.fetcher.get(f"{NOMINATIM_URL}?{urlencode(params)}", delay=NOMINATIM_DELAY_S, api=True)
         if not result.ok:
             log.warning("geocode: %s failed (%s %s)", city, result.status_code, result.error)
             return None

@@ -27,6 +27,7 @@ concurrency:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   gather:
@@ -134,3 +135,22 @@ jobs:
           done
           echo "could not push leads after 6 attempts" >&2
           exit 1
+
+      # Beyond GitHub's default failure email: open (or comment on) a tracking issue so a failed
+      # scheduled crawl is visible in the repo, not just in one person's inbox. Keyless - uses
+      # the built-in GITHUB_TOKEN.
+      - name: Alert on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CAMPAIGN_REF: ${{ github.event.inputs.campaign || 'scheduled run' }}
+        run: |
+          body="gather-leads failed for **${CAMPAIGN_REF}**.
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          existing=$(gh issue list --state open --label crawl-failure --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "gather-leads run failed" --label crawl-failure --body "$body" \
+              || gh issue create --title "gather-leads run failed" --body "$body"
+          fi
