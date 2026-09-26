@@ -1,5 +1,6 @@
 import { ShieldCheck, Gauge, UserSearch, Radar, MailCheck, Sheet } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Illustration } from "@/components/marketing/illustration"
 
 function FeatureCard({
   icon: Icon,
@@ -34,17 +35,26 @@ function FeatureCard({
 export function FeaturesBento() {
   return (
     <section id="features" className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          Everything between &ldquo;a list of companies&rdquo; and a booked meeting
-        </h2>
-        <p className="mt-4 text-muted-foreground">
-          Discovery, qualification, contact discovery and outreach in one pipeline &mdash;
-          each step keeps its evidence.
-        </p>
+      <div className="grid items-center gap-8 lg:grid-cols-[1fr_1.1fr] lg:gap-14">
+        <Illustration
+          src="/brand/feature-qualification-funnel.png"
+          alt="Companies narrowing through a qualification funnel into scored buyers"
+          width={1448}
+          height={1086}
+          className="mx-auto aspect-[4/3] w-full max-w-sm lg:order-first"
+        />
+        <div className="text-center lg:text-left">
+          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            Everything between &ldquo;a list of companies&rdquo; and a booked meeting
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            Discovery, qualification, contact discovery and outreach in one pipeline &mdash;
+            each step keeps its evidence.
+          </p>
+        </div>
       </div>
 
-      <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <FeatureCard
           className="lg:col-span-2"
           icon={ShieldCheck}

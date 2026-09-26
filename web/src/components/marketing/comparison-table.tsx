@@ -1,4 +1,5 @@
 import { Check, X } from "lucide-react"
+import { Illustration } from "@/components/marketing/illustration"
 
 const rows = [
   {
@@ -33,14 +34,23 @@ const rows = [
 export function ComparisonTable() {
   return (
     <section className="mx-auto max-w-5xl px-4 py-24 sm:px-6">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          What most teams do today, vs. Qualifyr
-        </h2>
-        <p className="mt-4 text-muted-foreground">
-          Not a competitor comparison &mdash; a comparison against how this actually gets
-          done without a tool.
-        </p>
+      <div className="grid items-center gap-8 lg:grid-cols-[1fr_1.1fr] lg:gap-14">
+        <Illustration
+          src="/brand/noise-to-qualified.png"
+          alt="A scattered pile of company signals filtered down to a qualified shortlist"
+          width={1448}
+          height={1086}
+          className="mx-auto aspect-[4/3] w-full max-w-sm lg:order-first"
+        />
+        <div className="text-center lg:text-left">
+          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            What most teams do today, vs. Qualifyr
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            Not a competitor comparison &mdash; a comparison against how this actually gets
+            done without a tool.
+          </p>
+        </div>
       </div>
 
       <div className="mt-14 overflow-hidden rounded-xl border border-border/60">

@@ -1,3 +1,5 @@
+import { Illustration } from "@/components/marketing/illustration"
+
 function StatusBar() {
   return (
     <div className="flex items-center justify-between px-4 pt-2.5 text-[7px] font-semibold text-foreground/70">
@@ -100,12 +102,21 @@ const panels = [
 export function DeviceMockups() {
   return (
     <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">See it in action</h2>
-        <p className="mt-4 text-muted-foreground">
-          The same responsive dashboard on your desk or in your pocket &mdash; there is no
-          separate mobile app.
-        </p>
+      <div className="grid items-center gap-8 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
+        <div className="text-center lg:text-left">
+          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">See it in action</h2>
+          <p className="mt-4 text-muted-foreground">
+            The same responsive dashboard on your desk or in your pocket &mdash; there is no
+            separate mobile app.
+          </p>
+        </div>
+        <Illustration
+          src="/brand/mobile-approval.png"
+          alt="Approving an outreach email from a phone"
+          width={1448}
+          height={1086}
+          className="mx-auto aspect-[4/3] w-full max-w-sm lg:order-last"
+        />
       </div>
 
       <div className="mt-14 grid gap-y-10 sm:grid-cols-3">

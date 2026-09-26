@@ -2,6 +2,7 @@
 
 import { MessageCircleQuestion } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Illustration } from "@/components/marketing/illustration"
 
 const faqs = [
   {
@@ -26,16 +27,31 @@ const faqs = [
   },
 ]
 
-/** A two-column pairing, not a single centred list: the accordion answers the searchable
- *  questions, the card beside it is for the one question no FAQ ever covers. The
- *  reference's radial ring diagram was considered and dropped deliberately - it is
- *  unusable on mobile (no room for eight orbiting nodes) and hostile to screen readers
- *  (no meaningful DOM order), which a plain accordion does not have to compromise on. */
+/** Heading pairs with an illustration (image right on desktop, below the heading on
+ *  mobile — text stays first in reading order at every width). The accordion below is
+ *  unchanged: it answers the searchable questions, the card beside it is for the one
+ *  question no FAQ ever covers, and it now carries its own small illustration instead of
+ *  a bare icon square. The reference's radial ring diagram was considered and dropped
+ *  deliberately - it is unusable on mobile (no room for eight orbiting nodes) and hostile
+ *  to screen readers (no meaningful DOM order), which this layout does not have to
+ *  compromise on. */
 export function Faq() {
   return (
     <section id="faq" className="mx-auto max-w-6xl px-4 py-24 sm:px-6">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Frequently asked</h2>
+      <div className="grid items-center gap-8 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
+        <div className="text-center lg:text-left">
+          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Frequently asked</h2>
+          <p className="mt-4 text-muted-foreground">
+            The questions that come up before someone runs their first search.
+          </p>
+        </div>
+        <Illustration
+          src="/brand/faq-woman-inquiring.png"
+          alt="Someone reviewing qualified-buyer answers on a laptop"
+          width={1448}
+          height={1086}
+          className="mx-auto aspect-[4/3] w-full max-w-sm lg:order-last"
+        />
       </div>
 
       <div className="mt-14 grid gap-10 lg:grid-cols-[2fr_1fr] lg:items-start">
@@ -48,20 +64,29 @@ export function Faq() {
           ))}
         </Accordion>
 
-        <div className="rounded-xl border border-border/60 bg-card p-6">
-          <span className="flex size-10 items-center justify-center rounded-lg bg-brand-muted">
-            <MessageCircleQuestion className="size-5 text-brand" />
-          </span>
-          <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Email us directly and we&rsquo;ll get back to you.
-          </p>
-          <a
-            href="mailto:outreach.grydin@gmail.com?subject=Qualifyr%20question"
-            className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
-          >
-            outreach.grydin@gmail.com
-          </a>
+        <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
+          <Illustration
+            src="/brand/faq-support-side.png"
+            alt="A support agent standing by to help"
+            width={1448}
+            height={1086}
+            className="aspect-[4/3] w-full rounded-none border-0 border-b border-border/60"
+          />
+          <div className="p-6">
+            <span className="flex size-10 items-center justify-center rounded-lg bg-brand-muted">
+              <MessageCircleQuestion className="size-5 text-brand" />
+            </span>
+            <h3 className="mt-4 font-heading text-base font-medium">Still stuck?</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Email us directly and we&rsquo;ll get back to you.
+            </p>
+            <a
+              href="mailto:outreach.grydin@gmail.com?subject=Qualifyr%20question"
+              className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
+            >
+              outreach.grydin@gmail.com
+            </a>
+          </div>
         </div>
       </div>
     </section>

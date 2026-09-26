@@ -1,8 +1,10 @@
+import { Illustration } from "@/components/marketing/illustration"
+
 const steps = [
   {
     n: "01",
     title: "Define your campaign",
-    description: "A YAML file: geography, industry, buyer terms, minimum score. No code, no UI form to fight.",
+    description: "Name what you sell, pick a region, set a company cap. No code, no config file to hand-edit.",
   },
   {
     n: "02",
@@ -28,6 +30,15 @@ export function HowItWorks() {
             pipeline runs.
           </p>
         </div>
+
+        <Illustration
+          src="/brand/process-three-step.png"
+          alt="Three people carrying out the define, discover and approve steps"
+          width={1672}
+          height={941}
+          sizes="(min-width: 1024px) 768px, 100vw"
+          className="mx-auto mt-10 aspect-[1672/941] w-full max-w-3xl"
+        />
 
         <div className="relative mt-14 grid gap-10 sm:grid-cols-3 sm:gap-6">
           {/* A single line links the three steps, so they read as a flow, not three cards. */}
