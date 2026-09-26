@@ -152,6 +152,10 @@ def _require_access(campaign_id: str, user_id: str | None) -> None:
     when auth is off (local operator, tests), which sees everything, so nothing changes for
     single-operator use. A campaign the caller may not see is reported as 404, not 403, so its
     existence is not leaked."""
+    # A NUL byte cannot be stored in a Postgres text column, so no id ever contains one:
+    # reject it here as "not found" rather than letting psycopg raise a 500 mid-query.
+    if "\x00" in campaign_id:
+        raise HTTPException(404, f"campaign '{campaign_id}' not found")
     if user_id is None or campaign_id in _campaign_files():
         return
     db = _db()
@@ -176,6 +180,8 @@ def require_campaign_access(campaign_id: str, user_id: str | None = Depends(curr
 def require_lead_access(lead_id: str, user_id: str | None = Depends(current_user_id)) -> None:
     """Route dependency for `/leads/{lead_id}/...`: resolve the lead's campaign, then apply the
     same ownership check. A lead the caller may not see is 404, so its existence is not leaked."""
+    if "\x00" in lead_id:
+        raise HTTPException(404, "lead not found")
     if user_id is None:
         return
     db = _db()
@@ -795,7 +801,7 @@ def outreach_activity(campaign_id: str, limit: int = 100) -> list[dict]:
     db = _db()
     rows = db.conn.execute(
         "SELECT e.*, l.data_json FROM outreach_events e JOIN leads l ON l.lead_id = e.lead_id "
-        "WHERE l.campaign_id = ? ORDER BY e.event_id DESC LIMIT ?", (campaign_id, limit)
+        "WHERE l.campaign_id = %s ORDER BY e.event_id DESC LIMIT %s", (campaign_id, limit)
     ).fetchall()
     out = []
     for r in rows:
