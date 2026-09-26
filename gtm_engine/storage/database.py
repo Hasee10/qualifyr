@@ -5,13 +5,17 @@ every caller still just does `Database(dsn)` and calls the same methods."""
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 import urllib.parse
 
 import psycopg
 from psycopg.rows import dict_row
 
 from gtm_engine.models import Lead, utcnow
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -156,21 +160,7 @@ class Database:
             )
         self.dsn = dsn
         self.dry_run = dry_run
-        # prepare_threshold=None disables psycopg's automatic prepared statements, which
-        # PgBouncer in transaction mode (Supabase's :6543 pooler, the right choice for
-        # serverless) cannot carry across pooled connections. Harmless on :5432.
-        self.conn = psycopg.connect(
-            dsn, row_factory=dict_row, autocommit=False, prepare_threshold=None
-        )
-        # A search_path in the DSN's `options=` is a *startup parameter*, and PgBouncer
-        # does not forward those - against Supabase's pooler it is silently dropped and
-        # every query quietly resolves in `public` instead. That failure is invisible
-        # (no error, just the wrong schema), so re-apply it as an explicit SET, which
-        # goes over the wire as a normal statement and always takes effect.
-        schema = _search_path_of(dsn)
-        if schema:
-            self.conn.execute(f'SET search_path TO "{schema}"')
-            self.conn.commit()
+        self.conn = self._connect()
         if ensure_schema is None:
             ensure_schema = dsn not in _SCHEMA_READY
         if ensure_schema:
@@ -180,14 +170,68 @@ class Database:
             # cold, empty database at once). A transaction-scoped advisory lock serialises
             # this DDL across connections; it releases on commit, so it is safe through a
             # transaction-mode pooler (PgBouncer) too.
-            self.conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
-            self.conn.execute(SCHEMA)
+            self._execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
+            self._execute(SCHEMA)
             self.conn.commit()
             _SCHEMA_READY.add(dsn)
 
+    def _connect(self) -> "psycopg.Connection":
+        # prepare_threshold=None disables psycopg's automatic prepared statements, which
+        # PgBouncer in transaction mode (Supabase's :6543 pooler, the right choice for
+        # serverless) cannot carry across pooled connections. Harmless on :5432.
+        conn = psycopg.connect(self.dsn, row_factory=dict_row, autocommit=False, prepare_threshold=None)
+        # A search_path in the DSN's `options=` is a *startup parameter*, and PgBouncer does not
+        # forward those - against Supabase's pooler it is silently dropped and every query quietly
+        # resolves in `public` instead. That failure is invisible (no error, just the wrong
+        # schema), so re-apply it as an explicit SET, which always takes effect. Re-applied on
+        # every (re)connect, since a fresh connection resets it.
+        schema = _search_path_of(self.dsn)
+        if schema:
+            conn.execute(f'SET search_path TO "{schema}"')
+            conn.commit()
+        return conn
+
+    def _reconnect(self, attempts: int = 3, base_delay: float = 0.5) -> None:
+        """Re-establish the connection after it drops mid-run. A long crawl outlives a pooler's
+        idle recycle, so without this the rest of the run silently fails every query. Best-effort
+        close of the dead handle, then a few backed-off reconnect attempts; the schema already
+        exists, so no DDL is re-run."""
+        try:
+            self.conn.close()
+        except Exception:  # noqa: BLE001 - the handle is already broken; closing is best-effort
+            pass
+        last: Exception | None = None
+        for i in range(attempts):
+            try:
+                self.conn = self._connect()
+                log.info("db reconnected")
+                return
+            except psycopg.OperationalError as exc:
+                last = exc
+                time.sleep(base_delay * (2 ** i))
+        raise last if last else psycopg.OperationalError("reconnect failed")
+
+    def _execute(self, query, params=None):
+        """Run a statement, reconnecting once if the connection has dropped. Returns the cursor,
+        so callers can `.fetchone()/.fetchall()`/iterate exactly as with `conn.execute`."""
+        try:
+            return self.conn.execute(query, params)
+        except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
+            if self.dry_run:
+                raise  # a dry-run transaction can't be meaningfully resumed on a new connection
+            log.warning("db connection lost (%s); reconnecting", exc)
+            self._reconnect()
+            return self.conn.execute(query, params)
+
     def _commit(self) -> None:
-        if not self.dry_run:
+        if self.dry_run:
+            return
+        try:
             self.conn.commit()
+        except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
+            # The in-flight transaction is lost, but recover the connection so the run continues.
+            log.warning("db commit failed on a lost connection (%s); reconnecting", exc)
+            self._reconnect()
 
     def close(self) -> None:
         if self.dry_run:
@@ -200,7 +244,7 @@ class Database:
         # owner_id is set on create and preserved on later updates (a run re-upserts the
         # campaign but must not blank its owner), so COALESCE keeps the existing owner when
         # the caller passes None.
-        self.conn.execute(
+        self._execute(
             "INSERT INTO campaigns (campaign_id, name, config_json, created_at, owner_id) "
             "VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (campaign_id) DO UPDATE SET name = EXCLUDED.name, config_json = EXCLUDED.config_json, "
@@ -218,50 +262,50 @@ class Database:
             sql += " WHERE owner_id = %s OR owner_id IS NULL"
             params.append(owner_id)
         sql += " ORDER BY created_at DESC"
-        rows = self.conn.execute(sql, params).fetchall()
+        rows = self._execute(sql, params).fetchall()
         return [{"campaign_id": r["campaign_id"], "name": r["name"], "created_at": r["created_at"],
                  "owner_id": r["owner_id"], "config": json.loads(r["config_json"])} for r in rows]
 
     def campaign_owner(self, campaign_id: str) -> str | None:
-        row = self.conn.execute("SELECT owner_id FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
+        row = self._execute("SELECT owner_id FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
         return row["owner_id"] if row else None
 
     def delete_campaign(self, campaign_id: str) -> None:
-        self.conn.execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
+        self._execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
         self._commit()
 
     def start_run(self, run_id: str, campaign_id: str) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO runs (run_id, campaign_id, started_at, status) VALUES (%s, %s, %s, 'running')",
             (run_id, campaign_id, utcnow().isoformat()),
         )
         self._commit()
 
     def finish_run(self, run_id: str, status: str, stats: dict) -> None:
-        self.conn.execute(
+        self._execute(
             "UPDATE runs SET finished_at = %s, status = %s, stats_json = %s WHERE run_id = %s",
             (utcnow().isoformat(), status, json.dumps(stats, default=str), run_id),
         )
         self._commit()
 
     def get_run(self, run_id: str) -> dict | None:
-        row = self.conn.execute("SELECT * FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+        row = self._execute("SELECT * FROM runs WHERE run_id = %s", (run_id,)).fetchone()
         return dict(row) if row else None
 
     def list_runs(self, campaign_id: str | None = None) -> list[dict]:
         if campaign_id:
-            rows = self.conn.execute(
+            rows = self._execute(
                 "SELECT * FROM runs WHERE campaign_id = %s ORDER BY started_at DESC", (campaign_id,)
             )
         else:
-            rows = self.conn.execute("SELECT * FROM runs ORDER BY started_at DESC")
+            rows = self._execute("SELECT * FROM runs ORDER BY started_at DESC")
         return [dict(r) for r in rows]
 
     # -- run progress (polled by GET /campaigns/{id}/progress) --------------
 
     def set_run_progress(self, campaign_id: str, run_id: str | None, stage: str,
                           done: int, total: int, message: str | None = None) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO run_progress (campaign_id, run_id, stage, done, total, message, updated_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (campaign_id) DO UPDATE SET run_id = EXCLUDED.run_id, stage = EXCLUDED.stage, "
@@ -272,7 +316,7 @@ class Database:
         self._commit()
 
     def get_run_progress(self, campaign_id: str) -> dict | None:
-        row = self.conn.execute(
+        row = self._execute(
             "SELECT * FROM run_progress WHERE campaign_id = %s", (campaign_id,)
         ).fetchone()
         return dict(row) if row else None
@@ -283,10 +327,10 @@ class Database:
                        domain: str | None, website: str | None, country: str | None,
                        city: str | None, source: str, source_url: str | None, raw: dict) -> bool:
         """Returns True if the company was new for this campaign."""
-        exists = self.conn.execute(
+        exists = self._execute(
             "SELECT 1 FROM companies WHERE company_key = %s", (company_key,)
         ).fetchone()
-        self.conn.execute(
+        self._execute(
             "INSERT INTO companies (company_key, campaign_id, name, domain, website, "
             "country, city, source, source_url, discovered_at, raw_json) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
@@ -305,7 +349,7 @@ class Database:
 
     def save_page(self, company_key: str, url: str, kind: str, status_code: int,
                   title: str | None, text: str) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO pages (url, company_key, kind, status_code, title, text, fetched_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (url) DO UPDATE SET company_key = EXCLUDED.company_key, kind = EXCLUDED.kind, "
@@ -318,7 +362,7 @@ class Database:
     # -- leads --------------------------------------------------------------
 
     def save_lead(self, lead: Lead, run_id: str | None, company_key: str | None) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO leads (lead_id, campaign_id, run_id, company_key, company_type, "
             "total_score, priority, outreach_ready, sequence_status, contact_email, data_json, updated_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
@@ -337,7 +381,7 @@ class Database:
 
     def update_lead(self, lead: Lead) -> None:
         """Update a lead's state without touching run_id/company_key (outreach stages)."""
-        self.conn.execute(
+        self._execute(
             "UPDATE leads SET company_type = %s, total_score = %s, priority = %s, outreach_ready = %s, "
             "sequence_status = %s, contact_email = %s, data_json = %s, updated_at = %s WHERE lead_id = %s",
             (lead.company_type.value, lead.total_score, lead.priority.value, int(lead.outreach_ready),
@@ -347,7 +391,7 @@ class Database:
         self._commit()
 
     def get_lead(self, lead_id: str) -> Lead | None:
-        row = self.conn.execute("SELECT data_json FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
+        row = self._execute("SELECT data_json FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
         return Lead.model_validate_json(row["data_json"]) if row else None
 
     def list_leads(self, campaign_id: str, *, run_id: str | None = None,
@@ -368,19 +412,19 @@ class Database:
             sql += " AND outreach_ready = %s"
             params.append(int(outreach_ready))
         sql += " ORDER BY total_score DESC"
-        rows = self.conn.execute(sql, params).fetchall()
+        rows = self._execute(sql, params).fetchall()
         return [Lead.model_validate_json(r["data_json"]) for r in rows]
 
     def leads_by_status(self, campaign_id: str, statuses: list[str]) -> list[Lead]:
         placeholders = ",".join("%s" for _ in statuses)
-        rows = self.conn.execute(
+        rows = self._execute(
             f"SELECT data_json FROM leads WHERE campaign_id = %s AND sequence_status IN ({placeholders}) "
             "ORDER BY total_score DESC", [campaign_id, *statuses]
         ).fetchall()
         return [Lead.model_validate_json(r["data_json"]) for r in rows]
 
     def campaign_config(self, campaign_id: str) -> dict | None:
-        row = self.conn.execute("SELECT config_json FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
+        row = self._execute("SELECT config_json FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
         return json.loads(row["config_json"]) if row else None
 
     def campaign_counts(self, campaign_id: str, min_score: int) -> dict:
@@ -388,7 +432,7 @@ class Database:
         indexed columns rather than by loading and JSON-parsing every Lead in Python. This is
         what /campaigns needs per campaign for the dropdown, and doing it in SQL keeps that
         list fast no matter how many leads a campaign accumulates."""
-        row = self.conn.execute(
+        row = self._execute(
             "SELECT COUNT(*) AS leads, "
             "COUNT(*) FILTER (WHERE company_type = 'BUYER') AS buyers, "
             "COUNT(*) FILTER (WHERE company_type = 'BUYER' AND total_score >= %s) AS qualified, "
@@ -402,7 +446,7 @@ class Database:
     def campaign_of_lead(self, lead_id: str) -> str | None:
         """The campaign a lead belongs to, or None if the lead is unknown. Used to scope
         lead-level routes to the campaign's owner without deserialising the whole Lead."""
-        row = self.conn.execute("SELECT campaign_id FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
+        row = self._execute("SELECT campaign_id FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
         return row["campaign_id"] if row else None
 
     def bounced_today(self, campaign_id: str, day: str, mailbox: str | None = None,
@@ -419,13 +463,13 @@ class Database:
         return n
 
     def events_today(self, event_type: str, day_prefix: str) -> int:
-        return self.conn.execute(
+        return self._execute(
             "SELECT COUNT(*) AS n FROM outreach_events WHERE event_type = %s AND created_at LIKE %s",
             (event_type, day_prefix + "%"),
         ).fetchone()["n"]
 
     def lead_for_company(self, campaign_id: str, company_key: str) -> Lead | None:
-        row = self.conn.execute(
+        row = self._execute(
             "SELECT data_json FROM leads WHERE campaign_id = %s AND company_key = %s "
             "ORDER BY updated_at DESC LIMIT 1", (campaign_id, company_key)
         ).fetchone()
@@ -434,7 +478,7 @@ class Database:
     # -- suppressions ---------------------------------------------------------
 
     def add_suppression(self, value: str, kind: str, reason: str | None = None) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO suppressions (value, kind, reason, created_at) VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (value) DO UPDATE SET kind = EXCLUDED.kind, reason = EXCLUDED.reason, "
             "created_at = EXCLUDED.created_at",
@@ -447,14 +491,14 @@ class Database:
         if not vals:
             return False
         placeholders = ",".join("%s" for _ in vals)
-        return self.conn.execute(
+        return self._execute(
             f"SELECT 1 FROM suppressions WHERE value IN ({placeholders}) LIMIT 1", vals
         ).fetchone() is not None
 
     # -- drafts (human approval) ----------------------------------------------
 
     def get_draft(self, lead_id: str, step: str) -> dict | None:
-        row = self.conn.execute("SELECT * FROM drafts WHERE lead_id = %s AND step = %s", (lead_id, step)).fetchone()
+        row = self._execute("SELECT * FROM drafts WHERE lead_id = %s AND step = %s", (lead_id, step)).fetchone()
         return dict(row) if row else None
 
     def upsert_draft(self, lead_id: str, step: str, subject: str, body: str, *,
@@ -462,7 +506,7 @@ class Database:
         existing = self.get_draft(lead_id, step)
         created = existing["created_at"] if existing else utcnow().isoformat()
         approved_at = utcnow().isoformat() if status == "approved" else (existing or {}).get("approved_at")
-        self.conn.execute(
+        self._execute(
             "INSERT INTO drafts (lead_id, step, subject, body, status, edited, created_at, approved_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (lead_id, step) DO UPDATE SET subject = EXCLUDED.subject, body = EXCLUDED.body, "
@@ -474,20 +518,20 @@ class Database:
         return self.get_draft(lead_id, step)
 
     def set_draft_status(self, lead_id: str, step: str, status: str) -> None:
-        self.conn.execute(
+        self._execute(
             "UPDATE drafts SET status = %s, approved_at = COALESCE(approved_at, %s) WHERE lead_id = %s AND step = %s",
             (status, utcnow().isoformat() if status == "approved" else None, lead_id, step),
         )
         self._commit()
 
     def drafts_by_status(self, status: str) -> list[dict]:
-        return [dict(r) for r in self.conn.execute("SELECT * FROM drafts WHERE status = %s ORDER BY created_at", (status,))]
+        return [dict(r) for r in self._execute("SELECT * FROM drafts WHERE status = %s ORDER BY created_at", (status,))]
 
     def list_suppressions(self) -> list[dict]:
-        return [dict(r) for r in self.conn.execute("SELECT * FROM suppressions ORDER BY created_at DESC")]
+        return [dict(r) for r in self._execute("SELECT * FROM suppressions ORDER BY created_at DESC")]
 
     def remove_suppression(self, value: str) -> bool:
-        cur = self.conn.execute("DELETE FROM suppressions WHERE value = %s", (value.lower().strip(),))
+        cur = self._execute("DELETE FROM suppressions WHERE value = %s", (value.lower().strip(),))
         self._commit()
         return cur.rowcount > 0
 
@@ -495,13 +539,13 @@ class Database:
 
     def add_event(self, lead_id: str, event_type: str, step: str | None = None,
                   detail: str | None = None) -> None:
-        self.conn.execute(
+        self._execute(
             "INSERT INTO outreach_events (lead_id, event_type, step, detail, created_at) VALUES (%s, %s, %s, %s, %s)",
             (lead_id, event_type, step, detail, utcnow().isoformat()),
         )
         self._commit()
 
     def events_for(self, lead_id: str) -> list[dict]:
-        return [dict(r) for r in self.conn.execute(
+        return [dict(r) for r in self._execute(
             "SELECT * FROM outreach_events WHERE lead_id = %s ORDER BY event_id", (lead_id,)
         )]
