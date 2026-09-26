@@ -1,3 +1,6 @@
+"use client"
+
+import * as React from "react"
 import { ShieldCheck, Gauge, UserSearch, Radar, MailCheck, Sheet } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Illustration } from "@/components/marketing/illustration"
@@ -13,18 +16,58 @@ function FeatureCard({
   description: string
   className?: string
 }) {
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  // Track the cursor as CSS vars so the edge glow and inner spotlight follow it. Cheap: it
+  // only writes two custom properties; the visuals are pure CSS (GPU-composited opacity).
+  const onMove = React.useCallback((e: React.MouseEvent) => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    el.style.setProperty("--mx", `${e.clientX - r.left}px`)
+    el.style.setProperty("--my", `${e.clientY - r.top}px`)
+  }, [])
+
   return (
     <div
+      ref={ref}
+      onMouseMove={onMove}
       className={cn(
-        "group flex flex-col rounded-2xl border border-border/60 bg-card p-5 transition-colors hover:border-border hover:bg-muted/40",
+        "group relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card p-5 transition-colors hover:bg-muted/40",
         className
       )}
     >
-      <span className="flex size-9 items-center justify-center rounded-xl bg-brand-muted transition-colors group-hover:bg-brand/15">
+      {/* Edge glow: a radial highlight masked to a 1px ring, so only the border lights up under
+          the cursor. color-mix on --foreground keeps it a light halo in dark mode and a soft
+          defined edge in light mode, so it reads well in both themes. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 motion-reduce:hidden"
+        style={{
+          padding: "1px",
+          background:
+            "radial-gradient(220px circle at var(--mx, 50%) var(--my, 0%), color-mix(in oklch, var(--foreground) 60%, transparent), transparent 45%)",
+          WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+          WebkitMaskComposite: "xor",
+          mask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+          maskComposite: "exclude",
+        }}
+      />
+      {/* Soft inner spotlight following the cursor. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 motion-reduce:hidden"
+        style={{
+          background:
+            "radial-gradient(300px circle at var(--mx, 50%) var(--my, 0%), color-mix(in oklch, var(--foreground) 7%, transparent), transparent 60%)",
+        }}
+      />
+
+      <span className="relative flex size-9 items-center justify-center rounded-xl bg-brand-muted transition-colors group-hover:bg-brand/15">
         <Icon className="size-[18px] text-brand" />
       </span>
-      <h3 className="mt-4 font-heading text-[15px] font-medium">{title}</h3>
-      <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
+      <h3 className="relative mt-4 font-heading text-[15px] font-medium">{title}</h3>
+      <p className="relative mt-1.5 text-sm text-muted-foreground">{description}</p>
     </div>
   )
 }
