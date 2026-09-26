@@ -104,6 +104,15 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
             be += 3
         else:
             reasons.append(f"minor vendor mentions present: {', '.join(cls.vendor_hits[:3])}")
+    # The LLM's intent verdict is the CEO's primary axis: reward an evident need, and record a
+    # judged non-need. It is scaled by confidence so a hedged verdict moves the score less.
+    if cls.intent_buyer is True:
+        be += 4 * cls.intent_confidence
+        reasons.append(f"intent match ({cls.intent_confidence:.0%})"
+                       + (f": {cls.intent_reason}" if cls.intent_reason else ""))
+    elif cls.intent_buyer is False:
+        reasons.append(f"intent: no evident need ({cls.intent_confidence:.0%})"
+                       + (f": {cls.intent_reason}" if cls.intent_reason else ""))
     be_pts = _scale(be, w.buyer_evidence, 15)
 
     # --- Contact quality (default 10)

@@ -25,7 +25,7 @@ from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
-from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords
+from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords, judge_intent
 from gtm_engine.qualification.relevance import relevant_terms
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
@@ -122,6 +122,46 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
     if signals.github_activity:
         facts.append("actively engineering (public GitHub org)")
     return "; ".join(facts) if facts else None
+
+
+# Above this confidence, the LLM's intent verdict is allowed to change the buyer/unknown call
+# (promote a keyword-thin UNKNOWN to BUYER, or demote a keyword-only BUYER with no real need).
+# Below it, the verdict is recorded and lightly scored but does not flip the type.
+INTENT_THRESHOLD = 0.6
+
+
+def _intent_evidence(company, bundle) -> str:
+    """The company's own text that the intent judge reasons over: name, category, description
+    and about/body copy. Deliberately its own words, so the verdict is about evident need, not
+    about our keywords."""
+    parts = [
+        company.name or "",
+        f"Category: {company.category}" if company.category else "",
+        bundle.description or "",
+        (bundle.about_text or bundle.body_text or "")[:2500],
+    ]
+    return "\n".join(p for p in parts if p).strip()
+
+
+def apply_intent_verdict(cls: Classification, verdict: dict, *, threshold: float = INTENT_THRESHOLD) -> str:
+    """Fold an LLM intent verdict into a Classification (mutates it) and return a provenance
+    note. A confident buyer promotes a keyword-thin UNKNOWN to BUYER; a confident non-buyer
+    demotes a keyword-only BUYER to UNKNOWN. The verdict is always recorded on the
+    classification even when it is not strong enough to flip the type. The caller must not pass
+    a VENDOR here — that is a hard reject and is never changed by intent."""
+    cls.intent_buyer = verdict["buyer"]
+    cls.intent_confidence = verdict["confidence"]
+    cls.intent_reason = verdict["reason"]
+    strong = verdict["confidence"] >= threshold
+    pct = f"{verdict['confidence']:.0%}"
+    if verdict["buyer"] and strong and cls.company_type == CompanyType.UNKNOWN:
+        cls.company_type = CompanyType.BUYER
+        cls.confidence = max(cls.confidence, verdict["confidence"])
+        cls.reasons.append(f"intent: needs the offer ({pct}) — {verdict['reason']}")
+    elif not verdict["buyer"] and strong and cls.company_type == CompanyType.BUYER:
+        cls.company_type = CompanyType.UNKNOWN
+        cls.reasons.append(f"intent: no evident need for the offer ({pct}) — {verdict['reason']}")
+    return f"{verdict['by']}: {'buyer' if verdict['buyer'] else 'not a buyer'} ({pct})"
 
 
 class Pipeline:
@@ -410,6 +450,16 @@ class Pipeline:
                         f"{p.kind}: {p.title[:60]}" for p in press[:2])
                     provenance["press_mentions"] = f"rss: {len(press)} entr(y/ies), latest '{press[0].title[:60]}'"
 
+        # Intent (CEO: qualify by NEED, not keywords). When the LLM is on, judge whether this
+        # company plausibly needs the offer from its own text, and let that drive the type and
+        # the score. A confident "not a buyer" demotes a keyword-only BUYER to UNKNOWN; a
+        # confident buyer promotes an UNKNOWN. VENDOR (agency/competitor) is a hard reject and
+        # is never promoted. Without the LLM this is skipped and the keyword path stands.
+        if self.llm and cls.company_type != CompanyType.VENDOR:
+            verdict = await judge_intent(self.llm, campaign.offer, _intent_evidence(company, bundle))
+            if verdict:
+                provenance["intent_fit"] = apply_intent_verdict(cls, verdict)
+
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
         suppressed = self.db.is_suppressed(domain, contact.email)
@@ -454,6 +504,9 @@ class Pipeline:
             pain_signal=pain,
             buying_signal=buying,
             personalization_hook=build_personalization_hook(company, cls, signals),
+            intent_fit=cls.intent_buyer,
+            intent_confidence=cls.intent_confidence,
+            intent_reason=cls.intent_reason,
             research_brief=build_research_brief(company, cls, contact, signals, city=company.city,
                                                 industry=company.category, description=description),
             source=company.source,

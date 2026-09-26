@@ -105,6 +105,11 @@ class Classification(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     buyer_hits: list[str] = Field(default_factory=list)
     vendor_hits: list[str] = Field(default_factory=list)
+    # LLM intent judgment (None when the LLM is off): does this company plausibly NEED the
+    # offer, judged from its own text rather than keyword hits. Drives the type and the score.
+    intent_buyer: bool | None = None
+    intent_confidence: float = 0.0
+    intent_reason: str = ""
 
 
 class Signals(BaseModel):
@@ -176,6 +181,11 @@ class Lead(BaseModel):
     buying_signal: str | None = None
     personalization_hook: str | None = None
     research_brief: str | None = None    # consolidated per-company research summary (P5)
+    # LLM intent verdict: whether the company plausibly NEEDS the offer, judged from its own
+    # text (not keywords). None when the LLM layer is off. Surfaced in the UI and CSV-adjacent.
+    intent_fit: bool | None = None
+    intent_confidence: float = 0.0
+    intent_reason: str = ""
     source: str = ""
     source_url: str | None = None
     scraped_at: datetime = Field(default_factory=utcnow)
