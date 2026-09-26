@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-09-26
+Last updated: 2026-09-26 (E2 web-search discovery done; bento edge-glow shipped)
 
 ---
 
@@ -98,13 +98,19 @@ categories discovered nothing, silently.
   matches nothing). `pipeline.run()` derives categories when the user gave none; **explicit
   user categories always win**. Sectors → `stats.discovery_sectors`, shown as chips; form says
   categories are optional. Tests: `tests/test_discovery_targeting.py`. Live-verified on Groq.
-- **E2 — web-search discovery** ⬜ **NEXT.** Find companies by *what they do* (run the offer's
-  derived search queries via Brave/DuckDuckGo, extract company names/domains from results, feed
-  into the pipeline). This widens the universe past mapped storefronts to software firms,
-  services, online-only brands — the offer-agnostic promise. `discovery/search.WebsiteFinder`
-  today only resolves a known name→URL; E2 needs a source that discovers *from a query*.
-  `derive_discovery_targets` should also emit `search_queries` (taxonomy can hold seed query
-  templates per sector, or the LLM generates them from the offer).
+- **E2 — web-search discovery** ✅ **DONE.** `derive_discovery_targets` now also emits
+  `search_queries` — deterministic seeds (industries/sector terms × cities) + optional LLM
+  queries aimed at buyers (`llm/tasks.generate_search_queries`; queries are free text so the
+  LLM writes them directly). `discovery/web_search.WebSearchDiscovery` runs them via the shared
+  `search.search_web` (Brave when keyed, else keyless DuckDuckGo), takes each result's own
+  domain, drops directories/aggregators/social, de-dupes, yields a company (asserts only the
+  domain + a name from it; the pipeline crawls/classifies/intent-judges the rest, so
+  competitors are filtered downstream). Config: `enable_web_search_discovery` (default on),
+  `web_search_max_queries_per_run` (6); `CampaignConfig.search_queries`. Wired into `run()`
+  (derives queries when the user set none; explicit map categories still win) + `discover()`.
+  `max_companies` still caps what gets processed. Tests: `tests/test_web_search_discovery.py`
+  (off in the DB fixture to stay hermetic). ⚠️ Not yet live-verified end-to-end on real Brave
+  results — do a capped run to confirm quality before trusting it.
 - **E3 — competitor-analysis flow** ⬜. The unbuilt 2nd core job: describe a product → find
   competitors → surface their hiring/press/funding. Different flow, larger build. **CEO earlier
   said park it — reconfirm before building.**
