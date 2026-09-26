@@ -57,10 +57,10 @@ export function Faq() {
             Email us directly and we&rsquo;ll get back to you.
           </p>
           <a
-            href="mailto:ihaseebarshad10@gmail.com?subject=Qualifyr%20question"
+            href="mailto:outreach.grydin@gmail.com?subject=Qualifyr%20question"
             className="mt-4 inline-block text-sm font-medium text-brand underline-offset-4 hover:underline"
           >
-            ihaseebarshad10@gmail.com
+            outreach.grydin@gmail.com
           </a>
         </div>
       </div>
