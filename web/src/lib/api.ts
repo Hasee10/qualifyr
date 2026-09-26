@@ -81,11 +81,24 @@ export interface OutreachEvent {
   contact_email?: string
 }
 
+export interface CampaignCreate {
+  name: string
+  offer: string
+  countries: string[]
+  cities: string[]
+  target_industries: string[]
+  buyer_keywords: string[]
+  osm_categories: string[]
+  overture_categories: string[]
+  min_score: number
+  max_companies: number
+}
+
 export interface Campaign {
   campaign_id: string
   name: string
   offer: string
-  file: string
+  file: string | null
   cities: string[]
   countries: string[]
   min_score: number
@@ -198,12 +211,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail))
   }
+  // 204 No Content (e.g. DELETE) has an empty body; res.json() would throw on it.
+  if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T
   return res.json() as Promise<T>
 }
 
 export const api = {
   health: () => request<{ status: string; version: string; smtp_configured: boolean; require_approval: boolean; auth_mode: string; warmup: { enabled: boolean; start: number; step: number; max: number } }>("/health"),
   campaigns: () => request<Campaign[]>("/campaigns"),
+  createCampaign: (body: CampaignCreate) =>
+    request<{ campaign_id: string; name: string }>("/campaigns", { method: "POST", body: JSON.stringify(body) }),
+  deleteCampaign: (id: string) =>
+    request<void>(`/campaigns/${id}`, { method: "DELETE" }),
   runCampaign: (id: string, max_companies?: number) =>
     request<Progress>(`/campaigns/${id}/run`, { method: "POST", body: JSON.stringify({ max_companies }) }),
   progress: (id: string) => request<Progress>(`/campaigns/${id}/progress`),
