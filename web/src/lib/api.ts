@@ -243,6 +243,38 @@ export const api = {
     request<{ ok: boolean }>(`/leads/${leadId}/suppress`, { method: "POST", body: JSON.stringify({ reason }) }),
   exportUrl: (id: string, min_score = 70, buyers_only = true) =>
     `${API_URL}/campaigns/${id}/export?min_score=${min_score}&buyers_only=${buyers_only}`,
+  /** Download the CSV through an authenticated fetch. A plain <a href> navigation cannot send
+   * the bearer token, so the API answered "missing bearer token"; this fetches with the token,
+   * then saves the returned blob. Honours the same filters shown in the Leads table. */
+  downloadExport: async (id: string, opts: { min_score?: number; company_type?: string } = {}) => {
+    const token = await accessToken()
+    const p = new URLSearchParams()
+    if (opts.min_score !== undefined) p.set("min_score", String(opts.min_score))
+    if (opts.company_type) p.set("company_type", opts.company_type)
+    const res = await fetch(`${API_URL}/campaigns/${id}/export?${p}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      cache: "no-store",
+    })
+    if (!res.ok) {
+      if (res.status === 401 && typeof window !== "undefined") {
+        window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname)}`)
+      }
+      let detail = res.statusText
+      try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail))
+    }
+    const blob = await res.blob()
+    const cd = res.headers.get("content-disposition") ?? ""
+    const match = /filename="?([^"]+)"?/.exec(cd)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = match ? match[1] : `${id}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
   queue: (id: string) => request<Queue>(`/campaigns/${id}/outreach/queue`),
   draft: (leadId: string, step: Step) => request<Draft>(`/leads/${leadId}/drafts/${step}`),
   saveDraft: (leadId: string, step: Step, subject: string, body: string) =>

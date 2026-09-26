@@ -136,15 +136,31 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
 }
 
 export default function LeadsPage() {
-  const { campaignId, campaigns } = useCampaign()
+  const { campaignId } = useCampaign()
   const [leads, setLeads] = React.useState<Lead[]>([])
   const [type, setType] = React.useState<string>("BUYER")
   const [minScore, setMinScore] = React.useState("0")
   const [search, setSearch] = React.useState("")
   const [selected, setSelected] = React.useState<string | null>(null)
   const [page, setPage] = React.useState(1)
+  const [downloading, setDownloading] = React.useState(false)
   const pageSize = 25
-  const campaign = campaigns.find((c) => c.campaign_id === campaignId)
+
+  const downloadCsv = async () => {
+    if (!campaignId) return
+    setDownloading(true)
+    try {
+      // Match the CSV to the current filters: the active type tab (All → every type) and min score.
+      await api.downloadExport(campaignId, {
+        min_score: Number(minScore) || 0,
+        company_type: type === "ALL" ? undefined : type,
+      })
+    } catch (e) {
+      alert(`Download failed: ${(e as Error).message}`)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const load = React.useCallback(() => {
     if (!campaignId) return
@@ -170,9 +186,9 @@ export default function LeadsPage() {
           <p className="text-muted-foreground">Every company processed, with the reason behind its classification and score.</p>
         </div>
         {campaignId && (
-          <a href={api.exportUrl(campaignId, campaign?.min_score ?? 70)}>
-            <Button variant="outline"><Download data-icon="inline-start" /> Download qualified CSV</Button>
-          </a>
+          <Button variant="outline" disabled={downloading} onClick={downloadCsv}>
+            <Download data-icon="inline-start" /> {downloading ? "Preparing…" : "Download CSV"}
+          </Button>
         )}
       </div>
 

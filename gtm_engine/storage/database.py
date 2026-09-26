@@ -383,6 +383,22 @@ class Database:
         row = self.conn.execute("SELECT config_json FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
         return json.loads(row["config_json"]) if row else None
 
+    def campaign_counts(self, campaign_id: str, min_score: int) -> dict:
+        """Lead tallies for a campaign in one aggregate query, computed in Postgres from the
+        indexed columns rather than by loading and JSON-parsing every Lead in Python. This is
+        what /campaigns needs per campaign for the dropdown, and doing it in SQL keeps that
+        list fast no matter how many leads a campaign accumulates."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS leads, "
+            "COUNT(*) FILTER (WHERE company_type = 'BUYER') AS buyers, "
+            "COUNT(*) FILTER (WHERE company_type = 'BUYER' AND total_score >= %s) AS qualified, "
+            "COUNT(*) FILTER (WHERE outreach_ready = 1) AS outreach_ready "
+            "FROM leads WHERE campaign_id = %s",
+            (min_score, campaign_id),
+        ).fetchone()
+        return {"leads": row["leads"], "buyers": row["buyers"],
+                "qualified": row["qualified"], "outreach_ready": row["outreach_ready"]}
+
     def campaign_of_lead(self, lead_id: str) -> str | None:
         """The campaign a lead belongs to, or None if the lead is unknown. Used to scope
         lead-level routes to the campaign's owner without deserialising the whole Lead."""

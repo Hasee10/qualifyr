@@ -218,8 +218,7 @@ def health() -> dict:
 
 
 def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict:
-    leads = db.list_leads(c.campaign_id)
-    buyers = [l for l in leads if l.company_type == CompanyType.BUYER]
+    counts = db.campaign_counts(c.campaign_id, c.min_score)
     last_run = (db.list_runs(c.campaign_id) or [None])[0]
     # The offer's generated need-terms the last run actually used, so the UI can show what
     # the LLM derived rather than leaving it invisible in the logs.
@@ -234,9 +233,9 @@ def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict
         "cities": c.geography.cities, "countries": c.geography.countries,
         "provinces": c.geography.provinces, "relevance_keywords": relevance_keywords,
         "min_score": c.min_score, "max_companies": c.max_companies,
-        "leads": len(leads), "buyers": len(buyers),
-        "qualified": sum(1 for l in buyers if l.total_score >= c.min_score),
-        "outreach_ready": sum(1 for l in leads if l.outreach_ready),
+        "leads": counts["leads"], "buyers": counts["buyers"],
+        "qualified": counts["qualified"],
+        "outreach_ready": counts["outreach_ready"],
         "last_run": last_run,
         "live": db.get_run_progress(c.campaign_id),
     }
@@ -622,10 +621,14 @@ def act_on_referral(lead_id: str, req: ReferralAction) -> dict:
 
 
 @app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(require_campaign_access)])
-def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True) -> FileResponse:
+def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True,
+           company_type: str | None = None) -> FileResponse:
+    # The CSV honours the same filters the Leads table shows. `company_type` (BUYER/UNKNOWN/
+    # VENDOR) is preferred when given; `buyers_only` is the older default for callers that
+    # don't pass one. None means "every type at or above min_score".
+    ct = company_type or (CompanyType.BUYER.value if buyers_only else None)
     db = _db()
-    rows = db.list_leads(campaign_id, min_score=min_score,
-                         company_type=CompanyType.BUYER.value if buyers_only else None)
+    rows = db.list_leads(campaign_id, min_score=min_score, company_type=ct)
     db.close()
     # Scratch on serverless: the CSV only has to survive long enough to be streamed back.
     export_dir = runtime_dir() / "exports" if is_serverless() else _settings.export_dir
