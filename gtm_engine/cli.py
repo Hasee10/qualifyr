@@ -91,7 +91,11 @@ def _sheets(args: argparse.Namespace) -> int:
     leads = db.list_leads(args.campaign_id, min_score=None if args.all else args.min_score,
                           company_type=None if args.all else CompanyType.BUYER.value)
     db.close()
-    info = sheets_export.export_leads(leads, args.campaign_id, tab=args.tab)
+    try:
+        info = sheets_export.export_leads(leads, args.campaign_id, tab=args.tab)
+    except Exception as exc:  # noqa: BLE001 - the Sheets mirror is optional; report cleanly, don't dump a traceback
+        print(f"sheets export skipped: {exc}", file=sys.stderr)
+        return 1
     print(f"wrote {info['rows']} leads -> {info['url']} (tab {info['tab']})")
     return 0
 

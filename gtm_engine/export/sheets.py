@@ -31,13 +31,42 @@ def configured() -> bool:
 
 
 def access_token() -> str:
-    """Service-account bearer token via google-auth (optional extra `sheets`)."""
+    """Service-account bearer token via google-auth (optional extra `sheets`).
+
+    Turns the three ways this fails into one clear, actionable message each, instead of a raw
+    google-auth traceback: unparseable JSON, a key missing required fields, and — the common
+    one — Google rejecting the identity ("invalid_grant: account not found"), which means the
+    service account was deleted or the key is stale and must be recreated."""
+    try:
+        info = json.loads(os.environ["GTM_SHEETS_CREDENTIALS_JSON"])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "GTM_SHEETS_CREDENTIALS_JSON is not valid JSON — paste the service-account key "
+            "file's full contents into the secret."
+        ) from exc
+
     from google.oauth2 import service_account  # imported lazily: optional dependency
     from google.auth.transport.requests import Request
+    from google.auth.exceptions import RefreshError
 
-    info = json.loads(os.environ["GTM_SHEETS_CREDENTIALS_JSON"])
-    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-    creds.refresh(Request())
+    try:
+        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"GTM_SHEETS_CREDENTIALS_JSON is missing required service-account fields: {exc}"
+        ) from exc
+    try:
+        creds.refresh(Request())
+    except RefreshError as exc:
+        email = info.get("client_email", "<unknown>")
+        project = info.get("project_id", "<unknown>")
+        raise RuntimeError(
+            f"Google rejected the Sheets service account '{email}' (project '{project}'): "
+            f"{exc.args[0] if exc.args else exc}. The key is stale or the account was deleted. "
+            "Recreate the service account and a JSON key in Google Cloud, enable the Google "
+            "Sheets API, share the spreadsheet with that email as Editor, then update the "
+            "GTM_SHEETS_CREDENTIALS_JSON secret."
+        ) from exc
     return creds.token
 
 

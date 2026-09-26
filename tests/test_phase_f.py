@@ -96,3 +96,36 @@ def test_sheets_status_and_guard(client, monkeypatch):
     monkeypatch.delenv("GTM_SHEETS_SPREADSHEET_ID", raising=False)
     assert c.get("/sheets/status").json()["configured"] is False
     assert c.post("/campaigns/one/export/sheets").status_code == 400
+
+
+def test_sheets_access_token_wraps_bad_json_cleanly(monkeypatch):
+    """A malformed credentials secret becomes one actionable line, not a JSONDecodeError."""
+    import pytest
+    from gtm_engine.export.sheets import access_token
+    monkeypatch.setenv("GTM_SHEETS_CREDENTIALS_JSON", "{not json")
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        access_token()
+
+
+def test_sheets_access_token_wraps_google_refresh_error(monkeypatch):
+    """The live failure ('account not found') surfaces as an actionable RuntimeError naming the
+    service account, not a raw google-auth traceback."""
+    import pytest
+    from google.oauth2 import service_account
+    from google.auth.exceptions import RefreshError
+    from gtm_engine.export import sheets as sheets_export
+
+    monkeypatch.setenv("GTM_SHEETS_CREDENTIALS_JSON",
+                       '{"client_email": "svc@proj.iam.gserviceaccount.com", "project_id": "proj"}')
+
+    class _Creds:
+        token = None
+        def refresh(self, _request):
+            raise RefreshError("invalid_grant: Invalid grant: account not found")
+
+    # access_token() imports service_account lazily and calls this classmethod, so patch it on
+    # the real module.
+    monkeypatch.setattr(service_account.Credentials, "from_service_account_info",
+                        classmethod(lambda cls, info, scopes=None: _Creds()))
+    with pytest.raises(RuntimeError, match="svc@proj.iam.gserviceaccount.com.*account not found"):
+        sheets_export.access_token()
