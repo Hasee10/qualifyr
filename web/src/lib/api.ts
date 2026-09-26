@@ -32,6 +32,7 @@ export interface Lead {
   phone: string | null
   linkedin_or_public_profile_url: string | null
   personalization_hook: string | null
+  research_brief?: string | null
   buying_signal: string | null
   pain_signal: string | null
   source: string

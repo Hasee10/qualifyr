@@ -21,6 +21,7 @@ from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
 from gtm_engine.enrichment.github_signals import github_activity
 from gtm_engine.enrichment.job_signals import job_board_signals
 from gtm_engine.enrichment.press_signals import press_mentions
+from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
@@ -453,6 +454,8 @@ class Pipeline:
             pain_signal=pain,
             buying_signal=buying,
             personalization_hook=build_personalization_hook(company, cls, signals),
+            research_brief=build_research_brief(company, cls, contact, signals, city=company.city,
+                                                industry=company.category, description=description),
             source=company.source,
             source_url=company.source_url,
             outreach_ready=ready,

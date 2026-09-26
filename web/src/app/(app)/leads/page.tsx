@@ -53,6 +53,12 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
               <ReplyLabelBadge label={lead.reply_label} />
             </div>
             <ReviewButtons leadId={lead.lead_id} verdict={lead.review_verdict} onChange={(v) => setLead({ ...lead, review_verdict: v })} />
+            {lead.research_brief && (
+              <section>
+                <h3 className="mb-1 text-sm font-semibold">Research brief</h3>
+                <p className="whitespace-pre-line rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed">{lead.research_brief}</p>
+              </section>
+            )}
             {lead.intent_signals && lead.intent_signals.length > 0 && (
               <section>
                 <h3 className="mb-1 text-sm font-semibold">Intent & requirements</h3>

@@ -175,6 +175,7 @@ class Lead(BaseModel):
     pain_signal: str | None = None
     buying_signal: str | None = None
     personalization_hook: str | None = None
+    research_brief: str | None = None    # consolidated per-company research summary (P5)
     source: str = ""
     source_url: str | None = None
     scraped_at: datetime = Field(default_factory=utcnow)
