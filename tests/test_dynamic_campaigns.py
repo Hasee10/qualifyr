@@ -63,7 +63,7 @@ def test_create_list_and_delete_campaign(api_client):
 
     listed = api_client.get("/campaigns").json()
     row = next(c for c in listed if c["campaign_id"] == cid)
-    assert row["file"] is None and row["cities"] == ["lahore"] and row["max_companies"] == 40
+    assert row["file"] is None and row["cities"] == ["Lahore"] and row["max_companies"] == 40
 
     # A second campaign with the same name gets a distinct id.
     r2 = api_client.post("/campaigns", json=body)
