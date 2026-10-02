@@ -66,6 +66,13 @@ def _online_presence_section(op: OnlinePresence | None) -> str | None:
         social.append("Instagram")
     if social:
         parts.append(f"social: {', '.join(social)}")
+    if op.google_rating is not None:
+        review_part = f"Google rating {op.google_rating:.1f}/5"
+        if op.google_review_count:
+            review_part += f" ({op.google_review_count} reviews)"
+        parts.append(review_part)
+    if op.opening_hours_days is not None:
+        parts.append(f"open {op.opening_hours_days} days/week")
     if not parts:
         return "Online presence: no ordering channel, app, or delivery-platform listing detected."
     line = "Online presence: " + "; ".join(parts) + "."

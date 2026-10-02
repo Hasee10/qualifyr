@@ -229,6 +229,7 @@ def _fallback_pitch(offer: str, company: str, online_gaps: list[str],
         "no_delivery_platform": "is not listed on any delivery platform",
         "no_social": "has no social media presence",
         "no_website": "has no website",
+        "low_google_visibility": "has very few Google reviews",
     }
     parts: list[str] = []
     for gap in online_gaps:

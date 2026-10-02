@@ -23,7 +23,9 @@ from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
 from gtm_engine.enrichment.github_signals import github_activity
 from gtm_engine.enrichment.job_signals import job_board_signals
 from gtm_engine.enrichment.press_signals import press_mentions
+from gtm_engine.enrichment.hours import parse_opening_hours
 from gtm_engine.enrichment.online_presence import audit_online_presence, online_gap_labels
+from gtm_engine.enrichment.places import places_enrichment
 from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
@@ -222,6 +224,7 @@ class Pipeline:
         self._job_board_budget = settings.job_board_max_companies_per_run
         self._github_budget = settings.github_max_companies_per_run
         self._press_budget = settings.press_max_companies_per_run
+        self._places_budget = settings.places_max_companies_per_run
         self.ppra = PPRATenders(fetcher, settings)
         self.llm = build_llm(settings.llm_provider, settings.llm_model) if settings.enable_llm else None
         if self.llm:
@@ -365,6 +368,35 @@ class Pipeline:
         quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
         online_presence = audit_online_presence(snapshot, company.name, signals.technologies)
+
+        # Opening hours from OSM discovery tags
+        osm_hours = company.extra.get("opening_hours")
+        if osm_hours:
+            parsed = parse_opening_hours(osm_hours)
+            if parsed:
+                online_presence.opening_hours_raw = parsed.raw
+                online_presence.opening_hours_days = parsed.days_open
+
+        # Google Places enrichment (rating, review count, hours) — budget-limited
+        if (self.settings.enable_places_enrichment
+                and self.settings.google_places_api_key
+                and cls.company_type == CompanyType.BUYER
+                and self._places_budget > 0):
+            self._places_budget -= 1
+            places = await places_enrichment(
+                self.fetcher, company.name,
+                company.city or "Pakistan",
+                company.country or "Pakistan",
+                self.settings.google_places_api_key,
+            )
+            if places:
+                online_presence.google_rating = places.rating
+                online_presence.google_review_count = places.user_rating_count
+                online_presence.google_place_id = places.place_id
+                if places.opening_hours and not online_presence.opening_hours_raw:
+                    online_presence.opening_hours_raw = str(places.opening_hours)
+                provenance["google_places"] = f"place_id={places.place_id}, rating={places.rating}"
+
         # A site that does not belong to this company cannot supply its contact details:
         # its email, phone and staff names belong to somebody else.
         trust_site = snapshot.reachable and not quality.website_mismatch

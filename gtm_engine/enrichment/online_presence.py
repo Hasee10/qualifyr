@@ -142,6 +142,8 @@ def _compute_online_gap(presence: OnlinePresence) -> int:
         gap -= 2
     if presence.has_facebook or presence.has_instagram:
         gap -= 1
+    if presence.google_review_count and presence.google_review_count > 50:
+        gap -= 1
     return max(0, gap)
 
 
@@ -208,4 +210,6 @@ def online_gap_labels(op: OnlinePresence) -> list[str]:
         gaps.append("no_mobile_app")
     if not op.has_facebook and not op.has_instagram:
         gaps.append("no_social")
+    if op.google_place_id and op.google_review_count is not None and op.google_review_count < 10:
+        gaps.append("low_google_visibility")
     return gaps

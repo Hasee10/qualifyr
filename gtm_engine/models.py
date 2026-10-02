@@ -143,6 +143,11 @@ class OnlinePresence(BaseModel):
     instagram_url: str | None = None
     delivery_platforms: list[str] = Field(default_factory=list)  # foodpanda, daraz, bykea, ...
     delivery_model: str | None = None               # none / own / third_party / phone_only
+    google_rating: float | None = None              # 1.0-5.0 from Google Places
+    google_review_count: int | None = None
+    google_place_id: str | None = None
+    opening_hours_raw: str | None = None            # OSM-format opening hours string
+    opening_hours_days: int | None = None            # days per week the business is open
     online_gap_score: int = 0                        # 0-25: higher = bigger gap = better prospect
     notes: list[str] = Field(default_factory=list)
 

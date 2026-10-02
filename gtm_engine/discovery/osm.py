@@ -75,7 +75,10 @@ def element_to_company(el: dict, city: str, country: str, category_label: str | 
         category=category or category_label,
         source="osm",
         source_url=f"https://www.openstreetmap.org/{osm_type}/{osm_id}" if osm_type and osm_id else None,
-        extra={"osm_tags": tags, "brand": tags.get("brand"), "addr_city": tags.get("addr:city"), "lat": el.get("lat") or (el.get("center") or {}).get("lat"),
+        extra={"osm_tags": tags, "brand": tags.get("brand"),
+               "opening_hours": tags.get("opening_hours"),
+               "addr_city": tags.get("addr:city"),
+               "lat": el.get("lat") or (el.get("center") or {}).get("lat"),
                "lon": el.get("lon") or (el.get("center") or {}).get("lon")},
     )
 
