@@ -36,11 +36,12 @@ class GeographyConfig(BaseModel):
 class ScoringWeights(BaseModel):
     """Maximum points per dimension. Must sum to 100."""
 
-    icp_fit: int = 50
+    icp_fit: int = 40
     company_quality: int = 15
     buyer_evidence: int = 15
     contact_quality: int = 10
     buying_signals: int = 10
+    online_gap: int = 10
 
     def total(self) -> int:
         return (
@@ -49,6 +50,7 @@ class ScoringWeights(BaseModel):
             + self.buyer_evidence
             + self.contact_quality
             + self.buying_signals
+            + self.online_gap
         )
 
 

@@ -9,15 +9,10 @@ from datetime import datetime, timezone
 from gtm_engine.config.schema import CampaignConfig
 from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus,
-    Priority, ScoreBreakdown, Signals,
+    OnlinePresence, Priority, ScoreBreakdown, Signals,
 )
 
 
-# sig.buying categories that also carry their own explicit, differentiated bonus below
-# (intent's tender/rfq split, job_openings' growth-role weighting, ...). Counting these
-# again in the generic "2.5 per category present" sum double-pays them - measured, a
-# press mention alone scored 6 instead of the intended 3. news_mention and hiring have
-# no second bonus and stay in the generic count.
 _EXPLICITLY_SCORED_BUYING_KEYS = frozenset({"intent", "job_openings", "github_activity", "press_mention"})
 
 
@@ -28,6 +23,7 @@ class ScoreInputs:
     quality: CompanyQuality
     contact: Contact
     signals: Signals
+    online_presence: OnlinePresence | None = None
 
 
 def _scale(points: float, max_points: int, default_max: int) -> int:
@@ -180,7 +176,25 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
         reasons.append("pain signals: " + ", ".join(sig.pain))
     bs_pts = _scale(bs, w.buying_signals, 10)
 
-    total = icp_pts + cq_pts + be_pts + cp_pts + bs_pts
+    # --- Online gap (default 10): the inverse-digital-maturity signal.
+    # A company with high buyer evidence but no ordering channel is the ideal prospect.
+    og = 0.0
+    op = inputs.online_presence
+    if op:
+        og = op.online_gap_score * 10 / 25  # normalise 0-25 → 0-10
+        if op.online_gap_score >= 18:
+            reasons.append("online gap: no ordering channel detected — strong candidate for a digital solution")
+        elif op.online_gap_score >= 10:
+            reasons.append("online gap: limited digital presence — room to improve")
+        elif op.online_gap_score > 0:
+            reasons.append("online gap: some digital channels present")
+        else:
+            reasons.append("online gap: mature digital presence (e-commerce, app, delivery platforms)")
+        if op.delivery_platforms:
+            reasons.append(f"listed on: {', '.join(op.delivery_platforms)}")
+    og_pts = _scale(og, w.online_gap, 10)
+
+    total = icp_pts + cq_pts + be_pts + cp_pts + bs_pts + og_pts
 
     # --- Routing
     r = campaign.routing
@@ -204,8 +218,8 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
 
     return ScoreBreakdown(
         icp_fit=icp_pts, company_quality=cq_pts, buyer_evidence=be_pts,
-        contact_quality=cp_pts, buying_signals=bs_pts, total=int(total),
-        reasons=reasons, priority=priority,
+        contact_quality=cp_pts, buying_signals=bs_pts, online_gap=og_pts,
+        total=int(total), reasons=reasons, priority=priority,
     )
 
 

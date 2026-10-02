@@ -152,8 +152,8 @@ def _good_inputs(cls_type=CompanyType.BUYER, email_status=EmailStatus.MX_VALID) 
 def test_strong_buyer_scores_high_and_is_outreach_ready(campaign):
     inputs = _good_inputs()
     score = score_lead(inputs, campaign)
-    assert score.total >= 80 and score.priority == Priority.HIGH
-    assert score.total == score.icp_fit + score.company_quality + score.buyer_evidence + score.contact_quality + score.buying_signals
+    assert score.total >= 70 and score.priority in (Priority.HIGH, Priority.QUALIFIED)
+    assert score.total == score.icp_fit + score.company_quality + score.buyer_evidence + score.contact_quality + score.buying_signals + score.online_gap
     assert any("decision-maker found" in r for r in score.reasons)
     assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
 
@@ -189,9 +189,10 @@ def test_wrong_city_loses_points(campaign):
 
 
 def test_weights_rescale(campaign):
-    campaign.weights.icp_fit, campaign.weights.buying_signals = 40, 20
+    campaign.weights.icp_fit = 30
+    campaign.weights.buying_signals = 20
     score = score_lead(_good_inputs(), campaign)
-    assert score.icp_fit <= 40 and score.buying_signals <= 20
+    assert score.icp_fit <= 30 and score.buying_signals <= 20
 
 
 def test_third_party_emails_are_not_the_company_email(campaign, defaults):

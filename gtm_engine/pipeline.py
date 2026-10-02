@@ -23,17 +23,18 @@ from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
 from gtm_engine.enrichment.github_signals import github_activity
 from gtm_engine.enrichment.job_signals import job_board_signals
 from gtm_engine.enrichment.press_signals import press_mentions
+from gtm_engine.enrichment.online_presence import audit_online_presence, online_gap_labels
 from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
-from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords, judge_intent
+from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords, generate_pitch_angle, judge_intent
 from gtm_engine.qualification.relevance import relevant_terms
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Lead,
-    SequenceStatus, Signals, new_id,
+    OnlinePresence, SequenceStatus, Signals, new_id,
 )
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
 from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lead
@@ -363,6 +364,7 @@ class Pipeline:
         cls = classifier.classify(bundle)
         quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
+        online_presence = audit_online_presence(snapshot, company.name, signals.technologies)
         # A site that does not belong to this company cannot supply its contact details:
         # its email, phone and staff names belong to somebody else.
         trust_site = snapshot.reachable and not quality.website_mismatch
@@ -513,7 +515,7 @@ class Pipeline:
             if verdict:
                 provenance["intent_fit"] = apply_intent_verdict(cls, verdict)
 
-        score = score_lead(ScoreInputs(company, cls, quality, contact, signals), campaign)
+        score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
         suppressed = await self._db_call(self.db.is_suppressed, domain, contact.email)
         if suppressed:
@@ -521,6 +523,13 @@ class Pipeline:
             stats.suppressed += 1
 
         buying, pain = summarize(signals)
+        gaps = online_gap_labels(online_presence)
+        pitch = await generate_pitch_angle(
+            self.llm, campaign.offer, company.name,
+            online_gaps=gaps,
+            pain_signals=list(signals.pain.keys()) if signals.pain else [],
+            buying_signals=list(signals.buying.keys()) if signals.buying else [],
+        )
         description = bundle.description or (about.text[:300] if about else None) or (home.text[:300] if home else None)
         lead = Lead(
             campaign_id=campaign.campaign_id,
@@ -557,12 +566,14 @@ class Pipeline:
             pain_signal=pain,
             buying_signal=buying,
             personalization_hook=build_personalization_hook(company, cls, signals),
+            pitch_angle=pitch,
             intent_fit=cls.intent_buyer,
             intent_confidence=cls.intent_confidence,
             intent_reason=cls.intent_reason,
+            online_presence=online_presence.model_dump(mode="json"),
             research_brief=build_research_brief(company, cls, contact, signals, city=company.city,
                                                 industry=company.category, description=description,
-                                                quality=quality),
+                                                quality=quality, online_presence=online_presence),
             source=company.source,
             source_url=company.source_url,
             outreach_ready=ready,

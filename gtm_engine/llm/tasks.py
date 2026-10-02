@@ -184,6 +184,67 @@ async def classify_reply(llm: LLM | None, subject: str, body: str) -> str | None
     return None
 
 
+async def generate_pitch_angle(llm: LLM | None, offer: str, company: str,
+                               online_gaps: list[str], pain_signals: list[str],
+                               buying_signals: list[str]) -> str:
+    """Map the seller's offer + the prospect's observed gaps/pain to a specific pitch line.
+
+    The deterministic fallback always runs: the LLM only polishes it into a natural sentence.
+    Every pitch is grounded — it names what was observed, never invents a need."""
+    deterministic = _fallback_pitch(offer, company, online_gaps, pain_signals, buying_signals)
+    if llm is None or not offer.strip() or not (online_gaps or pain_signals or buying_signals):
+        return deterministic
+    evidence = "\n".join([
+        f"- Online gaps: {', '.join(online_gaps)}" if online_gaps else "",
+        f"- Pain signals: {', '.join(pain_signals)}" if pain_signals else "",
+        f"- Buying signals: {', '.join(buying_signals)}" if buying_signals else "",
+    ]).strip()
+    system = (
+        "You write a single short pitch sentence (max 30 words) for a B2B sales email. "
+        "The sentence must map the seller's product to the prospect's specific observed gap or pain. "
+        f"{_NO_OUTSIDE_FACTS} No flattery, no filler, no claims about ROI or percentages."
+    )
+    user = (f"Seller offer: {offer!r}\nProspect: {company}\n\nObserved evidence:\n{evidence}\n\n"
+            "Write ONE sentence naming which specific gap or pain the offer addresses and how.")
+    try:
+        raw = (await llm.complete(system, user, max_tokens=200)).strip()
+        lines = [l.strip('" ') for l in raw.splitlines() if l.strip()]
+        sentence = lines[-1] if lines else ""
+    except Exception as exc:  # noqa: BLE001
+        log.debug("llm pitch generation failed: %s", exc)
+        return deterministic
+    if not sentence or len(sentence.split()) > 35 or len(sentence) < 15:
+        return deterministic
+    return sentence
+
+
+def _fallback_pitch(offer: str, company: str, online_gaps: list[str],
+                    pain_signals: list[str], buying_signals: list[str]) -> str:
+    """Deterministic pitch: picks the strongest gap/pain and states it plainly."""
+    gap_phrases = {
+        "no_ecommerce": "has no online ordering channel",
+        "no_cart": "has a website but no cart or checkout",
+        "no_mobile_app": "has no mobile app for customers",
+        "no_whatsapp_ordering": "does not offer WhatsApp ordering",
+        "no_delivery_platform": "is not listed on any delivery platform",
+        "no_social": "has no social media presence",
+        "no_website": "has no website",
+    }
+    parts: list[str] = []
+    for gap in online_gaps:
+        phrase = gap_phrases.get(gap, gap.replace("_", " "))
+        parts.append(phrase)
+        if len(parts) >= 2:
+            break
+    if pain_signals:
+        parts.append(f"shows pain: {pain_signals[0]}")
+    if not parts and buying_signals:
+        parts.append(f"{buying_signals[0]}")
+    if not parts:
+        return f"{company} could benefit from {offer}."
+    return f"{company} {parts[0]}" + (f" and {parts[1]}" if len(parts) > 1 else "") + f" — {offer} addresses this."
+
+
 async def draft_hook(llm: LLM | None, company: str, facts: list[str]) -> str | None:
     """One natural sentence from observed facts only. Every fact keyword must survive."""
     if llm is None or not facts:

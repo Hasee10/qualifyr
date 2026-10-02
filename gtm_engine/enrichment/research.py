@@ -10,7 +10,7 @@ The LLM is never needed here — the point is a trustworthy summary, not prose."
 
 from __future__ import annotations
 
-from gtm_engine.models import Classification, CompanyQuality, Contact, DiscoveredCompany, EmailStatus, Signals
+from gtm_engine.models import Classification, CompanyQuality, Contact, DiscoveredCompany, EmailStatus, OnlinePresence, Signals
 
 
 def _sentence(parts: list[str]) -> str:
@@ -46,10 +46,43 @@ def _web_presence(quality: CompanyQuality | None) -> str | None:
     return line
 
 
+def _online_presence_section(op: OnlinePresence | None) -> str | None:
+    if op is None:
+        return None
+    parts: list[str] = []
+    if op.has_ecommerce_site:
+        detail = f"on {op.ecommerce_platform}" if op.ecommerce_platform else "detected"
+        parts.append(f"e-commerce site ({detail}{'with cart/checkout' if op.has_cart else ', no cart found'})")
+    if op.has_mobile_app:
+        parts.append("mobile app available")
+    if op.has_whatsapp_ordering:
+        parts.append("WhatsApp ordering")
+    if op.delivery_platforms:
+        parts.append(f"on {', '.join(op.delivery_platforms)}")
+    social: list[str] = []
+    if op.has_facebook:
+        social.append("Facebook")
+    if op.has_instagram:
+        social.append("Instagram")
+    if social:
+        parts.append(f"social: {', '.join(social)}")
+    if not parts:
+        return "Online presence: no ordering channel, app, or delivery-platform listing detected."
+    line = "Online presence: " + "; ".join(parts) + "."
+    if op.delivery_model and op.delivery_model != "unknown":
+        line += f" Delivery model: {op.delivery_model}."
+    if op.online_gap_score >= 18:
+        line += " Strong candidate — significant digital gap."
+    elif op.online_gap_score >= 10:
+        line += " Some digital presence but room to grow."
+    return line
+
+
 def build_research_brief(company: DiscoveredCompany, cls: Classification, contact: Contact,
                          signals: Signals, *, city: str | None = None,
                          industry: str | None = None, description: str | None = None,
-                         quality: CompanyQuality | None = None) -> str:
+                         quality: CompanyQuality | None = None,
+                         online_presence: OnlinePresence | None = None) -> str:
     """A grounded per-company account covering the Section-6 research checklist: what the company
     is, its web presence, whether it plausibly needs the offer (intent), the buying signals, the
     technologies, and who to talk to — every line built from observed fields, nothing invented."""
@@ -68,6 +101,10 @@ def build_research_brief(company: DiscoveredCompany, cls: Classification, contac
     web = _web_presence(quality)
     if web:
         lines.append(web)
+
+    op_line = _online_presence_section(online_presence)
+    if op_line:
+        lines.append(op_line)
 
     # Whether it plausibly needs the offer — the intent verdict leads when the LLM judged it.
     if cls.intent_buyer is not None:

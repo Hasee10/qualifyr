@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -18,13 +18,13 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-class CompanyType(StrEnum):
+class CompanyType(str, Enum):
     BUYER = "BUYER"
     VENDOR = "VENDOR"
     UNKNOWN = "UNKNOWN"
 
 
-class EmailStatus(StrEnum):
+class EmailStatus(str, Enum):
     NONE = "none"                 # no email found
     INVALID = "invalid"           # failed syntax or domain has no MX
     UNVERIFIED = "unverified"     # syntax ok, MX not checked yet
@@ -36,7 +36,7 @@ class EmailStatus(StrEnum):
     BOUNCED = "bounced"
 
 
-class SequenceStatus(StrEnum):
+class SequenceStatus(str, Enum):
     NOT_QUEUED = "not_queued"
     QUEUED = "queued"
     EMAIL_1_SENT = "email_1_sent"
@@ -49,7 +49,7 @@ class SequenceStatus(StrEnum):
     SUPPRESSED = "suppressed"
 
 
-class Priority(StrEnum):
+class Priority(str, Enum):
     HIGH = "high_priority"
     QUALIFIED = "qualified"
     REVIEW = "review"
@@ -126,6 +126,27 @@ class Signals(BaseModel):
     press_mentions: list[dict] = Field(default_factory=list)    # [{title,url,date,kind}]
 
 
+class OnlinePresence(BaseModel):
+    """Digital-maturity audit: what ordering/delivery channels a business has.
+    The inverse (high potential + low digital maturity) is the core ranking signal."""
+
+    has_ecommerce_site: bool = False
+    has_cart: bool = False
+    ecommerce_platform: str | None = None          # shopify / woocommerce / custom / None
+    has_mobile_app: bool = False
+    app_store_url: str | None = None
+    has_whatsapp_ordering: bool = False
+    whatsapp_number: str | None = None
+    has_facebook: bool = False
+    facebook_url: str | None = None
+    has_instagram: bool = False
+    instagram_url: str | None = None
+    delivery_platforms: list[str] = Field(default_factory=list)  # foodpanda, daraz, bykea, ...
+    delivery_model: str | None = None               # none / own / third_party / phone_only
+    online_gap_score: int = 0                        # 0-25: higher = bigger gap = better prospect
+    notes: list[str] = Field(default_factory=list)
+
+
 class CompanyQuality(BaseModel):
     reachable: bool = False
     https: bool = False
@@ -146,6 +167,7 @@ class ScoreBreakdown(BaseModel):
     buyer_evidence: int = 0
     contact_quality: int = 0
     buying_signals: int = 0
+    online_gap: int = 0
     total: int = 0
     reasons: list[str] = Field(default_factory=list)
     priority: Priority = Priority.REJECT
@@ -181,6 +203,8 @@ class Lead(BaseModel):
     buying_signal: str | None = None
     personalization_hook: str | None = None
     research_brief: str | None = None    # consolidated per-company research summary (P5)
+    online_presence: dict | None = None  # OnlinePresence.model_dump() — digital-maturity audit
+    pitch_angle: str | None = None       # module→pain pitch (specific to this lead's gaps)
     # LLM intent verdict: whether the company plausibly NEEDS the offer, judged from its own
     # text (not keywords). None when the LLM layer is off. Surfaced in the UI and CSV-adjacent.
     intent_fit: bool | None = None

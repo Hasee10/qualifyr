@@ -25,7 +25,7 @@ import smtplib
 import socket
 import string
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from typing import Protocol
 
 import dns.asyncresolver
@@ -35,7 +35,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 
-class VerifyStatus(StrEnum):
+class VerifyStatus(str, Enum):
     DELIVERABLE = "deliverable"
     RISKY = "risky"
     INVALID = "invalid"
