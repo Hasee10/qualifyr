@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -308,8 +308,8 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
     return {"campaign_id": cfg.campaign_id, "name": cfg.name}
 
 
-@app.delete("/campaigns/{campaign_id}", status_code=204, dependencies=[Depends(require_campaign_access)])
-def delete_campaign(campaign_id: str) -> None:
+@app.delete("/campaigns/{campaign_id}", status_code=204, response_class=Response, dependencies=[Depends(require_campaign_access)])
+def delete_campaign(campaign_id: str) -> Response:
     """Delete a user-created campaign. File-based example campaigns cannot be deleted here."""
     if campaign_id in _campaign_files():
         raise HTTPException(400, "this is a file-based example campaign; delete its YAML instead")
@@ -319,6 +319,7 @@ def delete_campaign(campaign_id: str) -> None:
         raise HTTPException(404, f"campaign '{campaign_id}' not found")
     db.delete_campaign(campaign_id)
     db.close()
+    return Response(status_code=204)
 
 
 @app.get("/campaigns/{campaign_id}", dependencies=[Depends(require_campaign_access)])
