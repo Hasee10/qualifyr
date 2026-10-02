@@ -249,37 +249,34 @@ def test_ecommerce_without_cart_shows_no_cart():
 
 # ── pitch angle (deterministic fallback) ───────────────────────────────
 
-def test_pitch_fallback_no_llm():
-    import asyncio
+async def test_pitch_fallback_no_llm():
     from gtm_engine.llm.tasks import generate_pitch_angle
-    pitch = asyncio.get_event_loop().run_until_complete(
-        generate_pitch_angle(None, "inventory software", "Test Store",
-                             online_gaps=["no_ecommerce", "no_mobile_app"],
-                             pain_signals=[], buying_signals=[])
+    pitch = await generate_pitch_angle(
+        None, "inventory software", "Test Store",
+        online_gaps=["no_ecommerce", "no_mobile_app"],
+        pain_signals=[], buying_signals=[],
     )
     assert "Test Store" in pitch
     assert "no online ordering" in pitch or "inventory software" in pitch
 
 
-def test_pitch_fallback_with_pain():
-    import asyncio
+async def test_pitch_fallback_with_pain():
     from gtm_engine.llm.tasks import generate_pitch_angle
-    pitch = asyncio.get_event_loop().run_until_complete(
-        generate_pitch_angle(None, "delivery app", "Corner Shop",
-                             online_gaps=["no_delivery_platform"],
-                             pain_signals=["customer_service_load"],
-                             buying_signals=[])
+    pitch = await generate_pitch_angle(
+        None, "delivery app", "Corner Shop",
+        online_gaps=["no_delivery_platform"],
+        pain_signals=["customer_service_load"],
+        buying_signals=[],
     )
     assert "Corner Shop" in pitch
     assert "delivery" in pitch.lower() or "pain" in pitch.lower()
 
 
-def test_pitch_fallback_no_gaps_no_signals():
-    import asyncio
+async def test_pitch_fallback_no_gaps_no_signals():
     from gtm_engine.llm.tasks import generate_pitch_angle
-    pitch = asyncio.get_event_loop().run_until_complete(
-        generate_pitch_angle(None, "POS system", "Big Mart",
-                             online_gaps=[], pain_signals=[], buying_signals=[])
+    pitch = await generate_pitch_angle(
+        None, "POS system", "Big Mart",
+        online_gaps=[], pain_signals=[], buying_signals=[],
     )
     assert "Big Mart" in pitch
     assert "POS system" in pitch
