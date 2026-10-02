@@ -63,7 +63,7 @@ def _detect_ecommerce(snapshot: SiteSnapshot) -> tuple[bool, bool, str | None]:
 
 def _detect_whatsapp(snapshot: SiteSnapshot) -> tuple[bool, str | None]:
     """Detects WhatsApp ordering links from crawled pages."""
-    wa_re = re.compile(r"wa\.me/(\d+)|api\.whatsapp\.com/send\?phone=(\d+)", re.I)
+    wa_re = re.compile(r"wa\.me/\+?(\d+)|api\.whatsapp\.com/send\?phone=\+?(\d+)", re.I)
     for page in snapshot.pages.values():
         for raw in (snapshot.raw_html.get(kind, "") for kind in snapshot.pages):
             m = wa_re.search(raw)

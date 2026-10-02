@@ -52,7 +52,7 @@ def _online_presence_section(op: OnlinePresence | None) -> str | None:
     parts: list[str] = []
     if op.has_ecommerce_site:
         detail = f"on {op.ecommerce_platform}" if op.ecommerce_platform else "detected"
-        parts.append(f"e-commerce site ({detail}{'with cart/checkout' if op.has_cart else ', no cart found'})")
+        parts.append(f"e-commerce site ({detail}{', with cart/checkout' if op.has_cart else ', no cart found'})")
     if op.has_mobile_app:
         parts.append("mobile app available")
     if op.has_whatsapp_ordering:

@@ -78,6 +78,13 @@ def test_whatsapp_api_link_detected():
     assert op.whatsapp_number == "923001234567"
 
 
+def test_whatsapp_plus_prefix_detected():
+    html = '<html><body><a href="https://api.whatsapp.com/send?phone=+923001234567&text=hi">Order</a></body></html>'
+    op = audit_online_presence(_snapshot_with_html(html))
+    assert op.has_whatsapp_ordering
+    assert op.whatsapp_number == "923001234567"
+
+
 def test_no_whatsapp_on_plain_site():
     html = '<html><body><p>Call us at 051-1234567</p></body></html>'
     op = audit_online_presence(_snapshot_with_html(html))
