@@ -157,7 +157,7 @@ async def test_parked_site_cannot_produce_a_qualified_lead(campaign, settings, d
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Parked Traders", website="https://parked.pk", city="Islamabad",
-                                  country="Pakistan", source="osm", category="shop=clothes")]
+                                  country="Pakistan", source="osm")]
 
     async with HttpFetcher(settings) as fetcher:
         p = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
@@ -232,9 +232,9 @@ async def test_two_records_redirecting_to_one_site_are_one_lead(campaign, settin
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Zara Fabrics", website="https://zarafabrics.com", city="Islamabad",
-                                  country="Pakistan", source="osm", category="shop=clothes"),
+                                  country="Pakistan", source="osm"),
                 DiscoveredCompany(name="Zara Fabrics Outlet", website="https://alias.pk", city="Islamabad",
-                                  country="Pakistan", source="osm", category="shop=clothes")]
+                                  country="Pakistan", source="osm")]
 
     async with HttpFetcher(settings) as fetcher:
         p = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
