@@ -40,8 +40,8 @@ def test_name_from_domain():
 
 def test_seed_queries_cross_industries_with_the_first_two_cities():
     q = _seed_queries(["retail", "apparel"], ["Lahore", "Karachi", "Multan"], [], {}, limit=8)
-    assert "retail companies in Lahore" in q
-    assert "apparel companies in Karachi" in q
+    assert "retail in Lahore" in q
+    assert "apparel in Karachi" in q
     assert all("Multan" not in x for x in q)      # only the first two cities are used
     assert len(q) == len(set(q))                   # de-duped
 
@@ -49,7 +49,7 @@ def test_seed_queries_cross_industries_with_the_first_two_cities():
 def test_seed_queries_fall_back_to_sector_match_terms():
     taxonomy = {"clothing_apparel": {"match": ["clothing", "apparel"]}}
     q = _seed_queries(None, ["Lahore"], ["clothing_apparel"], taxonomy, limit=8)
-    assert "clothing companies in Lahore" in q
+    assert "clothing in Lahore" in q
 
 
 async def test_generate_search_queries_without_llm_is_empty():
