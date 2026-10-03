@@ -39,6 +39,7 @@ from gtm_engine.models import (
     OnlinePresence, SequenceStatus, Signals, new_id,
 )
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
+from gtm_engine.scoring.proximity import haversine_km
 from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lead
 from gtm_engine.scraping.fetcher import Fetcher, HttpFetcher
 from gtm_engine.scraping.site_crawler import SiteCrawler, SiteSnapshot
@@ -65,6 +66,7 @@ class RunStats:
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
     discovery_relevance_dropped: int = 0  # companies dropped post-discovery for not matching offer keywords
+    area_proximity_dropped: int = 0  # companies dropped for being too far from the requested area
     llm_relevance_demoted: int = 0  # companies the LLM flagged as not matching the target type
     relevance_keywords: list[str] = field(default_factory=list)  # the offer's need-terms this run used
     discovery_sectors: list[str] = field(default_factory=list)   # sectors derived from the offer (E1)
@@ -178,6 +180,64 @@ def _discovery_relevance_filter(
             dropped += 1
     if dropped:
         log.info("discovery relevance filter: kept %d, dropped %d (no offer keyword match)", len(kept), dropped)
+    return kept, dropped
+
+
+AREA_RADIUS_KM = 3.0
+
+
+async def _area_proximity_filter(
+    companies: list[DiscoveredCompany],
+    areas: list[str],
+    cities: list[str],
+    fetcher: Fetcher,
+    settings: EngineSettings,
+) -> tuple[list[DiscoveredCompany], int]:
+    """Drop companies whose lat/lon is too far from the requested areas.
+
+    Geocodes each area (+ first city as context) to a center point, then keeps
+    only companies within AREA_RADIUS_KM of at least one area center.  Companies
+    without coordinates pass through (benefit of the doubt).
+    """
+    if not areas:
+        return companies, 0
+
+    from gtm_engine.discovery.geocode import Geocoder
+    geocoder = Geocoder(fetcher, settings.db_path.parent / "geocode_cache.json")
+
+    centers: list[tuple[float, float]] = []
+    city_hint = cities[0] if cities else ""
+    for area in areas:
+        query = f"{area} {city_hint}".strip()
+        bbox = await geocoder.bbox(query, None)
+        if bbox:
+            lat = (bbox.south + bbox.north) / 2
+            lon = (bbox.west + bbox.east) / 2
+            centers.append((lat, lon))
+
+    if not centers:
+        return companies, 0
+
+    kept: list[DiscoveredCompany] = []
+    dropped = 0
+    for c in companies:
+        clat = c.extra.get("lat") if c.extra else None
+        clon = c.extra.get("lon") if c.extra else None
+        if clat is None or clon is None:
+            kept.append(c)
+            continue
+        try:
+            clat, clon = float(clat), float(clon)
+        except (TypeError, ValueError):
+            kept.append(c)
+            continue
+        if any(haversine_km(clat, clon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
+            kept.append(c)
+        else:
+            dropped += 1
+    if dropped:
+        log.info("area proximity filter: kept %d, dropped %d (>%.0fkm from %s)",
+                 len(kept), dropped, AREA_RADIUS_KM, ", ".join(areas))
     return kept, dropped
 
 
@@ -793,6 +853,10 @@ class Pipeline:
                 before = len(discovered)
                 discovered = [c for c in discovered if not c.extra.get("brand")]
                 stats.chains_excluded = before - len(discovered)
+            if campaign.geography.areas:
+                discovered, stats.area_proximity_dropped = await _area_proximity_filter(
+                    discovered, campaign.geography.areas, campaign.geography.cities,
+                    self.fetcher, self.settings)
             campaign_cats = set(campaign.osm_categories) | {f"overture={c}" for c in campaign.overture_categories}
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
                 discovered, self._relevance_keywords, campaign_cats,

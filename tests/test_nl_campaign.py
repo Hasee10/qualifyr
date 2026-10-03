@@ -537,6 +537,55 @@ def test_discovery_relevance_filter_passes_no_category():
     assert len(kept) == 1
 
 
+# ---------------------------------------------------------------------------
+# Area proximity filter
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_area_proximity_filter_drops_distant_companies():
+    from gtm_engine.pipeline import _area_proximity_filter, AREA_RADIUS_KM
+    from gtm_engine.models import DiscoveredCompany
+    from unittest.mock import AsyncMock, patch
+    from gtm_engine.discovery.geocode import BBox
+
+    # G-13 Islamabad center approx: 33.6321, 73.0225
+    g13_bbox = BBox(south=33.625, west=73.015, north=33.640, east=73.030)
+
+    companies = [
+        DiscoveredCompany(name="Near Clinic", source="osm", extra={"lat": 33.633, "lon": 73.023}),  # ~0.1km
+        DiscoveredCompany(name="Far Hospital", source="osm", extra={"lat": 33.52, "lon": 73.10}),   # ~15km
+        DiscoveredCompany(name="No Coords", source="osm"),  # no lat/lon — should pass
+    ]
+
+    with patch("gtm_engine.discovery.geocode.Geocoder") as MockGeocoder:
+        instance = MockGeocoder.return_value
+        instance.bbox = AsyncMock(return_value=g13_bbox)
+        mock_fetcher = AsyncMock()
+        mock_settings = AsyncMock()
+        mock_settings.db_path.parent = AsyncMock()
+
+        kept, dropped = await _area_proximity_filter(
+            companies, ["G-13"], ["Islamabad"], mock_fetcher, mock_settings)
+
+    assert dropped == 1
+    assert len(kept) == 2
+    names = [c.name for c in kept]
+    assert "Near Clinic" in names
+    assert "No Coords" in names
+    assert "Far Hospital" not in names
+
+
+@pytest.mark.asyncio
+async def test_area_proximity_filter_noop_without_areas():
+    from gtm_engine.pipeline import _area_proximity_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [DiscoveredCompany(name="Anything", source="osm", extra={"lat": 33.5, "lon": 73.1})]
+    kept, dropped = await _area_proximity_filter(companies, [], ["Islamabad"], None, None)
+    assert dropped == 0
+    assert len(kept) == 1
+
+
 def test_areas_wired_into_geography():
     draft = parse_intent("find newspaper offices near G-7 Islamabad")
     cfg = build_campaign_config(draft)
