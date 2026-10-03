@@ -31,14 +31,15 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
 
   const close = () => { setText(""); setError(null); setResult(null); onClose() }
 
-  const cfg = result?.config
-  const chips: { label: string; value: string }[] = []
-  if (cfg) {
-    if (cfg.name) chips.push({ label: "Name", value: String(cfg.name) })
-    const cities = cfg.geography && typeof cfg.geography === "object" && "cities" in cfg.geography ? (cfg.geography as Record<string, unknown>).cities : null
-    if (Array.isArray(cities) && cities.length) chips.push({ label: "Cities", value: cities.join(", ") })
-    if (Array.isArray(cfg.target_industries) && cfg.target_industries.length) chips.push({ label: "Industries", value: cfg.target_industries.join(", ") })
-    if (cfg.offer) chips.push({ label: "Offer", value: String(cfg.offer) })
+  const exp = result?.explanation
+  const rows: { label: string; value: string }[] = []
+  if (exp && typeof exp === "object") {
+    const e = exp as Record<string, unknown>
+    if (e.offer_detected) rows.push({ label: "Offer", value: String(e.offer_detected) })
+    if (Array.isArray(e.cities) && e.cities.length) rows.push({ label: "Cities", value: e.cities.join(", ") })
+    if (Array.isArray(e.provinces) && e.provinces.length) rows.push({ label: "Provinces", value: e.provinces.join(", ") })
+    if (Array.isArray(e.sectors_matched) && e.sectors_matched.length) rows.push({ label: "Sectors", value: e.sectors_matched.join(", ") })
+    if (e.max_companies) rows.push({ label: "Max companies", value: String(e.max_companies) })
   }
 
   return (
@@ -72,20 +73,15 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
           ) : (
             <>
               <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-sm font-medium mb-2">Campaign created</p>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {chips.map((c) => (
-                    <Badge key={c.label} variant="outline"><span className="font-medium mr-1">{c.label}:</span> {c.value}</Badge>
+                <p className="text-sm font-medium mb-3">Campaign created</p>
+                <div className="grid gap-2">
+                  {rows.map((r) => (
+                    <div key={r.label} className="flex gap-2 text-sm">
+                      <span className="shrink-0 font-medium text-muted-foreground w-28">{r.label}</span>
+                      <span className="break-words min-w-0">{r.value}</span>
+                    </div>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {typeof result.explanation === "string"
-                    ? result.explanation
-                    : Object.entries(result.explanation)
-                        .filter(([, v]) => v != null && v !== false && !(Array.isArray(v) && v.length === 0) && !(typeof v === "object" && !Array.isArray(v) && Object.keys(v as Record<string, unknown>).length === 0))
-                        .map(([k, v]) => `${k.replace(/_/g, " ")}: ${Array.isArray(v) ? v.join(", ") : String(v)}`)
-                        .join(" · ")}
-                </p>
               </div>
               <div className="flex justify-end">
                 <Button onClick={close}>Done</Button>

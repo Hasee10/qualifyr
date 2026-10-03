@@ -258,7 +258,7 @@ def build_campaign_config(
         negative_keywords=draft.negative_keywords,
         exclude_chains=draft.exclude_chains,
         min_score=draft.min_score or 40,
-        max_companies=draft.max_companies or 150,
+        max_companies=draft.max_companies or 30,
         hard_filters=hard_filters,
     )
     return cfg
