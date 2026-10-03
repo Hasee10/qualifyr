@@ -99,10 +99,15 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const rows: { label: string; value: string }[] = []
   if (exp && typeof exp === "object") {
     const e = exp as Record<string, unknown>
+    if (e.name) rows.push({ label: "Name", value: String(e.name) })
     if (e.offer_detected || e.offer) rows.push({ label: "Offer", value: String(e.offer_detected ?? e.offer) })
     if (Array.isArray(e.cities) && e.cities.length) rows.push({ label: "Cities", value: e.cities.join(", ") })
+    if (Array.isArray(e.areas) && e.areas.length) rows.push({ label: "Areas", value: e.areas.join(", ") })
     if (Array.isArray(e.provinces) && e.provinces.length) rows.push({ label: "Provinces", value: e.provinces.join(", ") })
+    if (Array.isArray(e.target_industries) && e.target_industries.length) rows.push({ label: "Industries", value: e.target_industries.join(", ") })
+    if (Array.isArray(e.buyer_keywords) && e.buyer_keywords.length) rows.push({ label: "Keywords", value: e.buyer_keywords.join(", ") })
     if (Array.isArray(e.sectors_matched) && e.sectors_matched.length) rows.push({ label: "Sectors", value: e.sectors_matched.join(", ") })
+    if (Array.isArray(e.search_queries) && e.search_queries.length) rows.push({ label: "Queries", value: e.search_queries.join("; ") })
   }
 
   const loading = hasGroq === null
@@ -342,9 +347,9 @@ export default function CampaignsPage() {
             <CardContent className="p-4 grid gap-3">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-medium truncate">{c.name}</h3>
-                  {showOffer && <p className="text-sm text-muted-foreground truncate">{offer}</p>}
+                <div className="min-w-0 overflow-hidden">
+                  <h3 className="font-medium truncate max-w-full">{c.name}</h3>
+                  {showOffer && <p className="text-sm text-muted-foreground line-clamp-2">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {c.cities.map((city) => <Badge key={city} variant="outline" className="text-[11px] px-1.5 py-0">{city}</Badge>)}

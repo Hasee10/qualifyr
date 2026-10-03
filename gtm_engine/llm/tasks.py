@@ -332,8 +332,9 @@ async def parse_campaign_nl(llm: LLM | None, text: str,
                             taxonomy_sectors: list[str]) -> dict:
     """Extract structured campaign fields from free-form user text.
 
-    Returns a dict with optional keys: offer, cities, target_industries,
-    buyer_keywords, negative_keywords, sectors, exclude_chains, max_companies.
+    Returns a dict with optional keys: name, offer, cities, areas,
+    target_industries, buyer_keywords, negative_keywords, sectors,
+    search_queries, exclude_chains, max_companies.
     Deterministic fallback: empty dict (the caller's own regex parse is primary).
     """
     if llm is None or not (text or "").strip():
@@ -343,20 +344,30 @@ async def parse_campaign_nl(llm: LLM | None, text: str,
         "focused on Pakistan. Given a user's natural-language description of who they "
         "want to find, extract structured fields.\n\n"
         "Choose sectors ONLY from this list: " + str(taxonomy_sectors) + "\n\n"
-        "Cities must be real Pakistani cities.\n\n"
-        "Output a single JSON object with these optional keys:\n"
-        "  offer (string): what the user sells\n"
-        "  cities (array of strings): Pakistani cities to search\n"
-        "  target_industries (array of strings): industry terms\n"
-        "  buyer_keywords (array of strings): terms that identify a buyer company\n"
-        "  negative_keywords (array of strings): terms to exclude\n"
-        "  sectors (array of strings from the list above): which taxonomy sectors apply\n"
-        "  exclude_chains (boolean): whether to skip chain stores\n"
-        "  max_companies (integer): how many results the user wants\n\n"
-        "Omit any key you cannot determine from the text. Output ONLY the JSON object."
+        "Cities must be real Pakistani cities. Areas are specific localities, sectors, "
+        "or neighborhoods within a city (e.g. F-11, G-11, DHA, Gulberg, Saddar).\n\n"
+        "Output a single JSON object with these keys (include ALL that apply):\n"
+        '  "name" (string): a SHORT campaign title, max 8 words, e.g. "Marts near F-11 G-11 Islamabad"\n'
+        '  "offer" (string): what the user is looking for or selling — the core search intent, NOT the raw input\n'
+        '  "cities" (array of strings): Pakistani cities mentioned\n'
+        '  "areas" (array of strings): specific localities/sectors/neighborhoods within the city (e.g. "F-11", "G-11", "DHA Phase 5")\n'
+        '  "target_industries" (array of strings): industry terms describing the businesses to find (e.g. "grocery", "supermarket", "mart")\n'
+        '  "buyer_keywords" (array of strings): terms that identify a target company (e.g. "mart", "store", "shop", "retailer")\n'
+        '  "negative_keywords" (array of strings): terms to exclude\n'
+        '  "sectors" (array of strings from the taxonomy list): which discovery sectors apply\n'
+        '  "search_queries" (array of strings): 3-5 specific web search queries to find these businesses, '
+        'e.g. "grocery stores F-11 Islamabad", "marts near G-11 Islamabad"\n'
+        '  "exclude_chains" (boolean): whether to skip chain stores\n'
+        '  "max_companies" (integer): how many results the user wants\n\n'
+        "IMPORTANT:\n"
+        "- name must be SHORT and descriptive (max 8 words), never the raw input text\n"
+        "- offer should describe the search intent concisely, not repeat the input\n"
+        "- target_industries and buyer_keywords should ALWAYS be filled — infer from context\n"
+        "- search_queries should include area names if the user mentioned specific areas\n"
+        "- Omit a key ONLY if it truly cannot be determined. Output ONLY the JSON object."
     )
     try:
-        raw = await llm.complete(system, text, max_tokens=500)
+        raw = await llm.complete(system, text, max_tokens=600)
     except Exception as exc:  # noqa: BLE001
         log.debug("llm campaign parse failed: %s", exc)
         return {}

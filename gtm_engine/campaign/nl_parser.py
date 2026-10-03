@@ -66,14 +66,17 @@ class CampaignDraft:
     """Partial campaign extracted from natural language.  Every field is optional;
     the assembler fills defaults for anything the user did not mention."""
 
+    name: str | None = None
     offer: str | None = None
     cities: list[str] = field(default_factory=list)
+    areas: list[str] = field(default_factory=list)
     provinces: list[str] = field(default_factory=list)
     countries: list[str] = field(default_factory=lambda: ["Pakistan"])
     target_industries: list[str] = field(default_factory=list)
     buyer_keywords: list[str] = field(default_factory=list)
     negative_keywords: list[str] = field(default_factory=list)
     sectors: list[str] = field(default_factory=list)
+    search_queries: list[str] = field(default_factory=list)
     exclude_chains: bool = False
     max_companies: int | None = None
     min_score: int | None = None
@@ -110,6 +113,19 @@ _CHAIN_RE = re.compile(r"(?:no|ignore|exclude|skip|drop)\s+(?:big\s+)?chains?\b"
 _TIER_RE = re.compile(r"tier\s*([123])\s*only", re.I)
 _MIN_REVIEWS_RE = re.compile(r"(?:more\s+than|at\s+least|minimum|min)\s+(\d+)\s+reviews?", re.I)
 _NEAR_RE = re.compile(r"(?:near|close\s+to|around|in\s+the\s+area\s+of)\s+(.+?)(?:\.|,|$)", re.I)
+_AREA_RE = re.compile(
+    r"\b([A-Z]-\d{1,2}(?:/\d)?|[EFGHI]-\d{1,2}|DHA(?:\s+Phase\s*\d+)?|Gulberg|Saddar|Blue\s*Area|Bahria\s*Town"
+    r"|Model\s*Town|Garden\s*Town|Johar\s*Town|Cantt|Clifton|Defence|PECHS|Gulshan"
+    r"|Satellite\s*Town|PWD|CDA\s*Sector\s*\w+)\b", re.I)
+
+
+def _extract_areas(text: str) -> list[str]:
+    found: list[str] = []
+    for m in _AREA_RE.finditer(text):
+        area = m.group(0).strip()
+        if area.upper() not in [a.upper() for a in found]:
+            found.append(area)
+    return found
 
 
 def _extract_cities(text: str) -> list[str]:
@@ -191,6 +207,7 @@ def parse_intent(text: str) -> CampaignDraft:
 
     draft.cities = _extract_cities(text)
     draft.provinces = _extract_provinces(text)
+    draft.areas = _extract_areas(text)
     draft.offer = _extract_offer(text)
 
     taxonomy = load_taxonomy()
@@ -218,11 +235,21 @@ def parse_intent(text: str) -> CampaignDraft:
 # Stage 3: assemble a full CampaignConfig
 # ---------------------------------------------------------------------------
 
-def _name_from_text(text: str, max_len: int = 120) -> str:
-    name = text.strip()
-    if len(name) > max_len:
-        name = name[:max_len].rsplit(" ", 1)[0] + "..."
-    return name
+def _name_from_draft(draft: CampaignDraft) -> str:
+    if draft.name:
+        return draft.name.strip()[:80]
+    parts: list[str] = []
+    if draft.target_industries:
+        parts.append(", ".join(draft.target_industries[:2]).title())
+    elif draft.offer:
+        parts.append(draft.offer[:40].strip())
+    if draft.areas:
+        parts.append("near " + ", ".join(draft.areas[:3]))
+    if draft.cities:
+        parts.append("in " + ", ".join(draft.cities[:2]))
+    if parts:
+        return " ".join(parts)[:80]
+    return draft.raw_text.strip()[:60]
 
 
 def build_campaign_config(
@@ -235,10 +262,22 @@ def build_campaign_config(
     generate_keywords() on the returned config if desired — this function
     only fills in what the NL parser extracted, plus sane defaults.
     """
-    name = _name_from_text(draft.raw_text)
+    name = _name_from_draft(draft)
     cid = slugify_campaign_id(name[:60], existing_ids)
 
-    offer = draft.offer or draft.raw_text.strip()[:200]
+    offer = draft.offer or (
+        f"Find {', '.join(draft.target_industries[:3]) or 'businesses'} "
+        f"in {', '.join(draft.cities) or 'Pakistan'}"
+    )
+
+    search_queries = list(draft.search_queries)
+    if draft.areas and draft.cities:
+        for area in draft.areas:
+            for city in draft.cities[:1]:
+                industry = draft.target_industries[0] if draft.target_industries else "stores"
+                q = f"{industry} {area} {city}"
+                if q not in search_queries:
+                    search_queries.append(q)
 
     geo = GeographyConfig(
         countries=draft.countries or ["Pakistan"],
@@ -256,6 +295,7 @@ def build_campaign_config(
         geography=geo,
         buyer_keywords=draft.buyer_keywords,
         negative_keywords=draft.negative_keywords,
+        search_queries=search_queries,
         exclude_chains=draft.exclude_chains,
         min_score=draft.min_score or 40,
         max_companies=draft.max_companies or 30,
@@ -267,10 +307,15 @@ def build_campaign_config(
 def build_explanation(draft: CampaignDraft, cfg: CampaignConfig) -> dict:
     """Human-readable breakdown of what was interpreted from the NL input."""
     return {
+        "name": cfg.name,
         "offer_detected": draft.offer,
         "cities": draft.cities,
+        "areas": draft.areas,
         "provinces": draft.provinces,
+        "target_industries": draft.target_industries,
+        "buyer_keywords": draft.buyer_keywords,
         "sectors_matched": draft.sectors,
+        "search_queries": cfg.search_queries,
         "exclusions": draft.negative_keywords,
         "exclude_chains": draft.exclude_chains,
         "max_companies": cfg.max_companies,
@@ -314,11 +359,19 @@ def _merge_llm(draft: CampaignDraft, llm_fields: dict) -> None:
     if not llm_fields:
         return
 
+    if not draft.name and llm_fields.get("name"):
+        draft.name = llm_fields["name"]
+
     if not draft.offer and llm_fields.get("offer"):
         draft.offer = llm_fields["offer"]
 
     if not draft.cities and llm_fields.get("cities"):
         draft.cities = llm_fields["cities"]
+
+    llm_areas = llm_fields.get("areas") or []
+    for area in llm_areas:
+        if area.upper() not in [a.upper() for a in draft.areas]:
+            draft.areas.append(area)
 
     llm_industries = llm_fields.get("target_industries") or []
     for ind in llm_industries:
@@ -339,6 +392,11 @@ def _merge_llm(draft: CampaignDraft, llm_fields: dict) -> None:
     for s in llm_sectors:
         if s not in draft.sectors:
             draft.sectors.append(s)
+
+    llm_queries = llm_fields.get("search_queries") or []
+    for q in llm_queries:
+        if q not in draft.search_queries:
+            draft.search_queries.append(q)
 
     if llm_fields.get("exclude_chains") and not draft.exclude_chains:
         draft.exclude_chains = True
