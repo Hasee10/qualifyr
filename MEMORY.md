@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (Phase 7 open-source readiness: API keys, usage limits, vote)
+Last updated: 2026-10-03 (NL frontend, campaigns UI cleanup, mailbox management, CSV fix)
 
 ---
 
@@ -93,6 +93,17 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - `gtm_engine/campaign/nl_parser.py` — accepts text like "find grocery stores in Islamabad that
   need inventory software", auto-builds CampaignConfig. Two-stage: deterministic regex always
   runs, optional LLM fills gaps (never overwrites). `POST /campaigns/nl` + `gtm nl` CLI.
+- Frontend: old 10-field form replaced with NL text input (always editable, stays visible after
+  creation). Editable `max_companies` field (default 30). "Run now" button in result panel
+  triggers discovery immediately. `POST /campaigns/nl` accepts optional `max_companies` override.
+
+**Frontend cleanup** ✅ **DONE (2026-10-03):**
+- Campaigns page: compact cards (redundant offer line hidden when it matches name, sectors/keywords
+  badges removed, stats in single row, smaller Run/CSV buttons, last-run shows date only).
+- CSV export: authenticated fetch with bearer token (was broken — plain `<a href>` couldn't send auth).
+- Self-serve mailbox management: Settings → Mailboxes tab (add SMTP credentials, test connection,
+  enable/disable, delete). `user_mailboxes` table + 5 new API endpoints.
+- React crash fix: NL explanation dict rendered as text node → guarded with type checks.
 
 **Phase 7 — Open-source readiness** ✅ **DONE (2026-10-03):**
 - Per-user API key management: `user_api_keys` table, Fernet-encrypted at rest (`GTM_ENCRYPTION_KEY`),
@@ -248,10 +259,13 @@ is near-empty. 3.5% have a website *tag* (a floor, not the true rate — a missi
 - CEO sign-off on **multi-country scope** (P3) and on **E3 competitor analysis**.
 - Confirm **`GTM_GROQ_API_KEY` is a GitHub Actions secret** — without it the gather-leads job
   degrades to the keyword path (never breaks, but no intent/offer-derived discovery live).
+- `GTM_ENCRYPTION_KEY` — added to GitHub Secrets + Vercel env vars (2026-10-03). Verify the
+  Settings page no longer shows the red warning after redeployment.
 - Missing keys: `GTM_SHEETS_CREDENTIALS_JSON`, `GTM_MAILBOX_2_*`, `GTM_GMAIL_REFRESH_TOKEN`
   (needs `gtm outreach gmail-auth`).
 - `docs/API_KEYS.md` quota text is stale (Hunter/Brave); no Brave monthly spend counter in code.
 - Support email in the landing FAQ is `outreach.grydin@gmail.com`.
+- **Compare leads with vs without Google Places API key** — requested, never executed.
 
 ---
 
