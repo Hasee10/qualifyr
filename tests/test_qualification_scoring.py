@@ -150,11 +150,16 @@ def _good_inputs(cls_type=CompanyType.BUYER, email_status=EmailStatus.MX_VALID) 
 
 
 def test_strong_buyer_scores_high_and_is_outreach_ready(campaign):
+    from gtm_engine.models import OnlinePresence
     inputs = _good_inputs()
+    inputs.online_presence = OnlinePresence(
+        google_review_count=150, google_rating=4.5,
+        online_gap_score=18, pain_from_reviews=["stockouts"],
+    )
     score = score_lead(inputs, campaign)
-    assert score.total >= 70 and score.priority in (Priority.HIGH, Priority.QUALIFIED)
-    assert score.total == score.icp_fit + score.company_quality + score.buyer_evidence + score.contact_quality + score.buying_signals + score.online_gap
-    assert any("decision-maker found" in r for r in score.reasons)
+    assert score.total >= campaign.min_score and score.priority in (Priority.HIGH, Priority.QUALIFIED)
+    assert score.total == score.review_band + score.rating_score + score.proximity_tier + score.online_gap + score.pain_evidence
+    assert any("decision-maker" in r for r in score.reasons)
     assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
 
 
@@ -179,20 +184,18 @@ def test_unverified_email_blocks_outreach(campaign):
     assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
 
 
-def test_wrong_city_loses_points(campaign):
-    good = score_lead(_good_inputs(), campaign)
+def test_proximity_tier_scores(campaign):
     inputs = _good_inputs()
-    inputs.company = _company(city="Karachi")
-    worse = score_lead(inputs, campaign)
-    assert worse.icp_fit < good.icp_fit
-    assert any("not in campaign list" in r for r in worse.reasons)
+    score = score_lead(inputs, campaign)
+    assert score.proximity_tier > 0
+    assert any("Tier" in r for r in score.reasons)
 
 
 def test_weights_rescale(campaign):
-    campaign.weights.icp_fit = 30
-    campaign.weights.buying_signals = 20
+    campaign.weights.review_band = 20
+    campaign.weights.pain_evidence = 30
     score = score_lead(_good_inputs(), campaign)
-    assert score.icp_fit <= 30 and score.buying_signals <= 20
+    assert score.review_band <= 20 and score.pain_evidence <= 30
 
 
 def test_third_party_emails_are_not_the_company_email(campaign, defaults):
@@ -217,11 +220,16 @@ def test_freemail_only_from_visible_text_and_same_label_domain():
 
 def test_wrong_website_is_held_for_review(campaign):
     from gtm_engine.enrichment.signals import assess_quality
+    from gtm_engine.models import OnlinePresence
     snap = _snapshot()  # Zara Fabrics pages
     q = assess_quality(snap, "XS Mobile", "zarafabrics.pk")
     assert q.website_mismatch and any("belong" in n for n in q.notes)
     inputs = _good_inputs()
     inputs.quality = q
+    inputs.online_presence = OnlinePresence(
+        google_review_count=200, google_rating=4.5,
+        online_gap_score=20, pain_from_reviews=["stockouts"],
+    )
     score = score_lead(inputs, campaign)
     assert score.priority == Priority.REVIEW
     assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)

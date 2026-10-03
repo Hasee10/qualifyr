@@ -30,7 +30,7 @@ from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
-from gtm_engine.llm.tasks import draft_hook, extract_requirement, generate_keywords, generate_pitch_angle, judge_intent
+from gtm_engine.llm.tasks import draft_hook, extract_requirement, extract_review_pain, generate_keywords, generate_pitch_angle, judge_intent
 from gtm_engine.qualification.relevance import relevant_terms
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
@@ -377,7 +377,7 @@ class Pipeline:
                 online_presence.opening_hours_raw = parsed.raw
                 online_presence.opening_hours_days = parsed.days_open
 
-        # Google Places enrichment (rating, review count, hours) — budget-limited
+        # Google Places enrichment (rating, review count, hours, reviews) — budget-limited
         if (self.settings.enable_places_enrichment
                 and self.settings.google_places_api_key
                 and cls.company_type == CompanyType.BUYER
@@ -388,6 +388,7 @@ class Pipeline:
                 company.city or "Pakistan",
                 company.country or "Pakistan",
                 self.settings.google_places_api_key,
+                include_reviews=self.settings.enable_review_text,
             )
             if places:
                 online_presence.google_rating = places.rating
@@ -396,6 +397,11 @@ class Pipeline:
                 if places.opening_hours and not online_presence.opening_hours_raw:
                     online_presence.opening_hours_raw = str(places.opening_hours)
                 provenance["google_places"] = f"place_id={places.place_id}, rating={places.rating}"
+                if places.review_texts:
+                    pains = await extract_review_pain(self.llm, company.name, places.review_texts)
+                    if pains:
+                        online_presence.pain_from_reviews = pains
+                        provenance["review_pain"] = f"{len(pains)} pain(s) from {len(places.review_texts)} review(s)"
 
         # A site that does not belong to this company cannot supply its contact details:
         # its email, phone and staff names belong to somebody else.
@@ -547,7 +553,7 @@ class Pipeline:
             if verdict:
                 provenance["intent_fit"] = apply_intent_verdict(cls, verdict)
 
-        score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence), campaign)
+        score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence, self.settings), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
         suppressed = await self._db_call(self.db.is_suppressed, domain, contact.email)
         if suppressed:
@@ -574,10 +580,10 @@ class Pipeline:
             industry=company.category,
             company_description=description,
             company_type=cls.company_type,
-            buyer_fit_score=score.icp_fit + score.buyer_evidence,
+            buyer_fit_score=score.review_band + score.rating_score,
             buyer_fit_reason="; ".join(cls.reasons),
-            company_quality_score=score.company_quality,
-            buying_signal_score=score.buying_signals,
+            company_quality_score=score.proximity_tier,
+            buying_signal_score=score.pain_evidence,
             total_score=score.total,
             score_reason="; ".join(score.reasons),
             contact_name=contact.name,

@@ -26,6 +26,10 @@ DETAILS_FIELD_MASK = (
     "rating,userRatingCount,regularOpeningHours,currentOpeningHours,websiteUri"
 )
 
+DETAILS_FIELD_MASK_WITH_REVIEWS = (
+    "rating,userRatingCount,regularOpeningHours,currentOpeningHours,websiteUri,reviews"
+)
+
 
 @dataclass
 class PlacesData:
@@ -35,6 +39,7 @@ class PlacesData:
     opening_hours: dict | None = None
     is_open_now: bool | None = None
     website_from_google: str | None = None
+    review_texts: list[str] = field(default_factory=list)
 
 
 async def _text_search(api_key: str, query: str) -> str | None:
@@ -61,12 +66,14 @@ async def _text_search(api_key: str, query: str) -> str | None:
         return None
 
 
-async def _place_details(fetcher: Fetcher, place_id: str, api_key: str) -> PlacesData | None:
-    """Fetch Place Details (Enterprise SKU: 1K free/month)."""
+async def _place_details(fetcher: Fetcher, place_id: str, api_key: str,
+                         include_reviews: bool = False) -> PlacesData | None:
+    """Fetch Place Details (Enterprise SKU: 1K free/month; +Atmosphere for reviews)."""
     url = PLACE_DETAILS_URL.format(place_id=place_id)
+    mask = DETAILS_FIELD_MASK_WITH_REVIEWS if include_reviews else DETAILS_FIELD_MASK
     headers = {
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": DETAILS_FIELD_MASK,
+        "X-Goog-FieldMask": mask,
     }
     result = await fetcher.get(url, api=True, headers=headers)
     if not result.ok:
@@ -80,6 +87,12 @@ async def _place_details(fetcher: Fetcher, place_id: str, api_key: str) -> Place
     hours_data = data.get("regularOpeningHours")
     current_hours = data.get("currentOpeningHours")
 
+    review_texts: list[str] = []
+    for review in data.get("reviews", []):
+        text = (review.get("text") or {}).get("text", "").strip()
+        if text:
+            review_texts.append(text)
+
     return PlacesData(
         place_id=place_id,
         rating=data.get("rating"),
@@ -87,6 +100,7 @@ async def _place_details(fetcher: Fetcher, place_id: str, api_key: str) -> Place
         opening_hours=hours_data,
         is_open_now=current_hours.get("openNow") if current_hours else None,
         website_from_google=data.get("websiteUri"),
+        review_texts=review_texts,
     )
 
 
@@ -96,10 +110,11 @@ async def places_enrichment(
     city: str,
     country: str,
     api_key: str,
+    include_reviews: bool = False,
 ) -> PlacesData | None:
     """Two-step lookup: Text Search (free) -> Place Details (1K/month free)."""
     query = f"{business_name}, {city}, {country}"
     place_id = await _text_search(api_key, query)
     if not place_id:
         return None
-    return await _place_details(fetcher, place_id, api_key)
+    return await _place_details(fetcher, place_id, api_key, include_reviews=include_reviews)

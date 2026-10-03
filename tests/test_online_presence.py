@@ -215,9 +215,9 @@ def test_online_gap_affects_total_score(campaign):
     assert score_high_gap.online_gap > score_low_gap.online_gap
     assert score_high_gap.total > score_low_gap.total
     assert any("online gap" in r for r in score_high_gap.reasons)
-    assert score_high_gap.total == (score_high_gap.icp_fit + score_high_gap.company_quality +
-                                     score_high_gap.buyer_evidence + score_high_gap.contact_quality +
-                                     score_high_gap.buying_signals + score_high_gap.online_gap)
+    assert score_high_gap.total == (score_high_gap.review_band + score_high_gap.rating_score +
+                                     score_high_gap.proximity_tier + score_high_gap.online_gap +
+                                     score_high_gap.pain_evidence)
 
 
 # ── gap labels ─────────────────────────────────────────────────────────

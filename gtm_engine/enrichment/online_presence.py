@@ -212,4 +212,6 @@ def online_gap_labels(op: OnlinePresence) -> list[str]:
         gaps.append("no_social")
     if op.google_place_id and op.google_review_count is not None and op.google_review_count < 10:
         gaps.append("low_google_visibility")
+    if op.pain_from_reviews:
+        gaps.append("review_complaints")
     return gaps

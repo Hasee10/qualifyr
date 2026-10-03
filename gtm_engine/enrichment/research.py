@@ -73,6 +73,8 @@ def _online_presence_section(op: OnlinePresence | None) -> str | None:
         parts.append(review_part)
     if op.opening_hours_days is not None:
         parts.append(f"open {op.opening_hours_days} days/week")
+    if op.pain_from_reviews:
+        parts.append(f"review complaints: {', '.join(op.pain_from_reviews[:3])}")
     if not parts:
         return "Online presence: no ordering channel, app, or delivery-platform listing detected."
     line = "Online presence: " + "; ".join(parts) + "."

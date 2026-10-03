@@ -70,7 +70,7 @@ def test_campaign_yaml_roundtrip_and_validation(client):
     c, camp_dir = client
     got = c.get("/campaigns/one/yaml").json()
     assert got["file"] == "one.yaml" and "campaign_id: one" in got["yaml"]
-    bad = c.post("/campaigns/validate", json={"yaml": "campaign_id: two\nname: T\noffer: x\nweights: {icp_fit: 90, company_quality: 15, buyer_evidence: 15, contact_quality: 10, buying_signals: 10}"}).json()
+    bad = c.post("/campaigns/validate", json={"yaml": "campaign_id: two\nname: T\noffer: x\nweights: {review_band: 50, rating: 10, proximity_tier: 15, online_gap: 25, pain_evidence: 20}"}).json()
     assert bad["ok"] is False and "sum to 100" in bad["error"]
     ok = c.post("/campaigns/validate", json={"yaml": "campaign_id: two\nname: Two\noffer: x\ngeography:\n  cities: [Karachi]\nchamber_sources: [kcci]"}).json()
     assert ok["ok"] and ok["sources"] == ["kcci"]

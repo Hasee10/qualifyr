@@ -50,6 +50,7 @@ jobs:
       # GTM_GITHUB_TOKEN - that PAT has actions:write and triggers our own workflows;
       # it has no business being handed to a job that only reads third-party orgs.
       GTM_GITHUB_READ_TOKEN: ${{ secrets.GTM_GITHUB_READ_TOKEN }}
+      GTM_GOOGLE_PLACES_API_KEY: ${{ secrets.GTM_GOOGLE_PLACES_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 

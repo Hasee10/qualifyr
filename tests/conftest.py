@@ -95,7 +95,7 @@ def campaign() -> CampaignConfig:
         target_roles=["founder", "ceo", "head of ecommerce"],
         buyer_keywords=["retailer", "store", "brand", "outlet", "online store", "shop"],
         osm_categories=["shop=clothes", "shop=furniture"],
-        min_score=70,
+        min_score=40,
         max_pages_per_site=4,
     )
 

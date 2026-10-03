@@ -148,6 +148,7 @@ class OnlinePresence(BaseModel):
     google_place_id: str | None = None
     opening_hours_raw: str | None = None            # OSM-format opening hours string
     opening_hours_days: int | None = None            # days per week the business is open
+    pain_from_reviews: list[str] = Field(default_factory=list)  # pain signals mined from Google review text
     online_gap_score: int = 0                        # 0-25: higher = bigger gap = better prospect
     notes: list[str] = Field(default_factory=list)
 
@@ -167,12 +168,13 @@ class CompanyQuality(BaseModel):
 
 
 class ScoreBreakdown(BaseModel):
-    icp_fit: int = 0
-    company_quality: int = 0
-    buyer_evidence: int = 0
-    contact_quality: int = 0
-    buying_signals: int = 0
-    online_gap: int = 0
+    """Decomposed transparent score (reference xlsx formula)."""
+
+    review_band: int = 0       # 0-30: Google review count bands
+    rating_score: int = 0      # 0-10: Google rating scaled
+    proximity_tier: int = 0    # 0-15: distance from anchor (15/12/8/0)
+    online_gap: int = 0        # 0-25: inverse digital maturity
+    pain_evidence: int = 0     # 0-20: pain signals from reviews + site
     total: int = 0
     reasons: list[str] = Field(default_factory=list)
     priority: Priority = Priority.REJECT

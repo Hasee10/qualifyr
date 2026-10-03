@@ -34,30 +34,33 @@ class GeographyConfig(BaseModel):
 
 
 class ScoringWeights(BaseModel):
-    """Maximum points per dimension. Must sum to 100."""
+    """Maximum points per dimension. Must sum to 100.
 
-    icp_fit: int = 40
-    company_quality: int = 15
-    buyer_evidence: int = 15
-    contact_quality: int = 10
-    buying_signals: int = 10
-    online_gap: int = 10
+    The decomposed transparent score (reference xlsx formula):
+      review_band 0-30 + rating 0-10 + proximity_tier 0-15
+      + online_gap 0-25 + pain_evidence 0-20 = 100
+    """
+
+    review_band: int = 30
+    rating: int = 10
+    proximity_tier: int = 15
+    online_gap: int = 25
+    pain_evidence: int = 20
 
     def total(self) -> int:
         return (
-            self.icp_fit
-            + self.company_quality
-            + self.buyer_evidence
-            + self.contact_quality
-            + self.buying_signals
+            self.review_band
+            + self.rating
+            + self.proximity_tier
             + self.online_gap
+            + self.pain_evidence
         )
 
 
 class RoutingThresholds(BaseModel):
-    high_priority: int = 80
-    qualified: int = 70
-    review: int = 50
+    high_priority: int = 55
+    qualified: int = 40
+    review: int = 20
 
 
 class CampaignConfig(BaseModel):
@@ -91,7 +94,7 @@ class CampaignConfig(BaseModel):
     intent_sources: list[str] = Field(default_factory=list)
     # Terms that describe what we sell, matched against tender text (in addition to industries).
     intent_keywords: list[str] = Field(default_factory=list)
-    min_score: int = 70
+    min_score: int = 40
     max_companies: int = 150
     max_pages_per_site: int = 6
     allow_multiple_contacts_per_company: bool = False
@@ -205,6 +208,14 @@ class EngineSettings(BaseModel):
     enable_places_enrichment: bool = False
     google_places_api_key: str | None = None
     places_max_companies_per_run: int = 50
+    enable_review_text: bool = False
+    # Proximity scoring anchor: the user's office/home location.
+    # Companies are ranked by distance from this point (Tier 1/2/3).
+    # When unset, all companies get Tier 1 (same-city assumption).
+    anchor_lat: float | None = None
+    anchor_lon: float | None = None
+    proximity_tier1_km: float = 5.0
+    proximity_tier2_km: float = 15.0
     # Website finder (Brave) is a metered API on a small monthly free credit. Cap the searches
     # per run so a large max_companies cannot drain the month's budget in one go; companies
     # past the cap keep whatever website discovery already gave them.

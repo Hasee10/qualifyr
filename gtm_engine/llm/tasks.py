@@ -230,6 +230,7 @@ def _fallback_pitch(offer: str, company: str, online_gaps: list[str],
         "no_social": "has no social media presence",
         "no_website": "has no website",
         "low_google_visibility": "has very few Google reviews",
+        "review_complaints": "has customer complaints in reviews",
     }
     parts: list[str] = []
     for gap in online_gaps:
@@ -244,6 +245,62 @@ def _fallback_pitch(offer: str, company: str, online_gaps: list[str],
     if not parts:
         return f"{company} could benefit from {offer}."
     return f"{company} {parts[0]}" + (f" and {parts[1]}" if len(parts) > 1 else "") + f" — {offer} addresses this."
+
+
+_REVIEW_PAIN_PATTERNS: list[tuple[str, str]] = [
+    (r"expir|expire|rotten|stale|spoil", "sold expired or spoiled products"),
+    (r"rude|arrogant|disrespect|impolite|hostile", "rude or disrespectful staff"),
+    (r"overcharg|overpr|expensive|price.?goug", "overpriced or price gouging"),
+    (r"dirty|unhygien|unclean|filth|cockroach|insect|pest", "hygiene or cleanliness issues"),
+    (r"out.?of.?stock|unavailable|empty.?shelf|no.?stock", "frequent stockouts"),
+    (r"wrong.?item|wrong.?order|substitut|swap", "wrong items or substitutions"),
+    (r"slow|long.?wait|queue|line|crowded", "slow service or long queues"),
+    (r"parking|access|difficult.?to.?reach", "accessibility or parking issues"),
+    (r"no.?delivery|no.?online|no.?website|no.?app", "no online ordering or delivery"),
+    (r"billing|receipt|overcount|cheat", "billing or receipt issues"),
+]
+
+
+def _fallback_review_pain(review_texts: list[str]) -> list[str]:
+    """Deterministic pain extraction from review text using keyword patterns."""
+    import re
+    combined = " ".join(review_texts).lower()
+    found: list[str] = []
+    seen: set[str] = set()
+    for pattern, label in _REVIEW_PAIN_PATTERNS:
+        if label not in seen and re.search(pattern, combined):
+            seen.add(label)
+            found.append(label)
+    return found
+
+
+async def extract_review_pain(llm: LLM | None, company: str,
+                              review_texts: list[str]) -> list[str]:
+    """Mine customer pain signals from Google review text.
+
+    Returns a list of short pain phrases (max 8). The deterministic fallback always
+    runs; the LLM refines when available."""
+    deterministic = _fallback_review_pain(review_texts)
+    if not review_texts:
+        return deterministic
+    if llm is None:
+        return deterministic
+    combined = "\n---\n".join(review_texts[:10])
+    system = (
+        "You extract customer COMPLAINTS and PAIN POINTS from Google reviews of a business. "
+        f"{_NO_OUTSIDE_FACTS} Output a JSON array of short pain phrases (max 8, each under 10 words). "
+        "Focus on operational problems: quality, stock, service, hygiene, pricing, access."
+    )
+    user = (f"Business: {company}\n\nCustomer reviews:\n\"\"\"\n{combined[:3000]}\n\"\"\"\n\n"
+            "Extract the pain points customers complain about. JSON array only.")
+    try:
+        raw = await llm.complete(system, user, max_tokens=300)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("llm review pain extraction failed: %s", exc)
+        return deterministic
+    parsed = _parse_keyword_list(raw)
+    pains = [p.strip().lower() for p in parsed if 3 < len(p.strip()) < 80][:8]
+    return pains if pains else deterministic
 
 
 async def draft_hook(llm: LLM | None, company: str, facts: list[str]) -> str | None:

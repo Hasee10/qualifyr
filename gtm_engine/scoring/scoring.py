@@ -1,19 +1,23 @@
-"""Deterministic 0-100 lead score with human-readable reasons. Weights come from the
-campaign config; this module only decides how each dimension earns its points."""
+"""Decomposed transparent lead score (0-100).
+
+Reference formula (reverse-engineered from the competitor xlsx):
+  review_band (0-30) + rating (0-10) + proximity_tier (0-15)
+  + online_gap (0-25) + pain_evidence (0-20) = max 100
+
+Each dimension is observable and independently auditable. When Google Places
+data is missing (no API key), review_band and rating are 0 — the lead still
+ranks on online_gap + pain_evidence + proximity."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
-from gtm_engine.config.schema import CampaignConfig
+from gtm_engine.config.schema import CampaignConfig, EngineSettings
 from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus,
     OnlinePresence, Priority, ScoreBreakdown, Signals,
 )
-
-
-_EXPLICITLY_SCORED_BUYING_KEYS = frozenset({"intent", "job_openings", "github_activity", "press_mention"})
+from gtm_engine.scoring.proximity import TIER_POINTS, proximity_tier
 
 
 @dataclass
@@ -24,177 +28,155 @@ class ScoreInputs:
     contact: Contact
     signals: Signals
     online_presence: OnlinePresence | None = None
+    settings: EngineSettings | None = None
 
 
-def _scale(points: float, max_points: int, default_max: int) -> int:
-    """Rescale points designed against default_max onto the configured max."""
-    return int(round(min(points, default_max) * max_points / default_max))
+def _review_band(count: int | None, max_pts: int) -> tuple[int, str | None]:
+    """0-30 points based on Google review count bands."""
+    if count is None:
+        return 0, None
+    if count >= 200:
+        pts = max_pts
+        reason = f"{count} Google reviews (200+)"
+    elif count >= 100:
+        pts = int(max_pts * 0.8)
+        reason = f"{count} Google reviews (100-199)"
+    elif count >= 50:
+        pts = int(max_pts * 0.6)
+        reason = f"{count} Google reviews (50-99)"
+    elif count >= 10:
+        pts = int(max_pts * 0.4)
+        reason = f"{count} Google reviews (10-49)"
+    elif count >= 1:
+        pts = int(max_pts * 0.2)
+        reason = f"{count} Google reviews (1-9)"
+    else:
+        pts = 0
+        reason = "no Google reviews"
+    return pts, reason
 
 
-def _geo_points(company: DiscoveredCompany, campaign: CampaignConfig, reasons: list[str]) -> float:
-    pts = 0.0
-    countries = {c.lower() for c in campaign.geography.countries}
-    cities = {c.lower() for c in campaign.geography.cities}
-    if company.country and company.country.lower() in countries:
-        pts += 10
-        reasons.append(f"in target country ({company.country})")
-    elif not countries:
-        pts += 10
-    if company.city and company.city.lower() in cities:
-        pts += 10
-        reasons.append(f"in target city ({company.city})")
-    elif not cities:
-        pts += 10
-    elif company.city:
-        reasons.append(f"city '{company.city}' not in campaign list")
+def _rating_score(rating: float | None, max_pts: int) -> tuple[int, str | None]:
+    """0-10 points linearly scaled from Google rating (1.0-5.0)."""
+    if rating is None:
+        return 0, None
+    clamped = max(1.0, min(5.0, rating))
+    pts = int(round((clamped - 1.0) / 4.0 * max_pts))
+    return pts, f"Google rating {rating:.1f}/5"
+
+
+def _proximity_score(
+    company: DiscoveredCompany,
+    settings: EngineSettings | None,
+    max_pts: int,
+    reasons: list[str],
+) -> int:
+    """0-15 points based on distance tier from anchor."""
+    lat = company.extra.get("lat")
+    lon = company.extra.get("lon")
+    anchor_lat = settings.anchor_lat if settings else None
+    anchor_lon = settings.anchor_lon if settings else None
+    tier1_km = settings.proximity_tier1_km if settings else 5.0
+    tier2_km = settings.proximity_tier2_km if settings else 15.0
+
+    tier, dist = proximity_tier(lat, lon, anchor_lat, anchor_lon, tier1_km, tier2_km)
+    base = TIER_POINTS.get(tier, 8)
+    pts = int(round(base * max_pts / 15))
+    if dist is not None:
+        reasons.append(f"Tier {tier} ({dist:.1f} km from anchor)")
+    elif anchor_lat is None:
+        reasons.append(f"Tier {tier} (no anchor configured, same-city default)")
+    else:
+        reasons.append(f"Tier {tier} (no coordinates on record)")
     return pts
+
+
+def _pain_evidence_score(
+    online_presence: OnlinePresence | None,
+    signals: Signals,
+    max_pts: int,
+    reasons: list[str],
+) -> int:
+    """0-20 points for pain signals from reviews and site crawl."""
+    pts = 0.0
+
+    # Pain from Google review text (strongest signal)
+    if online_presence and online_presence.pain_from_reviews:
+        n = min(len(online_presence.pain_from_reviews), 5)
+        pts += n * 3
+        reasons.append(f"review pain: {', '.join(online_presence.pain_from_reviews[:3])}")
+
+    # Pain from site crawl signals
+    if signals.pain:
+        n = min(len(signals.pain), 3)
+        pts += n * 1.5
+
+    # Intent signals are evidence of active need
+    if signals.intent:
+        pts += 2
+        for s in signals.intent[:1]:
+            reasons.append(f"intent: {s.get('kind')} — {s.get('text', '')[:50]}")
+
+    return min(int(round(pts)), max_pts)
 
 
 def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     w = campaign.weights
     reasons: list[str] = []
-    cls, q, contact, sig = inputs.classification, inputs.quality, inputs.contact, inputs.signals
-
-    # --- ICP fit (default 50): geography 20, industry/buyer terms 20, company type 10
-    icp = _geo_points(inputs.company, campaign, reasons)
-    identity_hits = [h for h in cls.buyer_hits]
-    if identity_hits:
-        n = min(len(identity_hits), 4)
-        icp += 5 * n
-        reasons.append(f"{n} ICP term(s) matched: {', '.join(identity_hits[:4])}")
-    if cls.company_type == CompanyType.BUYER:
-        icp += 10
-    elif cls.company_type == CompanyType.UNKNOWN:
-        icp += 3
-        reasons.append("company type unknown: insufficient evidence")
-    icp_pts = _scale(icp, w.icp_fit, 50)
-
-    # --- Company quality (default 15)
-    cq = 0.0
-    if q.reachable:
-        cq += 5
-    if q.https:
-        cq += 2
-    if q.has_contact_page:
-        cq += 3
-    if q.has_about_page:
-        cq += 2
-    if q.has_public_email or q.has_phone:
-        cq += 3
-    if q.reachable and q.mobile_friendly is False:
-        cq -= 1
-    if q.copyright_year and q.copyright_year <= datetime.now(timezone.utc).year - 3:
-        cq -= 1
-    cq = max(cq, 0)
-    if not q.reachable:
-        reasons.append("website unreachable")
-    if q.notes:
-        reasons.append("quality notes: " + "; ".join(q.notes[:3]))
-    cq_pts = _scale(cq, w.company_quality, 15)
-
-    # --- Buyer evidence (default 15): classification confidence + operating-business signals
-    be = 0.0
-    if cls.company_type == CompanyType.BUYER:
-        be += 6 + 6 * cls.confidence
-        if not cls.vendor_hits:
-            be += 3
-        else:
-            reasons.append(f"minor vendor mentions present: {', '.join(cls.vendor_hits[:3])}")
-    # The LLM's intent verdict is the CEO's primary axis: reward an evident need, and record a
-    # judged non-need. It is scaled by confidence so a hedged verdict moves the score less.
-    if cls.intent_buyer is True:
-        be += 4 * cls.intent_confidence
-        reasons.append(f"intent match ({cls.intent_confidence:.0%})"
-                       + (f": {cls.intent_reason}" if cls.intent_reason else ""))
-    elif cls.intent_buyer is False:
-        reasons.append(f"intent: no evident need ({cls.intent_confidence:.0%})"
-                       + (f": {cls.intent_reason}" if cls.intent_reason else ""))
-    be_pts = _scale(be, w.buyer_evidence, 15)
-
-    # --- Contact quality (default 10)
-    cp = 0.0
-    if contact.is_decision_maker and contact.name:
-        cp += 5
-        reasons.append(f"decision-maker found: {contact.name} ({contact.role})")
-    email_pts = {EmailStatus.DELIVERABLE: 4, EmailStatus.MX_VALID: 3, EmailStatus.UNVERIFIED: 2, EmailStatus.GENERIC: 1.5}
-    cp += email_pts.get(contact.email_status, 0)
-    if contact.email_status == EmailStatus.DELIVERABLE:
-        reasons.append(f"decision-maker mailbox confirmed ({contact.email_pattern or 'verified'})")
-    elif contact.email_status == EmailStatus.GENERIC:
-        reasons.append("only a generic business mailbox is public")
-    if contact.phone_type == "mobile":
-        cp += 1
-        reasons.append("mobile number published (owner-level contact)")
-    elif contact.email_status in (EmailStatus.NONE, EmailStatus.INVALID):
-        reasons.append("no usable email")
-    if contact.profile_url:
-        cp += 2
-    cp_pts = _scale(cp, w.contact_quality, 10)
-
-    # --- Buying / pain signals (default 10)
-    generic_buying = [k for k in sig.buying if k not in _EXPLICITLY_SCORED_BUYING_KEYS]
-    bs = 2.5 * len(generic_buying) + 1.5 * len(sig.pain)
-    ecommerce_tech = [t for t in sig.technologies if t in ("shopify", "woocommerce", "magento")]
-    if ecommerce_tech:
-        bs += 2
-        reasons.append("ecommerce platform detected: " + ", ".join(ecommerce_tech))
-    if sig.intent:
-        kinds = {s.get("kind") for s in sig.intent}
-        # A hire/RFQ that survived the relevance gate names what we sell, so it is real
-        # buying intent, not just "this company is hiring". Reward it above a bare signal,
-        # but still below a public tender (a stated requirement with a deadline).
-        offer_relevant = any(s.get("relevance") for s in sig.intent)
-        if "tender" in kinds or "rfq" in kinds:
-            bs += 4
-        elif offer_relevant:
-            bs += 3
-        else:
-            bs += 2
-        reasons.append("intent: " + "; ".join(f"{s.get('kind')} – {s.get('text', '')[:50]}" for s in sig.intent[:2]))
-    if sig.news:
-        reasons.append(f"in the news: {sig.news[0]['title'][:60]} ({sig.news[0]['source']})")
-    if sig.domain_age_years is not None and sig.domain_age_years < 2:
-        bs += 1.5
-        reasons.append(f"young domain ({sig.domain_age_years} y): new or recently relaunched business")
-    if sig.job_openings:
-        growth = [j for j in sig.job_openings if j.get("growth_role")]
-        bs += 2.5 if growth else min(len(sig.job_openings), 3) * 0.75
-        board = sig.job_openings[0].get("board", "job board")
-        reasons.append(f"{len(sig.job_openings)} open role(s) on {board}"
-                        + (f", incl. growth role: {growth[0]['title']}" if growth else ""))
-    if sig.github_activity:
-        bs += 1.5
-        reasons.append(f"active GitHub org ({sig.github_activity.get('public_repos')} public repos, "
-                        f"last push {sig.github_activity.get('last_pushed_at')})")
-    if sig.press_mentions:
-        bonus = 3 if any(p.get("kind") == "funding" for p in sig.press_mentions) else 2
-        bs += bonus
-        reasons.append(f"press/RSS: {sig.press_mentions[0]['kind']} – {sig.press_mentions[0]['title'][:60]}")
-    if sig.buying:
-        reasons.append("buying signals: " + ", ".join(sig.buying))
-    if sig.pain:
-        reasons.append("pain signals: " + ", ".join(sig.pain))
-    bs_pts = _scale(bs, w.buying_signals, 10)
-
-    # --- Online gap (default 10): the inverse-digital-maturity signal.
-    # A company with high buyer evidence but no ordering channel is the ideal prospect.
-    og = 0.0
     op = inputs.online_presence
+
+    # --- Review band (default 30)
+    review_count = op.google_review_count if op else None
+    rb_pts, rb_reason = _review_band(review_count, w.review_band)
+    if rb_reason:
+        reasons.append(rb_reason)
+
+    # --- Rating (default 10)
+    rating = op.google_rating if op else None
+    rt_pts, rt_reason = _rating_score(rating, w.rating)
+    if rt_reason:
+        reasons.append(rt_reason)
+
+    # --- Proximity tier (default 15)
+    px_pts = _proximity_score(inputs.company, inputs.settings, w.proximity_tier, reasons)
+
+    # --- Online gap (default 25)
+    og_pts = 0
     if op:
-        og = op.online_gap_score * 10 / 25  # normalise 0-25 → 0-10
+        og_pts = min(op.online_gap_score, w.online_gap)
         if op.online_gap_score >= 18:
-            reasons.append("online gap: no ordering channel detected — strong candidate for a digital solution")
+            reasons.append("online gap: no ordering channel — strong candidate")
         elif op.online_gap_score >= 10:
-            reasons.append("online gap: limited digital presence — room to improve")
+            reasons.append("online gap: limited digital presence")
         elif op.online_gap_score > 0:
             reasons.append("online gap: some digital channels present")
         else:
-            reasons.append("online gap: mature digital presence (e-commerce, app, delivery platforms)")
+            reasons.append("online gap: mature digital presence")
         if op.delivery_platforms:
             reasons.append(f"listed on: {', '.join(op.delivery_platforms)}")
-    og_pts = _scale(og, w.online_gap, 10)
 
-    total = icp_pts + cq_pts + be_pts + cp_pts + bs_pts + og_pts
+    # --- Pain evidence (default 20)
+    pe_pts = _pain_evidence_score(op, inputs.signals, w.pain_evidence, reasons)
+
+    total = rb_pts + rt_pts + px_pts + og_pts + pe_pts
+
+    # --- Classification context (informs reasons but not score)
+    cls = inputs.classification
+    if cls.company_type == CompanyType.BUYER:
+        reasons.append("classified as BUYER")
+    elif cls.company_type == CompanyType.VENDOR:
+        reasons.append("classified as VENDOR")
+    if cls.intent_buyer is True:
+        reasons.append(f"intent match ({cls.intent_confidence:.0%}): {cls.intent_reason}")
+    elif cls.intent_buyer is False:
+        reasons.append(f"intent: no evident need ({cls.intent_confidence:.0%})")
+
+    # --- Contact context
+    contact = inputs.contact
+    if contact.is_decision_maker and contact.name:
+        reasons.append(f"decision-maker: {contact.name} ({contact.role})")
+    if contact.email_status == EmailStatus.DELIVERABLE:
+        reasons.append("email confirmed")
 
     # --- Routing
     r = campaign.routing
@@ -209,16 +191,18 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
         priority = Priority.REVIEW
     else:
         priority = Priority.REJECT
+
     if cls.company_type == CompanyType.UNKNOWN and priority in (Priority.HIGH, Priority.QUALIFIED):
         priority = Priority.REVIEW
         reasons.append("held for review: buyer status unconfirmed")
+    q = inputs.quality
     if q.website_mismatch and priority in (Priority.HIGH, Priority.QUALIFIED):
         priority = Priority.REVIEW
         reasons.append("held for review: website may belong to a different company")
 
     return ScoreBreakdown(
-        icp_fit=icp_pts, company_quality=cq_pts, buyer_evidence=be_pts,
-        contact_quality=cp_pts, buying_signals=bs_pts, online_gap=og_pts,
+        review_band=rb_pts, rating_score=rt_pts, proximity_tier=px_pts,
+        online_gap=og_pts, pain_evidence=pe_pts,
         total=int(total), reasons=reasons, priority=priority,
     )
 
