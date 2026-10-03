@@ -157,10 +157,13 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - Stats: `discovery_relevance_dropped` count in RunStats, shown in progress message.
 - 4 tests in `test_nl_campaign.py`.
 
-**Campaign edit UI** ✅ **DONE (2026-10-03):**
+**Campaign edit + delete UI** ✅ **DONE (2026-10-03):**
 - Pencil icon on every campaign card opens an edit sheet with all config fields pre-filled
   (name, offer, industries, cities, keywords, OSM categories, search queries, max companies,
   min score). Saves via the existing YAML API (`PUT /campaigns/{id}/yaml`).
+- Trash icon on every campaign card (including file-based examples). DB campaigns are deleted;
+  file-based ones are hidden via `hidden_campaigns` table (filesystem is read-only on Vercel).
+  `DELETE /campaigns/{id}` handles both cases.
 
 **CI** — `ci.yml`: `test` job runs the DB-backed tests against a throwaway `postgres:16`
 service (`GTM_TEST_DATABASE_URL`); `web` job runs `npm ci` + `next build` (tsc + ESLint). Both
