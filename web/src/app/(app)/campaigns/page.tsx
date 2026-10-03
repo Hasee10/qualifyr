@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Play, Download, Plus, Trash2 } from "lucide-react"
+import { Play, Download, Plus, Trash2, Pencil } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -238,6 +238,223 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   )
 }
 
+function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign; open: boolean; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = React.useState("")
+  const [offer, setOffer] = React.useState("")
+  const [industries, setIndustries] = React.useState("")
+  const [cities, setCities] = React.useState("")
+  const [keywords, setKeywords] = React.useState("")
+  const [categories, setCategories] = React.useState("")
+  const [queries, setQueries] = React.useState("")
+  const [maxCo, setMaxCo] = React.useState("")
+  const [minScore, setMinScore] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [raw, setRaw] = React.useState<Record<string, unknown>>({})
+
+  React.useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    setError(null)
+    api.campaignYaml(campaign.campaign_id).then((r) => {
+      const parsed = parseYaml(r.yaml)
+      setRaw(parsed)
+      setName(String(parsed.name ?? ""))
+      setOffer(String(parsed.offer ?? ""))
+      setIndustries(arr(parsed.target_industries).join(", "))
+      setCities(arr(parsed.geography && typeof parsed.geography === "object" ? (parsed.geography as Record<string, unknown>).cities : parsed.cities).join(", "))
+      setKeywords(arr(parsed.buyer_keywords).join(", "))
+      setCategories(arr(parsed.osm_categories).join(", "))
+      setQueries(arr(parsed.search_queries).join(", "))
+      setMaxCo(String(parsed.max_companies ?? ""))
+      setMinScore(String(parsed.min_score ?? ""))
+    }).catch((e) => setError((e as Error).message)).finally(() => setLoading(false))
+  }, [open, campaign.campaign_id])
+
+  const save = async () => {
+    setError(null)
+    if (!name.trim() || !offer.trim()) { setError("Name and offer are required."); return }
+    setBusy(true)
+    try {
+      const updated: Record<string, unknown> = {
+        ...raw,
+        name: name.trim(),
+        offer: offer.trim(),
+        target_industries: split(industries),
+        buyer_keywords: split(keywords),
+        osm_categories: split(categories),
+        search_queries: split(queries),
+        max_companies: maxCo.trim() ? parseInt(maxCo, 10) : raw.max_companies,
+        min_score: minScore.trim() ? parseInt(minScore, 10) : raw.min_score,
+      }
+      const geo: Record<string, unknown> = typeof raw.geography === "object" && raw.geography ? { ...raw.geography as Record<string, unknown> } : { countries: ["Pakistan"] }
+      geo.cities = split(cities)
+      updated.geography = geo
+      const yaml = toYaml(updated)
+      const res = await api.saveCampaignYaml(campaign.campaign_id, yaml)
+      if (!res.ok) { setError("Save failed"); return }
+      onSaved()
+      onClose()
+    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+        <SheetHeader><SheetTitle>Edit campaign</SheetTitle></SheetHeader>
+        <div className="flex flex-col gap-4 p-4 pt-0">
+          {loading ? <p className="text-sm text-muted-foreground">Loading config…</p> : (
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Campaign name *</label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">What you sell / offer *</label>
+                <Textarea rows={2} value={offer} onChange={(e) => setOffer(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Target industries <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                <Input value={industries} onChange={(e) => setIndustries(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Cities <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                <Input value={cities} onChange={(e) => setCities(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Buyer keywords <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">OSM categories <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                <Input value={categories} onChange={(e) => setCategories(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Search queries <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                <Input value={queries} onChange={(e) => setQueries(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Max companies</label>
+                  <Input type="number" min={1} max={500} value={maxCo} onChange={(e) => setMaxCo(e.target.value)} className="w-24" />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Min score</label>
+                  <Input type="number" min={0} max={100} value={minScore} onChange={(e) => setMinScore(e.target.value)} className="w-24" />
+                </div>
+              </div>
+            </div>
+          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button onClick={save} disabled={busy || loading}>{busy ? "Saving…" : "Save"}</Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function arr(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(String) : []
+}
+
+function split(s: string): string[] {
+  return s.split(",").map((t) => t.trim()).filter(Boolean)
+}
+
+function parseYaml(text: string): Record<string, unknown> {
+  const obj: Record<string, unknown> = {}
+  let currentKey = ""
+  let listKey = ""
+  const lines = text.split("\n")
+  for (const line of lines) {
+    const trimmed = line.trimEnd()
+    if (!trimmed || trimmed.startsWith("#")) continue
+    const listMatch = trimmed.match(/^\s+-\s+(.*)/)
+    if (listMatch && listKey) {
+      const arr = obj[listKey] as string[]
+      arr.push(listMatch[1].replace(/^['"]|['"]$/g, ""))
+      continue
+    }
+    const kvMatch = trimmed.match(/^(\w[\w_]*):\s*(.*)/)
+    if (kvMatch) {
+      const [, k, v] = kvMatch
+      listKey = ""
+      if (v === "" || v === "[]") {
+        obj[k] = v === "[]" ? [] : {}
+        currentKey = k
+        continue
+      }
+      if (v.startsWith("[") && v.endsWith("]")) {
+        obj[k] = v.slice(1, -1).split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
+        continue
+      }
+      const num = Number(v)
+      if (!isNaN(num) && v.trim() !== "") { obj[k] = num; continue }
+      if (v === "true") { obj[k] = true; continue }
+      if (v === "false") { obj[k] = false; continue }
+      obj[k] = v.replace(/^['"]|['"]$/g, "")
+      continue
+    }
+    const subMatch = trimmed.match(/^\s+(\w[\w_]*):\s*(.*)/)
+    if (subMatch && currentKey) {
+      if (typeof obj[currentKey] !== "object" || Array.isArray(obj[currentKey])) obj[currentKey] = {}
+      const sub = obj[currentKey] as Record<string, unknown>
+      const [, sk, sv] = subMatch
+      if (sv === "" || sv === "[]") {
+        sub[sk] = sv === "[]" ? [] : ""
+        listKey = ""
+        continue
+      }
+      if (sv.startsWith("[") && sv.endsWith("]")) {
+        sub[sk] = sv.slice(1, -1).split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
+        continue
+      }
+      if (sv.startsWith("- ")) {
+        sub[sk] = [sv.slice(2).replace(/^['"]|['"]$/g, "")]
+        listKey = sk
+        obj[currentKey] = sub
+        continue
+      }
+      const num = Number(sv)
+      if (!isNaN(num) && sv.trim() !== "") { sub[sk] = num; continue }
+      sub[sk] = sv.replace(/^['"]|['"]$/g, "")
+      continue
+    }
+  }
+  return obj
+}
+
+function toYaml(obj: Record<string, unknown>, indent = 0): string {
+  const pad = "  ".repeat(indent)
+  const lines: string[] = []
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue
+    if (Array.isArray(v)) {
+      if (v.length === 0) { lines.push(`${pad}${k}: []`); continue }
+      lines.push(`${pad}${k}:`)
+      for (const item of v) lines.push(`${pad}- ${yamlVal(item)}`)
+    } else if (typeof v === "object") {
+      lines.push(`${pad}${k}:`)
+      lines.push(toYaml(v as Record<string, unknown>, indent + 1))
+    } else {
+      lines.push(`${pad}${k}: ${yamlVal(v)}`)
+    }
+  }
+  return lines.join("\n")
+}
+
+function yamlVal(v: unknown): string {
+  if (typeof v === "string") {
+    if (/[:#{}[\],&*?|>!%@`]/.test(v) || v === "" || v === "true" || v === "false") return `'${v.replace(/'/g, "''")}'`
+    return v
+  }
+  return String(v)
+}
+
 function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: () => void }) {
   const [max, setMax] = React.useState(String(campaign.max_companies))
   const [progress, setProgress] = React.useState<RunProgress | null>(campaign.live)
@@ -314,6 +531,7 @@ function Stat({ label, value }: { label: string; value: number }) {
 export default function CampaignsPage() {
   const { campaigns, refresh, loading, error } = useCampaign()
   const [creating, setCreating] = React.useState(false)
+  const [editing, setEditing] = React.useState<Campaign | null>(null)
   const onFinished = React.useCallback(() => { refresh() }, [refresh])
 
   const onCreated = React.useCallback(async () => { await refresh() }, [refresh])
@@ -333,6 +551,7 @@ export default function CampaignsPage() {
         <Button onClick={() => setCreating(true)}><Plus data-icon="inline-start" /> New campaign</Button>
       </div>
       <NewCampaign open={creating} onClose={() => setCreating(false)} onCreated={onCreated} />
+      {editing && <EditCampaign campaign={editing} open={true} onClose={() => setEditing(null)} onSaved={() => { refresh(); setEditing(null) }} />}
       {error && <p className="text-sm text-destructive">API error: {error}</p>}
       {loading && <p className="text-muted-foreground">Loading…</p>}
       {!loading && campaigns.length === 0 && (
@@ -353,6 +572,9 @@ export default function CampaignsPage() {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {c.cities.map((city) => <Badge key={city} variant="outline" className="text-[11px] px-1.5 py-0">{city}</Badge>)}
+                  <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-primary" onClick={() => setEditing(c)}>
+                    <Pencil className="size-3.5" />
+                  </Button>
                   {!c.file && (
                     <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
                       <Trash2 className="size-3.5" />
