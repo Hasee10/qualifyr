@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (adaptive campaign form, adjustable usage limits, open-source readiness)
+Last updated: 2026-10-03 (discovery relevance filter, campaign edit UI, NL parser fixes)
 
 ---
 
@@ -135,6 +135,21 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - `cryptography` added to core deps; `.env.example` updated with encryption key + limit overrides.
 - Hard filters: `min_google_reviews`, `max_proximity_tier`, `require_online_gap` — applied
   post-scoring in the pipeline. City/province extraction from `config/defaults/pk_cities.yaml`.
+
+**Post-discovery relevance filter** ✅ **DONE (2026-10-03):**
+- `_discovery_relevance_filter()` in `pipeline.py` drops map-sourced companies (OSM/Overture)
+  whose name, category, or address contain none of the offer's relevance keywords. Prevents
+  broad OSM/Overture categories from flooding results with unrelated businesses (e.g. coffee
+  shops when searching for laser land leveler dealers).
+- Web-search, PPRA, KCCI, seed-CSV results pass automatically (query already targeted).
+- Companies matching a campaign-requested category, or having no category, also pass.
+- Stats: `discovery_relevance_dropped` count in RunStats, shown in progress message.
+- 4 tests in `test_nl_campaign.py`.
+
+**Campaign edit UI** ✅ **DONE (2026-10-03):**
+- Pencil icon on every campaign card opens an edit sheet with all config fields pre-filled
+  (name, offer, industries, cities, keywords, OSM categories, search queries, max companies,
+  min score). Saves via the existing YAML API (`PUT /campaigns/{id}/yaml`).
 
 **CI** — `ci.yml`: `test` job runs the DB-backed tests against a throwaway `postgres:16`
 service (`GTM_TEST_DATABASE_URL`); `web` job runs `npm ci` + `next build` (tsc + ESLint). Both
