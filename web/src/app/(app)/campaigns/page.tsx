@@ -14,6 +14,7 @@ import { useCampaign } from "@/components/campaign-context"
 
 function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [text, setText] = React.useState("")
+  const [maxCo, setMaxCo] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [result, setResult] = React.useState<{ config: Record<string, unknown>; explanation: Record<string, unknown> | string } | null>(null)
@@ -23,8 +24,11 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     if (!text.trim()) { setError("Describe what you're looking for."); return }
     setBusy(true)
     try {
-      const res = await api.createCampaignNL(text.trim())
+      const mc = maxCo.trim() ? parseInt(maxCo, 10) : undefined
+      const res = await api.createCampaignNL(text.trim(), mc ? { max_companies: mc } : undefined)
       setResult({ config: res.config, explanation: res.explanation })
+      const returned = typeof res.explanation === "object" && res.explanation?.max_companies
+      if (returned) setMaxCo(String(returned))
       onCreated()
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
@@ -39,7 +43,6 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     if (Array.isArray(e.cities) && e.cities.length) rows.push({ label: "Cities", value: e.cities.join(", ") })
     if (Array.isArray(e.provinces) && e.provinces.length) rows.push({ label: "Provinces", value: e.provinces.join(", ") })
     if (Array.isArray(e.sectors_matched) && e.sectors_matched.length) rows.push({ label: "Sectors", value: e.sectors_matched.join(", ") })
-    if (e.max_companies) rows.push({ label: "Max companies", value: String(e.max_companies) })
   }
 
   return (
@@ -55,6 +58,19 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
             placeholder="Find grocery stores in Islamabad that need inventory management software"
             autoFocus
           />
+          <div className="flex items-center gap-2">
+            <label htmlFor="max-co" className="text-sm text-muted-foreground whitespace-nowrap">Max companies</label>
+            <input
+              id="max-co"
+              type="number"
+              min={1}
+              max={500}
+              value={maxCo}
+              onChange={(e) => setMaxCo(e.target.value)}
+              placeholder="30"
+              className="w-20 rounded-md border bg-transparent px-2 py-1 text-sm"
+            />
+          </div>
           {!result && (
             <div className="flex flex-wrap gap-1.5">
               {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (

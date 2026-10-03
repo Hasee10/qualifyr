@@ -312,6 +312,7 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
 
 class CampaignNLRequest(BaseModel):
     text: str
+    max_companies: int | None = None
 
 
 @app.post("/campaigns/nl", status_code=201)
@@ -335,6 +336,10 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
     except Exception as exc:  # noqa: BLE001
         db.close()
         raise HTTPException(422, str(exc))
+
+    if body.max_companies is not None:
+        cfg.max_companies = max(1, min(body.max_companies, 500))
+        explanation["max_companies"] = cfg.max_companies
 
     db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
     db.close()
