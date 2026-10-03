@@ -460,3 +460,61 @@ def test_apply_hard_filters_empty():
     )
     result = _apply_hard_filters([lead], {})
     assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# Discovery relevance filter
+# ---------------------------------------------------------------------------
+
+def test_discovery_relevance_filter_drops_irrelevant():
+    from gtm_engine.pipeline import _discovery_relevance_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [
+        DiscoveredCompany(name="Laser Equipment Co", category="shop=tools", source="osm"),
+        DiscoveredCompany(name="Gloria Jeans Coffee", category="shop=coffee", source="osm"),
+        DiscoveredCompany(name="Some Web Result", category=None, source="web_search"),
+    ]
+    kept, dropped = _discovery_relevance_filter(companies, ["laser", "equipment", "leveler"])
+    assert dropped == 1
+    assert len(kept) == 2
+    names = [c.name for c in kept]
+    assert "Laser Equipment Co" in names
+    assert "Some Web Result" in names
+    assert "Gloria Jeans Coffee" not in names
+
+
+def test_discovery_relevance_filter_passes_matching_category():
+    from gtm_engine.pipeline import _discovery_relevance_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [
+        DiscoveredCompany(name="ABC Store", category="shop=tools", source="osm"),
+    ]
+    kept, dropped = _discovery_relevance_filter(companies, ["laser"], {"shop=tools"})
+    assert dropped == 0
+    assert len(kept) == 1
+
+
+def test_discovery_relevance_filter_noop_without_keywords():
+    from gtm_engine.pipeline import _discovery_relevance_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [
+        DiscoveredCompany(name="Anything", category="shop=coffee", source="osm"),
+    ]
+    kept, dropped = _discovery_relevance_filter(companies, [])
+    assert dropped == 0
+    assert len(kept) == 1
+
+
+def test_discovery_relevance_filter_passes_no_category():
+    from gtm_engine.pipeline import _discovery_relevance_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [
+        DiscoveredCompany(name="Unknown Co", category=None, source="osm"),
+    ]
+    kept, dropped = _discovery_relevance_filter(companies, ["laser", "equipment"])
+    assert dropped == 0
+    assert len(kept) == 1

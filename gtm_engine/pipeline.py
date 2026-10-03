@@ -64,6 +64,7 @@ class RunStats:
     rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
+    discovery_relevance_dropped: int = 0  # companies dropped post-discovery for not matching offer keywords
     relevance_keywords: list[str] = field(default_factory=list)  # the offer's need-terms this run used
     discovery_sectors: list[str] = field(default_factory=list)   # sectors derived from the offer (E1)
     buyer: int = 0
@@ -136,6 +137,44 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 # (promote a keyword-thin UNKNOWN to BUYER, or demote a keyword-only BUYER with no real need).
 # Below it, the verdict is recorded and lightly scored but does not flip the type.
 INTENT_THRESHOLD = 0.6
+
+
+def _discovery_relevance_filter(
+    companies: list[DiscoveredCompany],
+    offer_keywords: list[str],
+    campaign_categories: set[str] | None = None,
+) -> tuple[list[DiscoveredCompany], int]:
+    """Drop map-sourced companies whose name/category/address contain none of the offer keywords.
+
+    Web-search results pass automatically (the query already targeted them).  Companies whose
+    discovery category matches one the campaign explicitly requested also pass.  When no
+    keywords are available (generic campaign), everything passes — the filter is a no-op.
+    Returns (kept, dropped_count).
+    """
+    terms = [t.strip().lower() for t in offer_keywords if t and t.strip()]
+    if not terms:
+        return companies, 0
+    cats = campaign_categories or set()
+    kept: list[DiscoveredCompany] = []
+    dropped = 0
+    for c in companies:
+        if c.source in ("web_search", "ppra", "kcci", "seed_csv"):
+            kept.append(c)
+            continue
+        if c.category and c.category in cats:
+            kept.append(c)
+            continue
+        if not c.category:
+            kept.append(c)
+            continue
+        haystack = " ".join(filter(None, [c.name, c.category, c.address])).lower()
+        if any(t in haystack for t in terms):
+            kept.append(c)
+        else:
+            dropped += 1
+    if dropped:
+        log.info("discovery relevance filter: kept %d, dropped %d (no offer keyword match)", len(kept), dropped)
+    return kept, dropped
 
 
 def _round_robin(lists: list[list]) -> list:
@@ -744,13 +783,19 @@ class Pipeline:
                 before = len(discovered)
                 discovered = [c for c in discovered if not c.extra.get("brand")]
                 stats.chains_excluded = before - len(discovered)
+            campaign_cats = set(campaign.osm_categories) | {f"overture={c}" for c in campaign.overture_categories}
+            discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
+                discovered, self._relevance_keywords, campaign_cats)
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)
             companies, stats.dead_websites = await self._take_live(
                 companies, campaign.max_companies, progress)
             stats.after_dedupe = len(companies)
-            await _emit(progress, "dedupe", len(companies), len(companies), f"{len(companies)} unique companies")
+            dedupe_msg = f"{len(companies)} unique companies"
+            if stats.discovery_relevance_dropped:
+                dedupe_msg += f" ({stats.discovery_relevance_dropped} irrelevant dropped)"
+            await _emit(progress, "dedupe", len(companies), len(companies), dedupe_msg)
 
             classifier = BuyerClassifier(campaign, self.defaults)
             leads: list[Lead] = []
