@@ -98,6 +98,17 @@ _OFFER_PATTERNS = [
     re.compile(r"(?:selling|offering|providing)\s+(.+?)(?:\.|,|to\s|for\s|$)", re.I),
 ]
 
+_SUBJECT_PATTERNS = [
+    re.compile(r"(?:find|search|look\s+for|show|get|list)\s+(.+?)\s+(?:near|close\s+to|around|in\s+the\s+area\s+of)\b", re.I),
+    re.compile(r"(?:find|search|look\s+for|show|get|list)\s+(.+?)\s+in\s+\w", re.I),
+    re.compile(r"(?:find|search|look\s+for|show|get|list)\s+(.+?)(?:\.|,|$)", re.I),
+]
+
+_STRIP_GEOGRAPHY = re.compile(
+    r"\s*\b(?:in|near|around|close\s+to|from)\s+.*$", re.I)
+_STRIP_QUANTIFIER = re.compile(
+    r"^\s*(?:all|top|best|some|any|the|me)\s+", re.I)
+
 _EXCLUDE_PATTERNS = [
     re.compile(r"(?:ignore|exclude|skip|remove|drop|no)\s+(?:chains?\s+(?:like|such as)\s+)?(.+?)(?:\.|,|$)", re.I),
     re.compile(r"(?:don'?t|do not)\s+(?:include|want|need)\s+(.+?)(?:\.|,|$)", re.I),
@@ -161,6 +172,21 @@ def _extract_offer(text: str) -> str | None:
     return None
 
 
+def _extract_subject(text: str) -> list[str]:
+    """Extract the business type the user is looking for (e.g. "newspaper and media offices")."""
+    for pat in _SUBJECT_PATTERNS:
+        m = pat.search(text)
+        if m:
+            raw = m.group(1).strip()
+            raw = _STRIP_GEOGRAPHY.sub("", raw).strip()
+            raw = _STRIP_QUANTIFIER.sub("", raw).strip()
+            if len(raw) < 2:
+                continue
+            parts = re.split(r"\s+and\s+|\s*,\s*", raw)
+            return [p.strip() for p in parts if len(p.strip()) >= 2]
+    return []
+
+
 def _extract_exclusions(text: str) -> tuple[list[str], bool]:
     terms: list[str] = []
     chains = bool(_CHAIN_RE.search(text))
@@ -210,6 +236,7 @@ def parse_intent(text: str) -> CampaignDraft:
     draft.provinces = _extract_provinces(text)
     draft.areas = _extract_areas(text)
     draft.offer = _extract_offer(text)
+    draft.target_industries = _extract_subject(text)
 
     taxonomy = load_taxonomy()
     full_text = text
@@ -289,13 +316,18 @@ def build_campaign_config(
         offer = draft.raw_text.strip()[:200]
 
     search_queries = list(draft.search_queries)
+    subject = draft.target_industries[0] if draft.target_industries else None
     if draft.areas and draft.cities:
         for area in draft.areas:
             for city in draft.cities[:1]:
-                industry = draft.target_industries[0] if draft.target_industries else "stores"
-                q = f"{industry} {area} {city}"
+                q = f"{subject or 'stores'} {area} {city}"
                 if q not in search_queries:
                     search_queries.append(q)
+    elif subject and draft.cities:
+        for city in draft.cities[:2]:
+            q = f"{subject} {city}"
+            if q not in search_queries:
+                search_queries.append(q)
 
     geo = GeographyConfig(
         countries=draft.countries or ["Pakistan"],
