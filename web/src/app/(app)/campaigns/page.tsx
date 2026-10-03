@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Play, Download, Plus, Trash2 } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -147,37 +147,44 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
   const stats = progress?.stats
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Companies to process</span>
-        <Input className="w-24" value={max} onChange={(e) => setMax(e.target.value)} disabled={!!running} />
-        <Button onClick={start} disabled={!!running}>
-          <Play data-icon="inline-start" /> {running ? "Running…" : "Run discovery"}
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input className="w-20 h-8 text-sm" value={max} onChange={(e) => setMax(e.target.value)} disabled={!!running} />
+        <Button size="sm" onClick={start} disabled={!!running}>
+          <Play className="size-3.5" /> {running ? "Running…" : "Run"}
         </Button>
-        <Button variant="outline" onClick={() => api.downloadExport(campaign.campaign_id, { min_score: campaign.min_score })}>
-          <Download data-icon="inline-start" /> Qualified CSV
+        <Button size="sm" variant="outline" onClick={() => api.downloadExport(campaign.campaign_id, { min_score: campaign.min_score })}>
+          <Download className="size-3.5" /> CSV
         </Button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
       {progress && progress.stage !== "idle" && (
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-sm">
-            <Badge variant={progress.stage === "failed" ? "destructive" : progress.stage === "completed" ? "default" : "secondary"}>
+          <div className="flex items-center gap-2 text-xs">
+            <Badge variant={progress.stage === "failed" ? "destructive" : progress.stage === "completed" ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
               {progress.stage}
             </Badge>
             <span className="text-muted-foreground">
-              {progress.stage === "discover" ? `${progress.done} companies found` : progress.total ? `${progress.done}/${progress.total}` : ""} {progress.message}
+              {progress.stage === "discover" ? `${progress.done} found` : progress.total ? `${progress.done}/${progress.total}` : ""} {progress.message}
             </span>
           </div>
-          {progress.stage === "process" && <Progress value={pct} className="h-2" />}
+          {progress.stage === "process" && <Progress value={pct} className="h-1.5" />}
           {stats && (
-            <p className="text-xs text-muted-foreground">
-              discovered {stats.discovered} → {stats.after_dedupe} unique · BUYER {stats.buyer} · VENDOR {stats.vendor} · UNKNOWN {stats.unknown} · qualified {stats.qualified} · outreach-ready {stats.outreach_ready} · unreachable {stats.unreachable}
-              {stats.intent_dropped_irrelevant ? ` · ${stats.intent_dropped_irrelevant} off-offer signal(s) dropped` : ""}
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {stats.discovered} discovered → {stats.after_dedupe} unique · {stats.buyer} buyers · {stats.qualified} qualified · {stats.outreach_ready} outreach-ready
             </p>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="text-center">
+      <div className="text-lg font-semibold leading-none">{value}</div>
+      <div className="text-[11px] text-muted-foreground mt-0.5">{label}</div>
     </div>
   )
 }
@@ -195,11 +202,11 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-muted-foreground">Create a search, run discovery, and results land in Leads. Each run keeps its history.</p>
+          <p className="text-sm text-muted-foreground">Create a search, run discovery, and results land in Leads.</p>
         </div>
         <Button onClick={() => setCreating(true)}><Plus data-icon="inline-start" /> New campaign</Button>
       </div>
@@ -209,54 +216,50 @@ export default function CampaignsPage() {
       {!loading && campaigns.length === 0 && (
         <Card><CardContent className="py-10 text-center text-muted-foreground">No campaigns yet. Create one to start a search.</CardContent></Card>
       )}
-      {campaigns.map((c) => (
-        <Card key={c.campaign_id}>
-          <CardHeader>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <CardTitle>{c.name}</CardTitle>
-                <CardDescription>{typeof c.offer === "string" ? c.offer : JSON.stringify(c.offer)}</CardDescription>
+      {campaigns.map((c) => {
+        const offer = typeof c.offer === "string" ? c.offer : JSON.stringify(c.offer)
+        const showOffer = offer !== c.name
+
+        return (
+          <Card key={c.campaign_id} className="overflow-hidden">
+            <CardContent className="p-4 grid gap-3">
+              {/* Header row */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-medium truncate">{c.name}</h3>
+                  {showOffer && <p className="text-sm text-muted-foreground truncate">{offer}</p>}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {c.cities.map((city) => <Badge key={city} variant="outline" className="text-[11px] px-1.5 py-0">{city}</Badge>)}
+                  {!c.file && (
+                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1">
-                {c.cities.map((city) => <Badge key={city} variant="outline">{city}</Badge>)}
-                <Badge variant="secondary">min score {c.min_score}</Badge>
-                {!c.file && (
-                  <Button variant="ghost" size="sm" onClick={() => remove(c)} aria-label="Delete campaign" className="text-muted-foreground hover:text-destructive">
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
+
+              {/* Stats row */}
+              <div className="flex items-center gap-6">
+                <Stat label="Companies" value={c.leads} />
+                <Stat label="Buyers" value={c.buyers} />
+                <Stat label="Qualified" value={c.qualified} />
+                <Stat label="Outreach" value={c.outreach_ready} />
+                <div className="ml-auto">
+                  <RunPanel campaign={c} onFinished={onFinished} />
+                </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            {c.discovery_sectors && c.discovery_sectors.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Searching sectors:</span>
-                {c.discovery_sectors.map((s) => <Badge key={s} variant="outline" className="font-normal">{s.replace(/_/g, " ")}</Badge>)}
-              </div>
-            )}
-            {c.relevance_keywords && c.relevance_keywords.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Relevance keywords:</span>
-                {c.relevance_keywords.slice(0, 12).map((k) => <Badge key={k} variant="secondary" className="font-normal">{k}</Badge>)}
-                {c.relevance_keywords.length > 12 && <span className="text-xs text-muted-foreground">+{c.relevance_keywords.length - 12}</span>}
-              </div>
-            )}
-            <div className="grid gap-2 text-sm sm:grid-cols-4">
-              <div><span className="text-muted-foreground">Companies</span><div className="text-xl font-semibold">{c.leads}</div></div>
-              <div><span className="text-muted-foreground">Buyers</span><div className="text-xl font-semibold">{c.buyers}</div></div>
-              <div><span className="text-muted-foreground">Qualified</span><div className="text-xl font-semibold">{c.qualified}</div></div>
-              <div><span className="text-muted-foreground">Outreach-ready</span><div className="text-xl font-semibold">{c.outreach_ready}</div></div>
-            </div>
-            {c.last_run && (
-              <p className="text-xs text-muted-foreground">
-                Last run {c.last_run.run_id} · {c.last_run.status} · {new Date(c.last_run.started_at).toLocaleString()}
-              </p>
-            )}
-            <RunPanel campaign={c} onFinished={onFinished} />
-          </CardContent>
-        </Card>
-      ))}
+
+              {/* Last run — compact */}
+              {c.last_run && (
+                <p className="text-[11px] text-muted-foreground">
+                  Last run: {c.last_run.status} · {new Date(c.last_run.started_at).toLocaleDateString()}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })}
     </div>
   )
 }
