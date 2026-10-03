@@ -273,8 +273,9 @@ def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
         db.close()
         return out
     except Exception as exc:
-        log.error("campaigns endpoint crash: %s\n%s", exc, _tb.format_exc())
-        raise HTTPException(500, f"campaigns error: {exc}")
+        tb = _tb.format_exc()
+        log.error("campaigns endpoint crash: %s\n%s", exc, tb)
+        raise HTTPException(500, f"campaigns error [{type(exc).__name__}]: {exc}\n{tb}")
 
 
 class CampaignCreate(BaseModel):
