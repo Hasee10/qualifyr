@@ -6,91 +6,85 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
 
-const csv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean)
-
 function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = React.useState("")
-  const [offer, setOffer] = React.useState("")
-  const [countries, setCountries] = React.useState("Pakistan")
-  const [provinces, setProvinces] = React.useState("")
-  const [cities, setCities] = React.useState("")
-  const [industries, setIndustries] = React.useState("")
-  const [buyerKeywords, setBuyerKeywords] = React.useState("")
-  const [osm, setOsm] = React.useState("")
-  const [overture, setOverture] = React.useState("")
-  const [minScore, setMinScore] = React.useState("70")
-  const [maxCompanies, setMaxCompanies] = React.useState("60")
+  const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [result, setResult] = React.useState<{ config: Record<string, unknown>; explanation: string } | null>(null)
 
   const submit = async () => {
     setError(null)
-    if (!name.trim() || !offer.trim()) { setError("Name and offer are required."); return }
+    if (!text.trim()) { setError("Describe what you're looking for."); return }
     setBusy(true)
     try {
-      await api.createCampaign({
-        name: name.trim(), offer: offer.trim(),
-        countries: csv(countries), provinces: csv(provinces), cities: csv(cities),
-        target_industries: csv(industries), buyer_keywords: csv(buyerKeywords),
-        osm_categories: csv(osm), overture_categories: csv(overture),
-        min_score: Number(minScore) || 70, max_companies: Number(maxCompanies) || 60,
-      })
-      onCreated(); onClose()
+      const res = await api.createCampaignNL(text.trim())
+      setResult({ config: res.config, explanation: res.explanation })
+      onCreated()
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
+  const close = () => { setText(""); setError(null); setResult(null); onClose() }
+
+  const cfg = result?.config
+  const chips: { label: string; value: string }[] = []
+  if (cfg) {
+    if (cfg.name) chips.push({ label: "Name", value: String(cfg.name) })
+    const cities = cfg.geography && typeof cfg.geography === "object" && "cities" in cfg.geography ? (cfg.geography as Record<string, unknown>).cities : null
+    if (Array.isArray(cities) && cities.length) chips.push({ label: "Cities", value: cities.join(", ") })
+    if (Array.isArray(cfg.target_industries) && cfg.target_industries.length) chips.push({ label: "Industries", value: cfg.target_industries.join(", ") })
+    if (cfg.offer) chips.push({ label: "Offer", value: String(cfg.offer) })
+  }
+
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+    <Sheet open={open} onOpenChange={(o) => !o && close()}>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader><SheetTitle>New campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
-          <div className="grid gap-1.5">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Retail & apparel, Lahore" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label>What you offer</Label>
-            <Textarea rows={2} value={offer} onChange={(e) => setOffer(e.target.value)} placeholder="Order-management and inventory software for growing retailers" />
-            <p className="text-xs text-muted-foreground">Used for context and personalization. Keyword generation will build on this.</p>
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Countries</Label>
-            <Input value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="Pakistan" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5"><Label>Provinces / states</Label><Input value={provinces} onChange={(e) => setProvinces(e.target.value)} placeholder="Punjab, Sindh" /></div>
-            <div className="grid gap-1.5"><Label>Cities</Label><Input value={cities} onChange={(e) => setCities(e.target.value)} placeholder="Lahore, Karachi" /></div>
-          </div>
-          <p className="text-xs text-muted-foreground">Comma-separated. A province is searched as a broad area; a city is narrower. Leave provinces blank to search only the named cities.</p>
-          <div className="grid gap-1.5">
-            <Label>Target industries</Label>
-            <Input value={industries} onChange={(e) => setIndustries(e.target.value)} placeholder="retail, clothing, fashion" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Buyer keywords</Label>
-            <Input value={buyerKeywords} onChange={(e) => setBuyerKeywords(e.target.value)} placeholder="retailer, store, brand, outlet" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5"><Label>OSM categories</Label><Input value={osm} onChange={(e) => setOsm(e.target.value)} placeholder="shop=clothes" /></div>
-            <div className="grid gap-1.5"><Label>Overture categories</Label><Input value={overture} onChange={(e) => setOverture(e.target.value)} placeholder="clothing_store" /></div>
-          </div>
-          <p className="text-xs text-muted-foreground">Comma-separated, and optional — leave them blank and the engine derives the sectors to search from your offer above. Fill them in only to override that.</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5"><Label>Min score</Label><Input value={minScore} onChange={(e) => setMinScore(e.target.value)} /></div>
-            <div className="grid gap-1.5"><Label>Companies per run (API cap)</Label><Input value={maxCompanies} onChange={(e) => setMaxCompanies(e.target.value)} /></div>
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create campaign"}</Button>
-          </div>
+          {!result ? (
+            <>
+              <p className="text-sm text-muted-foreground">Describe what you&apos;re looking for in plain English. The engine figures out the cities, industries, and search categories automatically.</p>
+              <Textarea
+                rows={4}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Find grocery stores in Islamabad that need inventory management software"
+                autoFocus
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (
+                  <button key={ex} type="button" onClick={() => setText(ex)} className="rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors">
+                    {ex}
+                  </button>
+                ))}
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
+                <Button onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create campaign"}</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-sm font-medium mb-2">Campaign created</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {chips.map((c) => (
+                    <Badge key={c.label} variant="outline"><span className="font-medium mr-1">{c.label}:</span> {c.value}</Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{result.explanation}</p>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={close}>Done</Button>
+              </div>
+            </>
+          )}
         </div>
       </SheetContent>
     </Sheet>
