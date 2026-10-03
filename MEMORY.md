@@ -248,6 +248,14 @@ push each coherent slice with CI kept green; keep MEMORY.md current.
 - WhatsApp: no legit registration-check API (Meta's `contacts` endpoint always says "valid").
   Detect via `wa.me` links (proof) then `03xx` mobile prefix (candidate). ToS-safe only.
 
+**Google Places API impact (verified 2026-10-03, Gujranwala bakeries, 20 companies):**
+Without Places: 4 buyers, 0 qualified, 0 outreach-ready (max score ~35).
+With Places: 4 buyers, 2 qualified, 2 outreach-ready (max score 64). 9 API calls used.
+The `review_band` component (0–30 pts) is the biggest single scoring factor and is empty without
+Places data. Businesses like Imtiaz Mega (6,929 reviews, 4.4★) and Junaid Jamshed (710 reviews,
+4.2★) cross the qualification threshold only with Places enrichment.
+**Important `.env` format:** use `GTM_GOOGLE_PLACES_API_KEY=<key>`, not `Places API key = <key>`.
+
 **Market data (central Karachi, OSM, 2026-09-22):** 13,294 named businesses; 23.0% mobile
 (WhatsApp candidates) vs 0.2% email — i.e. phone/WhatsApp is the reachable channel in PK, email
 is near-empty. 3.5% have a website *tag* (a floor, not the true rate — a missing tag ≠ no site).
@@ -259,13 +267,14 @@ is near-empty. 3.5% have a website *tag* (a floor, not the true rate — a missi
 - CEO sign-off on **multi-country scope** (P3) and on **E3 competitor analysis**.
 - Confirm **`GTM_GROQ_API_KEY` is a GitHub Actions secret** — without it the gather-leads job
   degrades to the keyword path (never breaks, but no intent/offer-derived discovery live).
-- `GTM_ENCRYPTION_KEY` — added to GitHub Secrets + Vercel env vars (2026-10-03). Verify the
-  Settings page no longer shows the red warning after redeployment.
+- `GTM_ENCRYPTION_KEY` — added to GitHub Secrets + Vercel env vars (2026-10-03). Needs
+  verification: refresh Settings page, confirm red warning is gone, try saving a test key.
 - Missing keys: `GTM_SHEETS_CREDENTIALS_JSON`, `GTM_MAILBOX_2_*`, `GTM_GMAIL_REFRESH_TOKEN`
   (needs `gtm outreach gmail-auth`).
 - `docs/API_KEYS.md` quota text is stale (Hunter/Brave); no Brave monthly spend counter in code.
 - Support email in the landing FAQ is `outreach.grydin@gmail.com`.
-- **Compare leads with vs without Google Places API key** — requested, never executed.
+- **Outreach end-to-end test** — mailbox UI is built, needs user to add SMTP creds and test
+  sending from the Outreach tab.
 
 ---
 
