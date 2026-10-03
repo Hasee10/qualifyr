@@ -79,7 +79,7 @@ async def test_web_search_discovery_filters_directories_social_and_dedupes(monke
                ("https://outfitters.com.pk/", "Outfitters")],
     }
 
-    async def fake_search(fetcher, settings, query):
+    async def fake_search(fetcher, settings, query, **kwargs):
         return results.get(query, [])
 
     monkeypatch.setattr(ws, "search_web", fake_search)
@@ -99,7 +99,7 @@ async def test_web_search_discovery_filters_directories_social_and_dedupes(monke
 async def test_web_search_discovery_respects_the_query_cap(monkeypatch):
     calls: list[str] = []
 
-    async def fake_search(fetcher, settings, query):
+    async def fake_search(fetcher, settings, query, **kwargs):
         calls.append(query)
         return []
 
