@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
-  const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up"
+  const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up" || pathname === "/reset-password"
 
   // Nothing to check, and nothing we could check with. Note this only affects *navigation*:
   // the API refuses unauthenticated requests regardless, so an unconfigured deploy shows an
@@ -50,7 +50,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (isAuthPage && user) {
+  if (isAuthPage && user && pathname !== "/reset-password") {
     const url = request.nextUrl.clone()
     url.pathname = "/dashboard"
     url.search = ""

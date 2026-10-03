@@ -16,6 +16,28 @@ export function SignInForm() {
   const [showPassword, setShowPassword] = React.useState(false)
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [resetMode, setResetMode] = React.useState(false)
+  const [resetSent, setResetSent] = React.useState(false)
+
+  async function onReset(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    setPending(true)
+    const form = new FormData(event.currentTarget)
+    const email = String(form.get("email") ?? "").trim()
+    if (!email) { setError("Enter your email address."); setPending(false); return }
+    try {
+      const { error } = await createClient().auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      })
+      if (error) { setError(error.message); return }
+      setResetSent(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reach the auth service.")
+    } finally {
+      setPending(false)
+    }
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -55,6 +77,37 @@ export function SignInForm() {
     )
   }
 
+  if (resetMode) {
+    if (resetSent) {
+      return (
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Check your inbox for a password reset link. It may take a minute to arrive.
+          </p>
+          <button type="button" onClick={() => { setResetMode(false); setResetSent(false); setError(null) }} className="text-sm text-brand underline-offset-4 hover:underline self-start">
+            Back to sign in
+          </button>
+        </div>
+      )
+    }
+    return (
+      <form onSubmit={onReset} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="email">Email</Label>
+          <Input id="email" name="email" type="email" autoComplete="email" placeholder="you@company.com" required className="h-10" />
+        </div>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <Button type="submit" disabled={pending} className="h-10 bg-brand text-brand-foreground hover:bg-brand/90">
+          {pending && <Loader2 className="size-4 animate-spin" />}
+          {pending ? "Sending…" : "Send reset link"}
+        </Button>
+        <button type="button" onClick={() => { setResetMode(false); setError(null) }} className="text-sm text-muted-foreground underline-offset-4 hover:underline self-start">
+          Back to sign in
+        </button>
+      </form>
+    )
+  }
+
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
@@ -71,7 +124,12 @@ export function SignInForm() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">Password</Label>
+          <button type="button" onClick={() => { setResetMode(true); setError(null) }} className="text-xs text-muted-foreground underline-offset-4 hover:underline">
+            Forgot password?
+          </button>
+        </div>
         <div className="relative">
           <Input
             id="password"
@@ -95,8 +153,6 @@ export function SignInForm() {
         </div>
       </div>
 
-      {/* Inline and adjacent to the field, not a toast: a toast can be missed, and it
-          disappears while the user is still reading the form it refers to. */}
       {error && (
         <p id="sign-in-error" role="alert" className="text-sm text-destructive">
           {error}
