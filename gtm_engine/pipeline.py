@@ -143,12 +143,15 @@ def _discovery_relevance_filter(
     companies: list[DiscoveredCompany],
     offer_keywords: list[str],
     campaign_categories: set[str] | None = None,
+    *,
+    user_configured_categories: bool = False,
 ) -> tuple[list[DiscoveredCompany], int]:
     """Drop map-sourced companies whose name/category/address contain none of the offer keywords.
 
     Web-search results pass automatically (the query already targeted them).  Companies whose
-    discovery category matches one the campaign explicitly requested also pass.  When no
-    keywords are available (generic campaign), everything passes — the filter is a no-op.
+    discovery category matches one the campaign explicitly requested also pass — but only when
+    those categories were explicitly user-configured, not derived from a fallback sector.
+    When no keywords are available (generic campaign), everything passes — the filter is a no-op.
     Returns (kept, dropped_count).
     """
     terms = [t.strip().lower() for t in offer_keywords if t and t.strip()]
@@ -161,7 +164,7 @@ def _discovery_relevance_filter(
         if c.source in ("web_search", "ppra", "kcci", "seed_csv"):
             kept.append(c)
             continue
-        if c.category and c.category in cats:
+        if user_configured_categories and c.category and c.category in cats:
             kept.append(c)
             continue
         if not c.category:
@@ -748,6 +751,10 @@ class Pipeline:
         self.db.upsert_campaign(campaign.campaign_id, campaign.name, campaign.model_dump(mode="json"))
         self.db.start_run(run_id, campaign.campaign_id)
         self._relevance_keywords = await self._build_relevance_keywords(campaign)
+        for ind in campaign.target_industries:
+            for word in ind.lower().split():
+                if word not in self._relevance_keywords and len(word) > 2:
+                    self._relevance_keywords.append(word)
         stats.relevance_keywords = self._relevance_keywords
         # Feed the generated keywords into discovery itself, not just the relevance gate: a
         # deep copy (so the caller's config is untouched) whose intent_keywords carry the
@@ -759,7 +766,8 @@ class Pipeline:
         # Offer-driven discovery (E1 categories + E2 web-search queries). Derive from the offer
         # to fill map categories the user did not hand-pick and to produce web-search queries.
         # Explicit user map categories always win - deriving only fills the gap, never overrides.
-        needs_categories = not campaign.osm_categories and not campaign.overture_categories
+        user_configured_categories = bool(campaign.osm_categories or campaign.overture_categories)
+        needs_categories = not user_configured_categories
         if campaign.offer and (needs_categories or not campaign.search_queries):
             targets = await derive_discovery_targets(
                 campaign.offer, campaign.target_industries, self.llm,
@@ -785,7 +793,8 @@ class Pipeline:
                 stats.chains_excluded = before - len(discovered)
             campaign_cats = set(campaign.osm_categories) | {f"overture={c}" for c in campaign.overture_categories}
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
-                discovered, self._relevance_keywords, campaign_cats)
+                discovered, self._relevance_keywords, campaign_cats,
+                user_configured_categories=user_configured_categories)
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)

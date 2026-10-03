@@ -495,15 +495,22 @@ def test_discovery_relevance_filter_drops_irrelevant():
 
 
 def test_discovery_relevance_filter_passes_matching_category():
+    """User-configured categories bypass keyword check; derived ones do not."""
     from gtm_engine.pipeline import _discovery_relevance_filter
     from gtm_engine.models import DiscoveredCompany
 
     companies = [
         DiscoveredCompany(name="ABC Store", category="shop=tools", source="osm"),
     ]
-    kept, dropped = _discovery_relevance_filter(companies, ["laser"], {"shop=tools"})
+    kept, dropped = _discovery_relevance_filter(
+        companies, ["laser"], {"shop=tools"}, user_configured_categories=True)
     assert dropped == 0
     assert len(kept) == 1
+
+    kept2, dropped2 = _discovery_relevance_filter(
+        companies, ["laser"], {"shop=tools"}, user_configured_categories=False)
+    assert dropped2 == 1
+    assert len(kept2) == 0
 
 
 def test_discovery_relevance_filter_noop_without_keywords():
