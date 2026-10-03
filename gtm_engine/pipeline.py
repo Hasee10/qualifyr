@@ -75,6 +75,7 @@ class RunStats:
     duplicates: int = 0
     chains_excluded: int = 0
     hard_filtered: int = 0
+    places_api_calls: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -384,6 +385,7 @@ class Pipeline:
                 and cls.company_type == CompanyType.BUYER
                 and self._places_budget > 0):
             self._places_budget -= 1
+            stats.places_api_calls += 1
             places = await places_enrichment(
                 self.fetcher, company.name,
                 company.city or "Pakistan",
@@ -768,6 +770,9 @@ class Pipeline:
                 leads = _apply_hard_filters(leads, campaign.hard_filters)
                 stats.hard_filtered = before - len(leads)
             self.db.finish_run(run_id, "completed", stats.as_dict())
+            if stats.places_api_calls:
+                log.info("Google Places API: %d calls this run (budget remaining: %d/%d)",
+                         stats.places_api_calls, self._places_budget, self.settings.places_max_companies_per_run)
             log.info("run %s finished: %s", run_id, stats.as_dict())
             return RunResult(run_id=run_id, campaign_id=campaign.campaign_id, stats=stats, leads=leads)
         except Exception:

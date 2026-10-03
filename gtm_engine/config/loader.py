@@ -126,6 +126,8 @@ def load_settings(path: Path | None = None) -> EngineSettings:
         if env_val is not None:
             data[key] = env_val
     settings = EngineSettings.model_validate(data)
+    if settings.google_places_api_key and not settings.enable_places_enrichment:
+        settings.enable_places_enrichment = True
     for attr in ("db_path", "export_dir"):
         p = getattr(settings, attr)
         if not p.is_absolute():

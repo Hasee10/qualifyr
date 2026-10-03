@@ -211,7 +211,7 @@ class EngineSettings(BaseModel):
     press_max_companies_per_run: int = 40
     enable_places_enrichment: bool = False
     google_places_api_key: str | None = None
-    places_max_companies_per_run: int = 50
+    places_max_companies_per_run: int = 20
     enable_review_text: bool = False
     # Proximity scoring anchor: the user's office/home location.
     # Companies are ranked by distance from this point (Tier 1/2/3).

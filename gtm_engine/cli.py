@@ -178,6 +178,8 @@ async def _nl(args: argparse.Namespace) -> int:
     print(f"  discovered {s.discovered} -> {s.after_dedupe} unique; processed {s.processed}")
     print(f"  BUYER {s.buyer} | VENDOR {s.vendor} | UNKNOWN {s.unknown}")
     print(f"  qualified {s.qualified} | outreach-ready {s.outreach_ready}")
+    if s.places_api_calls:
+        print(f"  Google Places API: {s.places_api_calls} calls")
     if s.hard_filtered:
         print(f"  hard-filtered {s.hard_filtered} leads")
 
