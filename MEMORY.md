@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (NL frontend, campaigns UI cleanup, mailbox management, CSV fix)
+Last updated: 2026-10-03 (adaptive campaign form, adjustable usage limits, open-source readiness)
 
 ---
 
@@ -111,14 +111,27 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - Daily usage limits: `usage_counts` table, per-user caps (brave: 50, groq: 200, hunter: 10,
   places: 20). Configurable via `GTM_DAILY_LIMIT_{RESOURCE}`. Engine degrades to free fallbacks
   when limit hit.
+- **User-adjustable limits:** users can change their own daily caps from Settings → Usage tab
+  (inline edit, range 1 to 10× default). Stored in `user_preferences` as `daily_limit_{resource}`.
+  Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
-  "Usage" tab (progress bars per resource, daily reset at UTC midnight).
+  "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
 - Monetization vote: `user_preferences` table, radio + comment in Settings; captures
   own-keys/managed-paid/undecided preference for product direction.
 - CSV + Google Sheets deep link: after download, "View in Google Sheets" link on leads page.
 - Key resolution wired into pipeline: `Pipeline(resolved_keys=...)` threads to search.py,
   client.py, verifier.py, places.py, web_search.py. CLI path unchanged (env vars only).
-- 7 new API endpoints: `/settings/api-keys` (CRUD + test), `/settings/usage`, `/settings/preferences`.
+- **Adaptive campaign form:** "New campaign" sheet checks which API keys the user has configured
+  and adapts the form accordingly:
+  - Groq present → NL text input (auto mode: describe in plain English, engine handles the rest)
+  - Groq absent → manual form: name, offer, industries, cities, keywords + info banner nudging
+    toward adding a Groq key in Settings
+  - Brave absent (either mode) → extra fields for OSM categories / search queries so the user
+    can guide discovery manually when web search is unavailable
+  - Places / Hunter / Gemini degrade silently — no extra form fields needed
+  - NL mode submits to `POST /campaigns/nl`, manual mode to `POST /campaigns` (both pre-existing)
+- 8 new API endpoints: `/settings/api-keys` (CRUD + test), `/settings/usage` (GET + PUT per
+  resource), `/settings/preferences` (GET + PUT).
 - `cryptography` added to core deps; `.env.example` updated with encryption key + limit overrides.
 - Hard filters: `min_google_reviews`, `max_proximity_tier`, `require_online_gap` — applied
   post-scoring in the pipeline. City/province extraction from `config/defaults/pk_cities.yaml`.
