@@ -62,13 +62,12 @@ def test_extract_offer_providing():
     assert "erp" in draft.offer.lower()
 
 
-def test_no_offer_uses_structured_fallback():
+def test_no_offer_uses_raw_text():
     text = "grocery stores in Islamabad"
     draft = parse_intent(text)
     assert draft.offer is None
     cfg = build_campaign_config(draft)
-    assert "Islamabad" in cfg.offer
-    assert cfg.offer != text
+    assert cfg.offer == text
 
 
 # ---------------------------------------------------------------------------

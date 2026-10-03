@@ -116,6 +116,7 @@ _NEAR_RE = re.compile(r"(?:near|close\s+to|around|in\s+the\s+area\s+of)\s+(.+?)(
 _AREA_RE = re.compile(
     r"\b([A-Z]-\d{1,2}(?:/\d)?|[EFGHI]-\d{1,2}|DHA(?:\s+Phase\s*\d+)?|Gulberg|Saddar|Blue\s*Area|Bahria\s*Town"
     r"|Model\s*Town|Garden\s*Town|Johar\s*Town|Cantt|Clifton|Defence|PECHS|Gulshan"
+    r"|Askari\s*\d+|Wapda\s*Town|Valencia|Lake\s*City|EME\s*Society|Cavalry\s*Ground"
     r"|Satellite\s*Town|PWD|CDA\s*Sector\s*\w+)\b", re.I)
 
 
@@ -238,18 +239,22 @@ def parse_intent(text: str) -> CampaignDraft:
 def _name_from_draft(draft: CampaignDraft) -> str:
     if draft.name:
         return draft.name.strip()[:80]
-    parts: list[str] = []
-    if draft.target_industries:
-        parts.append(", ".join(draft.target_industries[:2]).title())
-    elif draft.offer:
-        parts.append(draft.offer[:40].strip())
-    if draft.areas:
-        parts.append("near " + ", ".join(draft.areas[:3]))
-    if draft.cities:
-        parts.append("in " + ", ".join(draft.cities[:2]))
-    if parts:
+    has_subject = bool(draft.target_industries or draft.offer)
+    if has_subject:
+        parts: list[str] = []
+        if draft.target_industries:
+            parts.append(", ".join(draft.target_industries[:2]).title())
+        elif draft.offer:
+            parts.append(draft.offer[:40].strip())
+        if draft.areas:
+            parts.append("near " + ", ".join(draft.areas[:3]))
+        if draft.cities:
+            parts.append("in " + ", ".join(draft.cities[:2]))
         return " ".join(parts)[:80]
-    return draft.raw_text.strip()[:60]
+    raw = draft.raw_text.strip()
+    if len(raw) <= 60:
+        return raw
+    return raw[:57].rsplit(" ", 1)[0] + "..."
 
 
 def build_campaign_config(
@@ -265,10 +270,15 @@ def build_campaign_config(
     name = _name_from_draft(draft)
     cid = slugify_campaign_id(name[:60], existing_ids)
 
-    offer = draft.offer or (
-        f"Find {', '.join(draft.target_industries[:3]) or 'businesses'} "
-        f"in {', '.join(draft.cities) or 'Pakistan'}"
-    )
+    if draft.offer:
+        offer = draft.offer
+    elif draft.target_industries:
+        offer = (
+            f"Find {', '.join(draft.target_industries[:3])} "
+            f"in {', '.join(draft.cities) or 'Pakistan'}"
+        )
+    else:
+        offer = draft.raw_text.strip()[:200]
 
     search_queries = list(draft.search_queries)
     if draft.areas and draft.cities:
