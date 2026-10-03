@@ -107,6 +107,7 @@ export interface Campaign {
   cities: string[]
   countries: string[]
   provinces?: string[]
+  areas?: string[]
   relevance_keywords?: string[]
   discovery_sectors?: string[]
   min_score: number

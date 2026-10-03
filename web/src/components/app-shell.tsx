@@ -108,8 +108,10 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-64 flex-col border-r bg-card lg:flex">
-        <SidebarContent />
+      <aside className="hidden w-64 shrink-0 border-r bg-card lg:block">
+        <div className="sticky top-0 flex h-screen flex-col overflow-y-auto">
+          <SidebarContent />
+        </div>
       </aside>
       <div className="flex flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-card px-6">

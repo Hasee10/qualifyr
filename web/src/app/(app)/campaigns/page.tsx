@@ -243,6 +243,7 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
   const [offer, setOffer] = React.useState("")
   const [industries, setIndustries] = React.useState("")
   const [cities, setCities] = React.useState("")
+  const [areas, setAreas] = React.useState("")
   const [keywords, setKeywords] = React.useState("")
   const [categories, setCategories] = React.useState("")
   const [queries, setQueries] = React.useState("")
@@ -259,11 +260,13 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
     setError(null)
     api.campaignYaml(campaign.campaign_id).then((r) => {
       const parsed = parseYaml(r.yaml)
+      const geo = parsed.geography && typeof parsed.geography === "object" ? parsed.geography as Record<string, unknown> : null
       setRaw(parsed)
       setName(String(parsed.name ?? ""))
       setOffer(String(parsed.offer ?? ""))
       setIndustries(arr(parsed.target_industries).join(", "))
-      setCities(arr(parsed.geography && typeof parsed.geography === "object" ? (parsed.geography as Record<string, unknown>).cities : parsed.cities).join(", "))
+      setCities(arr(geo ? geo.cities : parsed.cities).join(", "))
+      setAreas(arr(geo ? geo.areas : undefined).join(", "))
       setKeywords(arr(parsed.buyer_keywords).join(", "))
       setCategories(arr(parsed.osm_categories).join(", "))
       setQueries(arr(parsed.search_queries).join(", "))
@@ -290,6 +293,7 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
       }
       const geo: Record<string, unknown> = typeof raw.geography === "object" && raw.geography ? { ...raw.geography as Record<string, unknown> } : { countries: ["Pakistan"] }
       geo.cities = split(cities)
+      geo.areas = split(areas)
       updated.geography = geo
       const yaml = toYaml(updated)
       const res = await api.saveCampaignYaml(campaign.campaign_id, yaml)
@@ -321,6 +325,10 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
               <div className="grid gap-1.5">
                 <label className="text-xs font-medium">Cities <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
                 <Input value={cities} onChange={(e) => setCities(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Areas <span className="text-muted-foreground font-normal">(comma-separated, e.g. G-13, F-11 Markaz)</span></label>
+                <Input value={areas} onChange={(e) => setAreas(e.target.value)} />
               </div>
               <div className="grid gap-1.5">
                 <label className="text-xs font-medium">Buyer keywords <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
@@ -368,61 +376,57 @@ function split(s: string): string[] {
 function parseYaml(text: string): Record<string, unknown> {
   const obj: Record<string, unknown> = {}
   let currentKey = ""
-  let listKey = ""
-  const lines = text.split("\n")
-  for (const line of lines) {
-    const trimmed = line.trimEnd()
-    if (!trimmed || trimmed.startsWith("#")) continue
-    const listMatch = trimmed.match(/^\s+-\s+(.*)/)
-    if (listMatch && listKey) {
-      const arr = obj[listKey] as string[]
-      arr.push(listMatch[1].replace(/^['"]|['"]$/g, ""))
+  let listTarget: unknown[] | null = null
+
+  for (const line of text.split("\n")) {
+    const raw = line.trimEnd()
+    if (!raw || raw.startsWith("#")) continue
+    const indent = raw.length - raw.trimStart().length
+    const content = raw.trimStart()
+
+    if (content.startsWith("- ")) {
+      const val = content.slice(2).replace(/^['"]|['"]$/g, "")
+      if (listTarget) listTarget.push(val)
       continue
     }
-    const kvMatch = trimmed.match(/^(\w[\w_]*):\s*(.*)/)
-    if (kvMatch) {
-      const [, k, v] = kvMatch
-      listKey = ""
+
+    const kvMatch = content.match(/^(\w[\w_]*):\s*(.*)/)
+    if (!kvMatch) continue
+    const [, k, v] = kvMatch
+    listTarget = null
+
+    const parseVal = (s: string): unknown => {
+      if (s.startsWith("[") && s.endsWith("]"))
+        return s.slice(1, -1).split(",").map((t) => t.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
+      const n = Number(s)
+      if (!isNaN(n) && s.trim() !== "") return n
+      if (s === "true") return true
+      if (s === "false") return false
+      return s.replace(/^['"]|['"]$/g, "")
+    }
+
+    if (indent === 0) {
+      currentKey = k
       if (v === "" || v === "[]") {
-        obj[k] = v === "[]" ? [] : {}
-        currentKey = k
-        continue
+        const a: unknown[] = []
+        obj[k] = a
+        if (v !== "[]") listTarget = a
+      } else {
+        obj[k] = parseVal(v)
       }
-      if (v.startsWith("[") && v.endsWith("]")) {
-        obj[k] = v.slice(1, -1).split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
-        continue
+    } else if (currentKey) {
+      if (Array.isArray(obj[currentKey]) && (obj[currentKey] as unknown[]).length === 0) {
+        obj[currentKey] = {}
       }
-      const num = Number(v)
-      if (!isNaN(num) && v.trim() !== "") { obj[k] = num; continue }
-      if (v === "true") { obj[k] = true; continue }
-      if (v === "false") { obj[k] = false; continue }
-      obj[k] = v.replace(/^['"]|['"]$/g, "")
-      continue
-    }
-    const subMatch = trimmed.match(/^\s+(\w[\w_]*):\s*(.*)/)
-    if (subMatch && currentKey) {
       if (typeof obj[currentKey] !== "object" || Array.isArray(obj[currentKey])) obj[currentKey] = {}
       const sub = obj[currentKey] as Record<string, unknown>
-      const [, sk, sv] = subMatch
-      if (sv === "" || sv === "[]") {
-        sub[sk] = sv === "[]" ? [] : ""
-        listKey = ""
-        continue
+      if (v === "" || v === "[]") {
+        const a: unknown[] = []
+        sub[k] = a
+        if (v !== "[]") listTarget = a
+      } else {
+        sub[k] = parseVal(v)
       }
-      if (sv.startsWith("[") && sv.endsWith("]")) {
-        sub[sk] = sv.slice(1, -1).split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
-        continue
-      }
-      if (sv.startsWith("- ")) {
-        sub[sk] = [sv.slice(2).replace(/^['"]|['"]$/g, "")]
-        listKey = sk
-        obj[currentKey] = sub
-        continue
-      }
-      const num = Number(sv)
-      if (!isNaN(num) && sv.trim() !== "") { sub[sk] = num; continue }
-      sub[sk] = sv.replace(/^['"]|['"]$/g, "")
-      continue
     }
   }
   return obj
@@ -430,13 +434,14 @@ function parseYaml(text: string): Record<string, unknown> {
 
 function toYaml(obj: Record<string, unknown>, indent = 0): string {
   const pad = "  ".repeat(indent)
+  const itemPad = "  ".repeat(indent + 1)
   const lines: string[] = []
   for (const [k, v] of Object.entries(obj)) {
     if (v === null || v === undefined) continue
     if (Array.isArray(v)) {
       if (v.length === 0) { lines.push(`${pad}${k}: []`); continue }
       lines.push(`${pad}${k}:`)
-      for (const item of v) lines.push(`${pad}- ${yamlVal(item)}`)
+      for (const item of v) lines.push(`${itemPad}- ${yamlVal(item)}`)
     } else if (typeof v === "object") {
       lines.push(`${pad}${k}:`)
       lines.push(toYaml(v as Record<string, unknown>, indent + 1))
@@ -571,7 +576,18 @@ export default function CampaignsPage() {
                   {showOffer && <p className="text-sm text-muted-foreground line-clamp-2">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {c.cities.map((city) => <Badge key={city} variant="outline" className="text-[11px] px-1.5 py-0">{city}</Badge>)}
+                  {(() => {
+                    const pills = [...c.cities, ...(c.areas ?? [])]
+                    const MAX_PILLS = 4
+                    const shown = pills.slice(0, MAX_PILLS)
+                    const extra = pills.length - MAX_PILLS
+                    return (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {shown.map((p) => <Badge key={p} variant="outline" className="text-[11px] px-1.5 py-0">{p}</Badge>)}
+                        {extra > 0 && <Badge variant="outline" className="text-[11px] px-1.5 py-0">+{extra}</Badge>}
+                      </div>
+                    )
+                  })()}
                   <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-primary" onClick={() => setEditing(c)}>
                     <Pencil className="size-3.5" />
                   </Button>

@@ -236,7 +236,8 @@ def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict
     return {
         "campaign_id": c.campaign_id, "name": c.name, "offer": c.offer, "file": file,
         "cities": c.geography.cities, "countries": c.geography.countries,
-        "provinces": c.geography.provinces, "relevance_keywords": relevance_keywords,
+        "provinces": c.geography.provinces, "areas": c.geography.areas,
+        "relevance_keywords": relevance_keywords,
         "discovery_sectors": discovery_sectors,
         "min_score": c.min_score, "max_companies": c.max_companies,
         "leads": counts["leads"], "buyers": counts["buyers"],
