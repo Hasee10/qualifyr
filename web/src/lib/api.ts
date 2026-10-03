@@ -302,6 +302,18 @@ export const api = {
     request<{ ok: boolean; error?: string; campaign_id: string; name: string; sources: string[] }>("/campaigns/validate", { method: "POST", body: JSON.stringify({ yaml }) }),
   saveCampaignYaml: (id: string, yaml: string) =>
     request<{ ok: boolean; file: string | null; campaign_id?: string }>(`/campaigns/${id}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
+  // Settings: user mailboxes
+  listUserMailboxes: () =>
+    request<{ mailboxes: { address: string; smtp_host: string; smtp_port: number; sender_name: string | null; daily_limit: number | null; enabled: boolean; created_at: string }[]; encryption_available: boolean }>("/settings/mailboxes"),
+  saveUserMailbox: (body: { address: string; password: string; smtp_host?: string; smtp_port?: number; sender_name?: string; daily_limit?: number }) =>
+    request<{ ok: boolean; address: string }>("/settings/mailboxes", { method: "PUT", body: JSON.stringify(body) }),
+  deleteUserMailbox: (address: string) =>
+    request<{ ok: boolean }>(`/settings/mailboxes/${encodeURIComponent(address)}`, { method: "DELETE" }),
+  toggleUserMailbox: (address: string) =>
+    request<{ ok: boolean; enabled: boolean }>(`/settings/mailboxes/${encodeURIComponent(address)}/toggle`, { method: "POST" }),
+  testUserMailbox: (body: { address: string; password: string; smtp_host?: string; smtp_port?: number }) =>
+    request<{ ok: boolean; message: string }>("/settings/mailboxes/test", { method: "POST", body: JSON.stringify(body) }),
+
   sheetsStatus: () => request<{ configured: boolean; spreadsheet_id: string | null }>("/sheets/status"),
   exportSheets: (id: string) => request<{ rows: number; tab: string; url: string }>(`/campaigns/${id}/export/sheets`, { method: "POST" }),
   review: (leadId: string, verdict: string) =>

@@ -80,6 +80,29 @@ def load_mailboxes(env: dict[str, str] | None = None, max_slots: int = 10) -> li
     return [b for b in boxes if not (b.address in seen or seen.add(b.address))]
 
 
+def mailboxes_from_db(rows: list[dict], decrypt_fn=None) -> list[Mailbox]:
+    """Build Mailbox instances from user_mailboxes DB rows (encrypted passwords)."""
+    boxes: list[Mailbox] = []
+    for row in rows:
+        if not row.get("enabled", True):
+            continue
+        pw = None
+        if row.get("encrypted_password") and decrypt_fn:
+            try:
+                pw = decrypt_fn(row["encrypted_password"])
+            except Exception:
+                log.warning("failed to decrypt mailbox password for %s", row["address"])
+                continue
+        boxes.append(Mailbox(
+            address=row["address"],
+            password=pw,
+            daily_limit=row.get("daily_limit"),
+            sender_name=row.get("sender_name"),
+            enabled=True,
+        ))
+    return boxes
+
+
 @dataclass
 class MailboxState:
     mailbox: Mailbox

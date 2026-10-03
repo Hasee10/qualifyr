@@ -126,6 +126,19 @@ CREATE TABLE IF NOT EXISTS user_api_keys (
     PRIMARY KEY (user_id, key_name)
 );
 
+CREATE TABLE IF NOT EXISTS user_mailboxes (
+    user_id TEXT NOT NULL,
+    address TEXT NOT NULL,
+    encrypted_password TEXT,
+    smtp_host TEXT NOT NULL DEFAULT 'smtp.gmail.com',
+    smtp_port INTEGER NOT NULL DEFAULT 587,
+    sender_name TEXT,
+    daily_limit INTEGER,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, address)
+);
+
 CREATE TABLE IF NOT EXISTS usage_counts (
     user_id TEXT NOT NULL,
     resource TEXT NOT NULL,
@@ -603,6 +616,55 @@ class Database:
         cur = self._execute(
             "DELETE FROM user_api_keys WHERE user_id = %s AND key_name = %s",
             (user_id, key_name),
+        )
+        self._commit()
+        return cur.rowcount > 0
+
+    # -- user mailboxes (encrypted, per-user) ----------------------------------
+
+    def list_user_mailboxes(self, user_id: str) -> list[dict]:
+        return [dict(r) for r in self._execute(
+            "SELECT address, smtp_host, smtp_port, sender_name, daily_limit, enabled, created_at "
+            "FROM user_mailboxes WHERE user_id = %s ORDER BY created_at",
+            (user_id,),
+        )]
+
+    def get_user_mailbox(self, user_id: str, address: str) -> dict | None:
+        row = self._execute(
+            "SELECT address, encrypted_password, smtp_host, smtp_port, sender_name, daily_limit, enabled, created_at "
+            "FROM user_mailboxes WHERE user_id = %s AND address = %s",
+            (user_id, address.strip().lower()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_user_mailbox(self, user_id: str, address: str, encrypted_password: str | None,
+                         smtp_host: str = "smtp.gmail.com", smtp_port: int = 587,
+                         sender_name: str | None = None, daily_limit: int | None = None) -> None:
+        self._execute(
+            "INSERT INTO user_mailboxes (user_id, address, encrypted_password, smtp_host, smtp_port, "
+            "sender_name, daily_limit, enabled, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, true, %s) "
+            "ON CONFLICT (user_id, address) DO UPDATE SET "
+            "encrypted_password = EXCLUDED.encrypted_password, smtp_host = EXCLUDED.smtp_host, "
+            "smtp_port = EXCLUDED.smtp_port, sender_name = EXCLUDED.sender_name, "
+            "daily_limit = EXCLUDED.daily_limit",
+            (user_id, address.strip().lower(), encrypted_password, smtp_host, smtp_port,
+             sender_name, daily_limit, utcnow().isoformat()),
+        )
+        self._commit()
+
+    def delete_user_mailbox(self, user_id: str, address: str) -> bool:
+        cur = self._execute(
+            "DELETE FROM user_mailboxes WHERE user_id = %s AND address = %s",
+            (user_id, address.strip().lower()),
+        )
+        self._commit()
+        return cur.rowcount > 0
+
+    def toggle_user_mailbox(self, user_id: str, address: str, enabled: bool) -> bool:
+        cur = self._execute(
+            "UPDATE user_mailboxes SET enabled = %s WHERE user_id = %s AND address = %s",
+            (enabled, user_id, address.strip().lower()),
         )
         self._commit()
         return cur.rowcount > 0

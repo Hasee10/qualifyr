@@ -33,7 +33,7 @@ from gtm_engine.outreach.cli import ledger_path
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
 from gtm_engine.outreach.reply_state import sync_replies
-from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes
+from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes, mailboxes_from_db
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
 from gtm_engine.storage.database import Database
@@ -528,9 +528,21 @@ def delete_suppression(value: str) -> dict:
 
 
 @app.get("/mailboxes")
-def mailboxes(campaign_id: str | None = None) -> list[dict]:
+def mailboxes(campaign_id: str | None = None, user_id: str | None = Depends(current_user_id)) -> list[dict]:
     osettings = load_outreach_settings()
     boxes = load_mailboxes()
+    # Merge user's own mailboxes from the DB
+    if user_id and encryption_available():
+        db_tmp = _db()
+        user_rows = db_tmp.list_user_mailboxes(user_id)
+        db_tmp.close()
+        if user_rows:
+            db_tmp2 = _db()
+            full_rows = [db_tmp2.get_user_mailbox(user_id, r["address"]) for r in user_rows]
+            db_tmp2.close()
+            user_boxes = mailboxes_from_db([r for r in full_rows if r], decrypt_fn=decrypt_key)
+            env_addrs = {b.address for b in boxes}
+            boxes.extend(b for b in user_boxes if b.address not in env_addrs)
     if not boxes:
         return []
     cid = campaign_id or next(iter(_campaign_files()), None)
@@ -1028,3 +1040,91 @@ def set_preference(pref_key: str, body: PreferenceBody,
     db.set_preference(user_id, pref_key, body.value.strip())
     db.close()
     return {"ok": True, "pref_key": pref_key}
+
+
+# -- User mailboxes (self-serve SMTP credentials) ----------------------------
+
+
+class MailboxBody(BaseModel):
+    address: str
+    password: str
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    sender_name: str | None = None
+    daily_limit: int | None = None
+
+
+@app.get("/settings/mailboxes")
+def list_user_mailboxes(user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage mailboxes")
+    db = _db()
+    rows = db.list_user_mailboxes(user_id)
+    db.close()
+    return {"mailboxes": rows, "encryption_available": encryption_available()}
+
+
+@app.put("/settings/mailboxes")
+def save_user_mailbox(body: MailboxBody, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage mailboxes")
+    if not encryption_available():
+        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured — cannot store mailbox credentials")
+    addr = body.address.strip().lower()
+    if "@" not in addr:
+        raise HTTPException(422, "invalid email address")
+    encrypted_pw = encrypt_key(body.password.strip()) if body.password.strip() else None
+    db = _db()
+    db.set_user_mailbox(user_id, addr, encrypted_pw, body.smtp_host, body.smtp_port,
+                        body.sender_name, body.daily_limit)
+    db.close()
+    return {"ok": True, "address": addr}
+
+
+@app.delete("/settings/mailboxes/{address}")
+def delete_user_mailbox(address: str, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage mailboxes")
+    db = _db()
+    deleted = db.delete_user_mailbox(user_id, address)
+    db.close()
+    if not deleted:
+        raise HTTPException(404, "mailbox not found")
+    return {"ok": True, "address": address}
+
+
+@app.post("/settings/mailboxes/{address}/toggle")
+def toggle_user_mailbox(address: str, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage mailboxes")
+    db = _db()
+    mb = db.get_user_mailbox(user_id, address)
+    if not mb:
+        db.close()
+        raise HTTPException(404, "mailbox not found")
+    new_state = not mb["enabled"]
+    db.toggle_user_mailbox(user_id, address, new_state)
+    db.close()
+    return {"ok": True, "enabled": new_state}
+
+
+@app.post("/settings/mailboxes/test")
+def test_user_mailbox(body: MailboxBody) -> dict:
+    """Test SMTP connection without saving. Returns ok + message."""
+    import smtplib
+    addr = body.address.strip().lower()
+    pw = body.password.strip()
+    if not addr or not pw:
+        raise HTTPException(422, "address and password are required")
+    try:
+        conn = smtplib.SMTP(body.smtp_host, body.smtp_port, timeout=15)
+        conn.ehlo()
+        conn.starttls()
+        conn.ehlo()
+        conn.login(addr, pw)
+        conn.quit()
+        return {"ok": True, "message": f"Connected to {body.smtp_host}:{body.smtp_port} as {addr}"}
+    except smtplib.SMTPAuthenticationError:
+        return {"ok": False, "message": "Authentication failed — check email and app password"}
+    except (smtplib.SMTPException, OSError) as exc:
+        return {"ok": False, "message": f"Connection failed: {exc}"}

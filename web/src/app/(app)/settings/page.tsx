@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Trash2, Save, CheckCircle2, FileSpreadsheet, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff } from "lucide-react"
+import { Ban, Trash2, Save, CheckCircle2, FileSpreadsheet, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff, Mail, Power } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -299,36 +299,174 @@ function Suppressions() {
 }
 
 function Mailboxes({ campaignId }: { campaignId: string | null }) {
-  const [rows, setRows] = React.useState<MailboxState[]>([])
-  React.useEffect(() => { api.mailboxes(campaignId ?? undefined).then(setRows).catch(() => setRows([])) }, [campaignId])
+  const [liveRows, setLiveRows] = React.useState<MailboxState[]>([])
+  const [userRows, setUserRows] = React.useState<{ address: string; smtp_host: string; smtp_port: number; sender_name: string | null; daily_limit: number | null; enabled: boolean; created_at: string }[]>([])
+  const [encryptionAvailable, setEncryptionAvailable] = React.useState(false)
+  const [adding, setAdding] = React.useState(false)
+  const [addr, setAddr] = React.useState("")
+  const [pw, setPw] = React.useState("")
+  const [smtpHost, setSmtpHost] = React.useState("smtp.gmail.com")
+  const [smtpPort, setSmtpPort] = React.useState("587")
+  const [senderName, setSenderName] = React.useState("")
+  const [busy, setBusy] = React.useState<string | null>(null)
+  const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
+  const [showPw, setShowPw] = React.useState(false)
+
+  const loadLive = React.useCallback(() => {
+    api.mailboxes(campaignId ?? undefined).then(setLiveRows).catch(() => setLiveRows([]))
+  }, [campaignId])
+  const loadUser = React.useCallback(() => {
+    api.listUserMailboxes().then((r) => { setUserRows(r.mailboxes); setEncryptionAvailable(r.encryption_available) }).catch(() => {})
+  }, [])
+  React.useEffect(() => { loadLive(); loadUser() }, [loadLive, loadUser])
+
+  const testConn = async () => {
+    setBusy("test"); setMsg(null)
+    try {
+      const r = await api.testUserMailbox({ address: addr, password: pw, smtp_host: smtpHost, smtp_port: Number(smtpPort) || 587 })
+      setMsg({ ok: r.ok, text: r.message })
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }) } finally { setBusy(null) }
+  }
+
+  const save = async () => {
+    if (!addr.trim() || !pw.trim()) { setMsg({ ok: false, text: "Email and password are required." }); return }
+    setBusy("save"); setMsg(null)
+    try {
+      await api.saveUserMailbox({ address: addr.trim(), password: pw.trim(), smtp_host: smtpHost, smtp_port: Number(smtpPort) || 587, sender_name: senderName.trim() || undefined })
+      setAddr(""); setPw(""); setSenderName(""); setSmtpHost("smtp.gmail.com"); setSmtpPort("587"); setAdding(false); setMsg(null)
+      loadUser(); loadLive()
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }) } finally { setBusy(null) }
+  }
+
+  const remove = async (address: string) => {
+    if (!confirm(`Remove mailbox ${address}?`)) return
+    try { await api.deleteUserMailbox(address); loadUser(); loadLive() } catch (e) { alert((e as Error).message) }
+  }
+
+  const toggle = async (address: string) => {
+    try { await api.toggleUserMailbox(address); loadUser(); loadLive() } catch (e) { alert((e as Error).message) }
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Mailboxes</CardTitle>
-        <CardDescription>Configured through environment secrets (<code>GTM_SMTP_*</code>, <code>GTM_MAILBOX_N_*</code>). Each has its own cap, warm-up and bounce guard.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? <p className="text-sm text-muted-foreground">No mailboxes configured in this environment — sends are dry runs.</p> : (
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Address</TableHead><TableHead>Auth</TableHead><TableHead>Today</TableHead><TableHead>Warm-up</TableHead><TableHead>Bounced</TableHead><TableHead>State</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((m) => (
-                <TableRow key={m.address} className={cn(m.paused_reason && "bg-destructive/5")}>
-                  <TableCell className="font-mono text-xs">{m.address}</TableCell>
-                  <TableCell><Badge variant="outline">{m.auth_mode}</Badge></TableCell>
-                  <TableCell>{m.sent_today}/{m.cap}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{m.days_active ? `day ${m.days_active}` : "never sent"}</TableCell>
-                  <TableCell>{m.bounced_today}</TableCell>
-                  <TableCell>{m.paused_reason ? <Badge variant="destructive">{m.paused_reason}</Badge> : <Badge>{m.remaining} left</Badge>}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>Your mailboxes</CardTitle>
+              <CardDescription>Add your Gmail or SMTP account to send outreach emails. Credentials are encrypted at rest. For Gmail, use an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="underline">App Password</a> (not your regular password).</CardDescription>
+            </div>
+            {encryptionAvailable && !adding && (
+              <Button size="sm" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5 mr-1" /> Add mailbox</Button>
+            )}
+          </div>
+          {!encryptionAvailable && (
+            <p className="text-sm text-destructive mt-1">Encryption not configured on the server (GTM_ENCRYPTION_KEY). Mailbox storage is disabled.</p>
+          )}
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {adding && (
+            <div className="rounded-lg border p-4 grid gap-3">
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Email address</label>
+                <Input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="you@gmail.com" />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">App password</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Input type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="xxxx xxxx xxxx xxxx" />
+                    <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">SMTP host</label>
+                  <Input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Port</label>
+                  <Input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium">Sender name (optional)</label>
+                <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Your Name" />
+              </div>
+              {msg && <p className={cn("text-sm", msg.ok ? "text-green-600 dark:text-green-400" : "text-destructive")}>{msg.text}</p>}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={testConn} disabled={!!busy}>
+                  <FlaskConical className="h-3.5 w-3.5 mr-1" />{busy === "test" ? "Testing…" : "Test connection"}
+                </Button>
+                <Button size="sm" onClick={save} disabled={!!busy}>
+                  <Save className="h-3.5 w-3.5 mr-1" />{busy === "save" ? "Saving…" : "Save mailbox"}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => { setAdding(false); setMsg(null) }}>Cancel</Button>
+              </div>
+            </div>
+          )}
+          {userRows.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>Address</TableHead><TableHead>SMTP</TableHead><TableHead>Sender</TableHead><TableHead>Status</TableHead><TableHead /></TableRow>
+              </TableHeader>
+              <TableBody>
+                {userRows.map((m) => (
+                  <TableRow key={m.address}>
+                    <TableCell className="font-mono text-xs">{m.address}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{m.smtp_host}:{m.smtp_port}</TableCell>
+                    <TableCell className="text-xs">{m.sender_name ?? "—"}</TableCell>
+                    <TableCell>
+                      <Badge variant={m.enabled ? "default" : "secondary"}>{m.enabled ? "active" : "paused"}</Badge>
+                    </TableCell>
+                    <TableCell className="flex gap-1 justify-end">
+                      <Button size="icon-xs" variant="ghost" onClick={() => toggle(m.address)} title={m.enabled ? "Pause" : "Enable"}>
+                        <Power className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="icon-xs" variant="ghost" onClick={() => remove(m.address)} className="text-muted-foreground hover:text-destructive">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : !adding && (
+            <p className="text-sm text-muted-foreground">No mailboxes added yet. Add one to start sending outreach emails.</p>
+          )}
+        </CardContent>
+      </Card>
+      {liveRows.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Live mailbox status</CardTitle>
+            <CardDescription>Daily send counts, warm-up progress and bounce guard for all active mailboxes.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>Address</TableHead><TableHead>Auth</TableHead><TableHead>Today</TableHead><TableHead>Warm-up</TableHead><TableHead>Bounced</TableHead><TableHead>State</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                {liveRows.map((m) => (
+                  <TableRow key={m.address} className={cn(m.paused_reason && "bg-destructive/5")}>
+                    <TableCell className="font-mono text-xs">{m.address}</TableCell>
+                    <TableCell><Badge variant="outline">{m.auth_mode}</Badge></TableCell>
+                    <TableCell>{m.sent_today}/{m.cap}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{m.days_active ? `day ${m.days_active}` : "never sent"}</TableCell>
+                    <TableCell>{m.bounced_today}</TableCell>
+                    <TableCell>{m.paused_reason ? <Badge variant="destructive">{m.paused_reason}</Badge> : <Badge>{m.remaining} left</Badge>}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   )
 }
 
