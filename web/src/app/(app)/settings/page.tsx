@@ -206,8 +206,13 @@ function ApiKeys() {
 }
 
 function UsageDashboard() {
-  const [usage, setUsage] = React.useState<Record<string, { count: number; limit: number }>>({})
-  React.useEffect(() => { api.getUsage().then((r) => setUsage(r.usage)).catch(() => {}) }, [])
+  const [usage, setUsage] = React.useState<Record<string, { count: number; limit: number; default_limit: number; max_limit: number }>>({})
+  const [editing, setEditing] = React.useState<string | null>(null)
+  const [editValue, setEditValue] = React.useState("")
+  const [saving, setSaving] = React.useState(false)
+
+  const load = React.useCallback(() => { api.getUsage().then((r) => setUsage(r.usage)).catch(() => {}) }, [])
+  React.useEffect(() => { load() }, [load])
 
   const resources = [
     { key: "brave", label: "Brave Search", unit: "searches" },
@@ -216,24 +221,74 @@ function UsageDashboard() {
     { key: "places", label: "Google Places", unit: "lookups" },
   ]
 
+  const startEdit = (key: string) => {
+    setEditing(key)
+    setEditValue(String(usage[key]?.limit ?? 50))
+  }
+
+  const saveLimit = async () => {
+    if (!editing) return
+    const val = parseInt(editValue, 10)
+    if (!val || val < 1) return
+    setSaving(true)
+    try {
+      await api.updateUsageLimit(editing, val)
+      setEditing(null)
+      load()
+    } catch { /* */ } finally { setSaving(false) }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Daily usage</CardTitle>
         <CardDescription>
-          Usage resets at midnight UTC each day. Limits keep the free tier sustainable for everyone.
+          Usage resets at midnight UTC each day. Limits keep the free tier sustainable.
           When a limit is reached, the engine falls back to free alternatives automatically.
+          You can adjust limits to match your needs.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
         {resources.map((r) => {
-          const u = usage[r.key] ?? { count: 0, limit: 50 }
+          const u = usage[r.key] ?? { count: 0, limit: 50, default_limit: 50, max_limit: 500 }
           const pct = Math.min(100, Math.round((u.count / u.limit) * 100))
+          const isEditing = editing === r.key
           return (
             <div key={r.key}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-medium">{r.label}</span>
-                <span className="text-xs text-muted-foreground">{u.count} / {u.limit} {r.unit}</span>
+                <div className="flex items-center gap-2">
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={u.max_limit}
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-16 rounded border bg-transparent px-1.5 py-0.5 text-xs text-right"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === "Enter") saveLimit(); if (e.key === "Escape") setEditing(null) }}
+                      />
+                      <span className="text-xs text-muted-foreground">/ {u.max_limit} max</span>
+                      <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs" onClick={saveLimit} disabled={saving}>
+                        <Save className="h-3 w-3" />
+                      </Button>
+                      <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditing(null)}>✕</button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-xs text-muted-foreground">{u.count} / {u.limit} {r.unit}</span>
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground underline hover:text-foreground"
+                        onClick={() => startEdit(r.key)}
+                      >
+                        edit
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden">
                 <div
@@ -241,6 +296,9 @@ function UsageDashboard() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
+              {isEditing && u.limit !== u.default_limit && (
+                <p className="text-[11px] text-muted-foreground mt-0.5">Default: {u.default_limit}</p>
+              )}
             </div>
           )
         })}

@@ -332,7 +332,9 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/settings/api-keys/${name}/test`, { method: "POST" }),
 
   // Settings: usage
-  getUsage: () => request<{ usage: Record<string, { count: number; limit: number }> }>("/settings/usage"),
+  getUsage: () => request<{ usage: Record<string, { count: number; limit: number; default_limit: number; max_limit: number }> }>("/settings/usage"),
+  updateUsageLimit: (resource: string, limit: number) =>
+    request<{ ok: boolean; resource: string; limit: number }>(`/settings/usage/${resource}`, { method: "PUT", body: JSON.stringify({ limit }) }),
 
   // Settings: preferences
   getPreferences: () => request<{ preferences: Record<string, string> }>("/settings/preferences"),

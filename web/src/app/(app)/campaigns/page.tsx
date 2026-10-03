@@ -13,13 +13,37 @@ import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
 
 function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  // NL mode state
   const [text, setText] = React.useState("")
+  // Manual mode state
+  const [name, setName] = React.useState("")
+  const [offer, setOffer] = React.useState("")
+  const [industries, setIndustries] = React.useState("")
+  const [cities, setCities] = React.useState("")
+  const [keywords, setKeywords] = React.useState("")
+  const [categories, setCategories] = React.useState("")
+  const [searchQueries, setSearchQueries] = React.useState("")
+  // Shared state
   const [maxCo, setMaxCo] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [result, setResult] = React.useState<{ campaignId: string; config: Record<string, unknown>; explanation: Record<string, unknown> | string } | null>(null)
+  // Key availability
+  const [hasGroq, setHasGroq] = React.useState<boolean | null>(null)
+  const [hasBrave, setHasBrave] = React.useState<boolean | null>(null)
 
-  const submit = async () => {
+  React.useEffect(() => {
+    if (!open) return
+    api.listApiKeys().then((r) => {
+      const names = new Set(r.keys.map((k) => k.key_name))
+      setHasGroq(names.has("groq"))
+      setHasBrave(names.has("brave"))
+    }).catch(() => { setHasGroq(false); setHasBrave(false) })
+  }, [open])
+
+  const nlMode = hasGroq === true
+
+  const submitNL = async () => {
     setError(null)
     if (!text.trim()) { setError("Describe what you're looking for."); return }
     setBusy(true)
@@ -33,6 +57,30 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
+  const submitManual = async () => {
+    setError(null)
+    if (!name.trim() || !offer.trim()) { setError("Name and offer are required."); return }
+    setBusy(true)
+    try {
+      const body = {
+        name: name.trim(),
+        offer: offer.trim(),
+        countries: ["Pakistan"],
+        provinces: [] as string[],
+        cities: cities.trim() ? cities.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        target_industries: industries.trim() ? industries.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        buyer_keywords: keywords.trim() ? keywords.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        osm_categories: categories.trim() ? categories.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        overture_categories: [] as string[],
+        min_score: 70,
+        max_companies: maxCo.trim() ? parseInt(maxCo, 10) : 60,
+      }
+      const res = await api.createCampaign(body)
+      setResult({ campaignId: res.campaign_id, config: body as unknown as Record<string, unknown>, explanation: `Campaign "${res.name}" created` })
+      onCreated()
+    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+
   const runNow = async () => {
     if (!result) return
     try {
@@ -41,31 +89,103 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     close()
   }
 
-  const close = () => { setText(""); setMaxCo(""); setError(null); setResult(null); onClose() }
+  const close = () => {
+    setText(""); setName(""); setOffer(""); setIndustries(""); setCities("")
+    setKeywords(""); setCategories(""); setSearchQueries(""); setMaxCo("")
+    setError(null); setResult(null); onClose()
+  }
 
   const exp = result?.explanation
   const rows: { label: string; value: string }[] = []
   if (exp && typeof exp === "object") {
     const e = exp as Record<string, unknown>
-    if (e.offer_detected) rows.push({ label: "Offer", value: String(e.offer_detected) })
+    if (e.offer_detected || e.offer) rows.push({ label: "Offer", value: String(e.offer_detected ?? e.offer) })
     if (Array.isArray(e.cities) && e.cities.length) rows.push({ label: "Cities", value: e.cities.join(", ") })
     if (Array.isArray(e.provinces) && e.provinces.length) rows.push({ label: "Provinces", value: e.provinces.join(", ") })
     if (Array.isArray(e.sectors_matched) && e.sectors_matched.length) rows.push({ label: "Sectors", value: e.sectors_matched.join(", ") })
   }
+
+  const loading = hasGroq === null
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && close()}>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader><SheetTitle>New campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
-          <p className="text-sm text-muted-foreground">Describe what you&apos;re looking for in plain English. The engine figures out the cities, industries, and search categories automatically.</p>
-          <Textarea
-            rows={4}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Find grocery stores in Islamabad that need inventory management software"
-            autoFocus
-          />
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : nlMode ? (
+            <>
+              <p className="text-sm text-muted-foreground">Describe what you&apos;re looking for in plain English. The engine figures out the cities, industries, and search categories automatically.</p>
+              <Textarea
+                rows={4}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Find grocery stores in Islamabad that need inventory management software"
+                autoFocus
+              />
+              {!hasBrave && !result && (
+                <div className="rounded-lg border border-dashed p-3 grid gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">No Brave API key — provide search hints to improve discovery:</p>
+                  <Input
+                    value={categories}
+                    onChange={(e) => setCategories(e.target.value)}
+                    placeholder="OSM categories: shop=supermarket, shop=convenience"
+                    className="text-xs"
+                  />
+                  <Input
+                    value={searchQueries}
+                    onChange={(e) => setSearchQueries(e.target.value)}
+                    placeholder="Search queries: grocery stores Islamabad, marts near F-11"
+                    className="text-xs"
+                  />
+                </div>
+              )}
+              {!result && (
+                <div className="flex flex-wrap gap-1.5">
+                  {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (
+                    <button key={ex} type="button" onClick={() => setText(ex)} className="rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors">
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30 p-3">
+                <p className="text-xs text-blue-700 dark:text-blue-300">Add a <strong>Groq API key</strong> in Settings → API Keys to unlock automatic mode — describe what you want in plain English and the engine handles the rest.</p>
+              </div>
+              <div className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Campaign name *</label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Grocery stores Islamabad" autoFocus />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">What you sell / offer *</label>
+                  <Textarea rows={2} value={offer} onChange={(e) => setOffer(e.target.value)} placeholder="POS and inventory management software for retail stores" />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Target industries <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                  <Input value={industries} onChange={(e) => setIndustries(e.target.value)} placeholder="retail, grocery, supermarket" />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Cities <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                  <Input value={cities} onChange={(e) => setCities(e.target.value)} placeholder="Islamabad, Rawalpindi" />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-medium">Buyer keywords <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                  <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="store, mart, shop, retailer" />
+                </div>
+                {!hasBrave && (
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-medium">OSM categories <span className="text-muted-foreground font-normal">(comma-separated, e.g. shop=supermarket)</span></label>
+                    <Input value={categories} onChange={(e) => setCategories(e.target.value)} placeholder="shop=supermarket, shop=convenience" />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
           <div className="flex items-center gap-2">
             <label htmlFor="max-co" className="text-sm text-muted-foreground whitespace-nowrap">Max companies</label>
             <input
@@ -79,27 +199,22 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
               className="w-20 rounded-md border bg-transparent px-2 py-1 text-sm"
             />
           </div>
-          {!result && (
-            <div className="flex flex-wrap gap-1.5">
-              {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (
-                <button key={ex} type="button" onClick={() => setText(ex)} className="rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors">
-                  {ex}
-                </button>
-              ))}
-            </div>
-          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           {result && (
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium mb-3">Campaign created</p>
-              <div className="grid gap-2">
-                {rows.map((r) => (
-                  <div key={r.label} className="flex gap-2 text-sm">
-                    <span className="shrink-0 font-medium text-muted-foreground w-28">{r.label}</span>
-                    <span className="break-words min-w-0">{r.value}</span>
-                  </div>
-                ))}
-              </div>
+              {typeof exp === "string" ? (
+                <p className="text-sm text-muted-foreground">{exp}</p>
+              ) : (
+                <div className="grid gap-2">
+                  {rows.map((r) => (
+                    <div key={r.label} className="flex gap-2 text-sm">
+                      <span className="shrink-0 font-medium text-muted-foreground w-28">{r.label}</span>
+                      <span className="break-words min-w-0">{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mt-3 flex gap-2">
                 <Button size="sm" onClick={runNow}><Play data-icon="inline-start" /> Run now</Button>
                 <p className="text-xs text-muted-foreground self-center">Starts discovery immediately. Progress shows on the campaign card.</p>
@@ -108,7 +223,9 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
           )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
-            <Button onClick={submit} disabled={busy}>{busy ? "Creating…" : result ? "Recreate campaign" : "Create campaign"}</Button>
+            <Button onClick={nlMode ? submitNL : submitManual} disabled={busy || loading}>
+              {busy ? "Creating…" : result ? "Recreate campaign" : "Create campaign"}
+            </Button>
           </div>
         </div>
       </SheetContent>

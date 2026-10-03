@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from gtm_engine import __version__
 from gtm_engine.api.auth import auth_disabled, current_user_id, verify_request
 from gtm_engine.api.keys import ALLOWED_KEYS, decrypt_key, encrypt_key, encryption_available
-from gtm_engine.api.usage import get_all_usage
+from gtm_engine.api.usage import DEFAULT_LIMITS, MAX_LIMITS, get_all_usage
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
@@ -1020,6 +1020,25 @@ def usage_dashboard(user_id: str | None = Depends(current_user_id)) -> dict:
     usage = get_all_usage(db, user_id)
     db.close()
     return {"usage": usage}
+
+
+class UsageLimitBody(BaseModel):
+    limit: int
+
+
+@app.put("/settings/usage/{resource}")
+def update_usage_limit(resource: str, body: UsageLimitBody,
+                       user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to update limits")
+    if resource not in DEFAULT_LIMITS:
+        raise HTTPException(422, f"unknown resource: {resource}")
+    cap = MAX_LIMITS.get(resource, 1000)
+    clamped = max(1, min(body.limit, cap))
+    db = _db()
+    db.set_preference(user_id, f"daily_limit_{resource}", str(clamped))
+    db.close()
+    return {"ok": True, "resource": resource, "limit": clamped}
 
 
 @app.get("/settings/preferences")
