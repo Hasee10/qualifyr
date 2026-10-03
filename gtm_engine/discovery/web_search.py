@@ -34,16 +34,19 @@ def _name_from_domain(domain: str) -> str:
 class WebSearchDiscovery:
     name = "websearch"
 
-    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings):
+    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings,
+                 *, brave_api_key: str | None = None):
         self.fetcher = fetcher
         self.settings = settings
+        self.brave_api_key = brave_api_key
 
     async def discover(self, campaign: CampaignConfig) -> AsyncIterator[DiscoveredCompany]:
         queries = campaign.search_queries[: self.settings.web_search_max_queries_per_run]
         country = (campaign.geography.countries or [None])[0]
         seen: set[str] = set()
         for query in queries:
-            for url, title in await search_web(self.fetcher, self.settings, query):
+            for url, title in await search_web(self.fetcher, self.settings, query,
+                                               brave_api_key=self.brave_api_key):
                 domain = canonical_domain(url)
                 if not domain or domain in seen or is_social_url(url) or domain in _DIRECTORY_DOMAINS:
                     continue

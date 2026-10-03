@@ -13,6 +13,7 @@ dependencies = [
     "tldextract>=5",
     "tzdata>=2024.1",
     "psycopg[binary]>=3",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

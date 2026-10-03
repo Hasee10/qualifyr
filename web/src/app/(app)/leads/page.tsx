@@ -153,15 +153,19 @@ export default function LeadsPage() {
   const [downloading, setDownloading] = React.useState(false)
   const pageSize = 25
 
+  const [showSheetsLink, setShowSheetsLink] = React.useState(false)
+
   const downloadCsv = async () => {
     if (!campaignId) return
     setDownloading(true)
+    setShowSheetsLink(false)
     try {
       // Match the CSV to the current filters: the active type tab (All → every type) and min score.
       await api.downloadExport(campaignId, {
         min_score: Number(minScore) || 0,
         company_type: type === "ALL" ? undefined : type,
       })
+      setShowSheetsLink(true)
     } catch (e) {
       alert(`Download failed: ${(e as Error).message}`)
     } finally {
@@ -193,9 +197,21 @@ export default function LeadsPage() {
           <p className="text-muted-foreground">Every company processed, with the reason behind its classification and score.</p>
         </div>
         {campaignId && (
-          <Button variant="outline" disabled={downloading} onClick={downloadCsv}>
-            <Download data-icon="inline-start" /> {downloading ? "Preparing…" : "Download CSV"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" disabled={downloading} onClick={downloadCsv}>
+              <Download data-icon="inline-start" /> {downloading ? "Preparing…" : "Download CSV"}
+            </Button>
+            {showSheetsLink && (
+              <a
+                href="https://docs.google.com/spreadsheets/create"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                View in Google Sheets <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
         )}
       </div>
 

@@ -205,10 +205,12 @@ def apply_intent_verdict(cls: Classification, verdict: dict, *, threshold: float
 class Pipeline:
     def __init__(self, settings: EngineSettings, defaults: DefaultRules, db: Database,
                  fetcher: Fetcher, mx: MXChecker | None = None, verifier: EmailVerifier | None = None,
-                 resolver: HostResolver | None = None):
+                 resolver: HostResolver | None = None,
+                 *, resolved_keys: dict[str, str | None] | None = None):
         self.settings = settings
         self.defaults = defaults
         self.db = db
+        self._resolved_keys = resolved_keys or {}
         # The DB is one sync psycopg connection (not thread-safe). Run its calls in a worker
         # thread so a slow query does not freeze the event loop for every other concurrent
         # company, and serialise them with a lock so the single connection is only ever touched
@@ -219,7 +221,8 @@ class Pipeline:
         self.mx = mx if mx is not None else MXChecker(settings.dns_timeout_s)
         self.resolver = resolver if resolver is not None else HostResolver(settings.dns_timeout_s)
         self.verifier = verifier
-        self.website_finder = WebsiteFinder(fetcher, settings)
+        self.website_finder = WebsiteFinder(fetcher, settings,
+                                            brave_api_key=self._resolved_keys.get("brave"))
         self.news = NewsChecker(fetcher)
         self._news_budget = settings.news_max_companies_per_run
         self._website_finder_budget = settings.website_finder_max_per_run
@@ -228,7 +231,11 @@ class Pipeline:
         self._press_budget = settings.press_max_companies_per_run
         self._places_budget = settings.places_max_companies_per_run
         self.ppra = PPRATenders(fetcher, settings)
-        self.llm = build_llm(settings.llm_provider, settings.llm_model) if settings.enable_llm else None
+        self.llm = build_llm(
+            settings.llm_provider, settings.llm_model,
+            groq_api_key=self._resolved_keys.get("groq"),
+            gemini_api_key=self._resolved_keys.get("gemini"),
+        ) if settings.enable_llm else None
         if self.llm:
             log.info("llm layer: %s", self.llm.name)
         # The need-terms a hiring/intent signal must mention to count for this campaign
@@ -257,7 +264,9 @@ class Pipeline:
 
     async def _verifier(self) -> EmailVerifier:
         if self.verifier is None:
-            self.verifier = await build_verifier(self.settings.email_verification, self.settings.reacher_url)
+            self.verifier = await build_verifier(
+                self.settings.email_verification, self.settings.reacher_url,
+                hunter_api_key=self._resolved_keys.get("hunter"))
             log.info("email verifier: %s", self.verifier.name)
         return self.verifier
 
@@ -276,7 +285,8 @@ class Pipeline:
         if campaign.osm_categories and campaign.geography.search_areas():
             sources.append(OSMDiscovery(self.fetcher, self.settings))
         if self.settings.enable_web_search_discovery and campaign.search_queries:
-            sources.append(WebSearchDiscovery(self.fetcher, self.settings))
+            sources.append(WebSearchDiscovery(self.fetcher, self.settings,
+                                             brave_api_key=self._resolved_keys.get("brave")))
         if "kcci" in campaign.chamber_sources:
             sources.append(KCCIDirectory(self.fetcher, self.settings))
         if "ppra" in campaign.intent_sources:
@@ -380,8 +390,9 @@ class Pipeline:
                 online_presence.opening_hours_days = parsed.days_open
 
         # Google Places enrichment (rating, review count, hours, reviews) — budget-limited
+        places_key = self._resolved_keys.get("places") or self.settings.google_places_api_key
         if (self.settings.enable_places_enrichment
-                and self.settings.google_places_api_key
+                and places_key
                 and cls.company_type == CompanyType.BUYER
                 and self._places_budget > 0):
             self._places_budget -= 1
@@ -390,7 +401,7 @@ class Pipeline:
                 self.fetcher, company.name,
                 company.city or "Pakistan",
                 company.country or "Pakistan",
-                self.settings.google_places_api_key,
+                places_key,
                 include_reviews=self.settings.enable_review_text,
             )
             if places:

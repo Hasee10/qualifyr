@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Trash2, Save, CheckCircle2, FileSpreadsheet, Plus } from "lucide-react"
+import { Ban, Trash2, Save, CheckCircle2, FileSpreadsheet, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,219 @@ max_companies: 60
 max_pages_per_site: 6
 exclude_chains: false
 `
+
+const KEY_INFO: Record<string, { label: string; description: string; url: string }> = {
+  brave: { label: "Brave Search", description: "Web search for company discovery. Falls back to DuckDuckGo without a key.", url: "https://brave.com/search/api/" },
+  groq: { label: "Groq (LLM)", description: "AI-powered keyword generation, intent judging and relevance matching.", url: "https://console.groq.com/keys" },
+  gemini: { label: "Google Gemini", description: "Alternative LLM provider. Used as fallback when Groq is unavailable.", url: "https://aistudio.google.com/apikey" },
+  hunter: { label: "Hunter.io", description: "Email verification for decision-maker contacts. Falls back to MX-only check.", url: "https://hunter.io/api-keys" },
+  places: { label: "Google Places", description: "Rating, review count and opening hours enrichment. 1K free calls/month.", url: "https://console.cloud.google.com/apis/credentials" },
+}
+
+function ApiKeys() {
+  const [keys, setKeys] = React.useState<{ key_name: string; created_at: string }[]>([])
+  const [encryptionAvailable, setEncryptionAvailable] = React.useState(false)
+  const [inputs, setInputs] = React.useState<Record<string, string>>({})
+  const [visible, setVisible] = React.useState<Record<string, boolean>>({})
+  const [testing, setTesting] = React.useState<string | null>(null)
+  const [testResult, setTestResult] = React.useState<Record<string, { ok: boolean; message: string }>>({})
+  const [saving, setSaving] = React.useState<string | null>(null)
+  const [pref, setPref] = React.useState("")
+  const [comment, setComment] = React.useState("")
+
+  const configured = React.useMemo(() => new Set(keys.map((k) => k.key_name)), [keys])
+
+  const load = React.useCallback(() => {
+    api.listApiKeys().then((r) => { setKeys(r.keys); setEncryptionAvailable(r.encryption_available) }).catch(() => {})
+    api.getPreferences().then((r) => {
+      setPref(r.preferences["monetization_preference"] ?? "")
+      setComment(r.preferences["monetization_comment"] ?? "")
+    }).catch(() => {})
+  }, [])
+  React.useEffect(() => { load() }, [load])
+
+  const saveKey = async (name: string) => {
+    const val = inputs[name]?.trim()
+    if (!val) return
+    setSaving(name)
+    try {
+      await api.saveApiKey(name, val)
+      setInputs((p) => ({ ...p, [name]: "" }))
+      load()
+    } catch { /* toast? */ } finally { setSaving(null) }
+  }
+
+  const deleteKey = async (name: string) => {
+    if (!confirm(`Remove your ${KEY_INFO[name]?.label ?? name} API key?`)) return
+    try { await api.deleteApiKey(name); load() } catch { /* */ }
+  }
+
+  const testKey = async (name: string) => {
+    setTesting(name)
+    setTestResult((p) => ({ ...p, [name]: { ok: false, message: "Testing..." } }))
+    try {
+      const r = await api.testApiKey(name)
+      setTestResult((p) => ({ ...p, [name]: r }))
+    } catch (e) {
+      setTestResult((p) => ({ ...p, [name]: { ok: false, message: (e as Error).message } }))
+    } finally { setTesting(null) }
+  }
+
+  const savePref = async (key: string, value: string) => {
+    try { await api.setPreference(key, value) } catch { /* */ }
+  }
+
+  return (
+    <div className="grid gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>API Keys</CardTitle>
+          <CardDescription>
+            Add your own API keys to unlock premium features. All keys are encrypted at rest.
+            Without keys, the engine uses free fallbacks (DuckDuckGo, MX-only verification, no LLM refinement).
+          </CardDescription>
+          {!encryptionAvailable && (
+            <p className="text-sm text-destructive">Encryption not configured on the server (GTM_ENCRYPTION_KEY). API key storage is disabled.</p>
+          )}
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {Object.entries(KEY_INFO).map(([name, info]) => (
+            <div key={name} className="rounded-lg border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <Key className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">{info.label}</span>
+                  {configured.has(name)
+                    ? <Badge className="text-xs">configured</Badge>
+                    : <Badge variant="outline" className="text-xs">not configured</Badge>}
+                </div>
+                <a href={info.url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground underline">
+                  Get a key
+                </a>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">{info.description}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Input
+                    type={visible[name] ? "text" : "password"}
+                    placeholder={configured.has(name) ? "••••••••" : "Paste your key"}
+                    value={inputs[name] ?? ""}
+                    onChange={(e) => setInputs((p) => ({ ...p, [name]: e.target.value }))}
+                    disabled={!encryptionAvailable}
+                    className="pr-8 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    onClick={() => setVisible((p) => ({ ...p, [name]: !p[name] }))}
+                  >
+                    {visible[name] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <Button size="sm" onClick={() => saveKey(name)} disabled={!encryptionAvailable || !inputs[name]?.trim() || saving === name}>
+                  <Save className="h-3.5 w-3.5 mr-1" /> Save
+                </Button>
+                {configured.has(name) && (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => testKey(name)} disabled={testing === name}>
+                      <FlaskConical className="h-3.5 w-3.5 mr-1" /> Test
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => deleteKey(name)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
+              </div>
+              {testResult[name] && (
+                <p className={cn("text-xs mt-2", testResult[name].ok ? "text-green-600 dark:text-green-400" : "text-destructive")}>
+                  {testResult[name].message}
+                </p>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>How would you like to use Qualifyr?</CardTitle>
+          <CardDescription>Help us understand what works best for you. This is anonymous feedback — it shapes what we build next.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            {[
+              { value: "own_keys", label: "I'll bring my own API keys (free tier)" },
+              { value: "managed_paid", label: "I'd pay for a managed version (no keys needed)" },
+              { value: "undecided", label: "Not sure yet" },
+            ].map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio" name="monetization" value={opt.value}
+                  checked={pref === opt.value}
+                  onChange={() => { setPref(opt.value); savePref("monetization_preference", opt.value) }}
+                  className="accent-primary"
+                />
+                <span className="text-sm">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <Textarea
+            placeholder="What would make the paid version worth it for you? (optional)"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onBlur={() => { if (comment.trim()) savePref("monetization_comment", comment.trim()) }}
+            rows={3}
+            className="text-sm"
+          />
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function UsageDashboard() {
+  const [usage, setUsage] = React.useState<Record<string, { count: number; limit: number }>>({})
+  React.useEffect(() => { api.getUsage().then((r) => setUsage(r.usage)).catch(() => {}) }, [])
+
+  const resources = [
+    { key: "brave", label: "Brave Search", unit: "searches" },
+    { key: "groq", label: "Groq LLM", unit: "calls" },
+    { key: "hunter", label: "Hunter.io", unit: "verifications" },
+    { key: "places", label: "Google Places", unit: "lookups" },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Daily usage</CardTitle>
+        <CardDescription>
+          Usage resets at midnight UTC each day. Limits keep the free tier sustainable for everyone.
+          When a limit is reached, the engine falls back to free alternatives automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {resources.map((r) => {
+          const u = usage[r.key] ?? { count: 0, limit: 50 }
+          const pct = Math.min(100, Math.round((u.count / u.limit) * 100))
+          return (
+            <div key={r.key}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium">{r.label}</span>
+                <span className="text-xs text-muted-foreground">{u.count} / {u.limit} {r.unit}</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn("h-full rounded-full transition-all", pct >= 90 ? "bg-destructive" : pct >= 70 ? "bg-yellow-500" : "bg-primary")}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
+  )
+}
 
 function Suppressions() {
   const [rows, setRows] = React.useState<Suppression[]>([])
@@ -207,21 +420,25 @@ function Sheets({ campaignId }: { campaignId: string | null }) {
 
 export default function SettingsPage() {
   const { campaignId } = useCampaign()
-  const [tab, setTab] = React.useState("campaigns")
+  const [tab, setTab] = React.useState("api-keys")
   return (
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Campaign files, mailboxes, suppression list and exports.</p>
+        <p className="text-muted-foreground">API keys, usage limits, campaigns, mailboxes and exports.</p>
       </div>
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
         <TabsList>
+          <TabsTrigger value="api-keys"><Key className="h-3.5 w-3.5 mr-1" />API Keys</TabsTrigger>
+          <TabsTrigger value="usage"><BarChart3 className="h-3.5 w-3.5 mr-1" />Usage</TabsTrigger>
           <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
           <TabsTrigger value="mailboxes">Mailboxes</TabsTrigger>
           <TabsTrigger value="suppressions">Suppressions</TabsTrigger>
           <TabsTrigger value="sheets">Google Sheets</TabsTrigger>
         </TabsList>
       </Tabs>
+      {tab === "api-keys" && <ApiKeys />}
+      {tab === "usage" && <UsageDashboard />}
       {tab === "campaigns" && <CampaignEditor />}
       {tab === "mailboxes" && <Mailboxes campaignId={campaignId} />}
       {tab === "suppressions" && <Suppressions />}

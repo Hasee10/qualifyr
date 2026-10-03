@@ -99,15 +99,16 @@ def parse_results(html: str) -> list[tuple[str, str]]:
     return results
 
 
-def search_backend() -> str:
-    return "brave" if os.environ.get("GTM_BRAVE_API_KEY") else "duckduckgo"
+def search_backend(api_key: str | None = None) -> str:
+    return "brave" if (api_key or os.environ.get("GTM_BRAVE_API_KEY")) else "duckduckgo"
 
 
-async def search_web(fetcher: HttpFetcher, settings: EngineSettings, query: str) -> list[tuple[str, str]]:
+async def search_web(fetcher: HttpFetcher, settings: EngineSettings, query: str,
+                     *, brave_api_key: str | None = None) -> list[tuple[str, str]]:
     """Run one web search and return (url, title) pairs. Brave when a key is present, else the
     keyless DuckDuckGo HTML endpoint. Shared by WebsiteFinder (name -> site) and by web-search
     discovery (query -> companies)."""
-    key = os.environ.get("GTM_BRAVE_API_KEY")
+    key = brave_api_key or os.environ.get("GTM_BRAVE_API_KEY")
     if key:
         result = await fetcher.get(BRAVE_URL.format(q=quote_plus(query)), delay=1.1, api=True,
                                    headers={"X-Subscription-Token": key, "Accept": "application/json"})
@@ -126,16 +127,19 @@ async def search_web(fetcher: HttpFetcher, settings: EngineSettings, query: str)
 
 
 class WebsiteFinder:
-    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings):
+    def __init__(self, fetcher: HttpFetcher, settings: EngineSettings,
+                 *, brave_api_key: str | None = None):
         self.fetcher = fetcher
         self.settings = settings
+        self.brave_api_key = brave_api_key
 
     @property
     def backend(self) -> str:
-        return search_backend()
+        return search_backend(self.brave_api_key)
 
     async def _results(self, query: str) -> list[tuple[str, str]]:
-        return await search_web(self.fetcher, self.settings, query)
+        return await search_web(self.fetcher, self.settings, query,
+                                brave_api_key=self.brave_api_key)
 
     async def find(self, company_name: str, city: str | None, country: str | None) -> str | None:
         if not self.settings.enable_search_fallback:

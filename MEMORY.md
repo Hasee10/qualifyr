@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (Phase 6 scoring + NL campaign + Places API hardening)
+Last updated: 2026-10-03 (Phase 7 open-source readiness: API keys, usage limits, vote)
 
 ---
 
@@ -93,6 +93,22 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - `gtm_engine/campaign/nl_parser.py` — accepts text like "find grocery stores in Islamabad that
   need inventory software", auto-builds CampaignConfig. Two-stage: deterministic regex always
   runs, optional LLM fills gaps (never overwrites). `POST /campaigns/nl` + `gtm nl` CLI.
+
+**Phase 7 — Open-source readiness** ✅ **DONE (2026-10-03):**
+- Per-user API key management: `user_api_keys` table, Fernet-encrypted at rest (`GTM_ENCRYPTION_KEY`),
+  resolution priority: user DB key → operator env var. `api/keys.py` + `api/usage.py`.
+- Daily usage limits: `usage_counts` table, per-user caps (brave: 50, groq: 200, hunter: 10,
+  places: 20). Configurable via `GTM_DAILY_LIMIT_{RESOURCE}`. Engine degrades to free fallbacks
+  when limit hit.
+- Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
+  "Usage" tab (progress bars per resource, daily reset at UTC midnight).
+- Monetization vote: `user_preferences` table, radio + comment in Settings; captures
+  own-keys/managed-paid/undecided preference for product direction.
+- CSV + Google Sheets deep link: after download, "View in Google Sheets" link on leads page.
+- Key resolution wired into pipeline: `Pipeline(resolved_keys=...)` threads to search.py,
+  client.py, verifier.py, places.py, web_search.py. CLI path unchanged (env vars only).
+- 7 new API endpoints: `/settings/api-keys` (CRUD + test), `/settings/usage`, `/settings/preferences`.
+- `cryptography` added to core deps; `.env.example` updated with encryption key + limit overrides.
 - Hard filters: `min_google_reviews`, `max_proximity_tier`, `require_online_gap` — applied
   post-scoring in the pipeline. City/province extraction from `config/defaults/pk_cities.yaml`.
 

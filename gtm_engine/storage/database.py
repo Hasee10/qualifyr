@@ -117,6 +117,30 @@ CREATE TABLE IF NOT EXISTS run_progress (
     message TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_api_keys (
+    user_id TEXT NOT NULL,
+    key_name TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, key_name)
+);
+
+CREATE TABLE IF NOT EXISTS usage_counts (
+    user_id TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    daily_count INTEGER NOT NULL DEFAULT 0,
+    last_reset_date TEXT NOT NULL,
+    PRIMARY KEY (user_id, resource)
+);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id TEXT NOT NULL,
+    pref_key TEXT NOT NULL,
+    pref_value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, pref_key)
+);
 """
 
 
@@ -549,3 +573,94 @@ class Database:
         return [dict(r) for r in self._execute(
             "SELECT * FROM outreach_events WHERE lead_id = %s ORDER BY event_id", (lead_id,)
         )]
+
+    # -- user API keys (encrypted, per-user) ----------------------------------
+
+    def list_user_keys(self, user_id: str) -> list[dict]:
+        return [dict(r) for r in self._execute(
+            "SELECT key_name, created_at FROM user_api_keys WHERE user_id = %s ORDER BY key_name",
+            (user_id,),
+        )]
+
+    def get_user_key(self, user_id: str, key_name: str) -> str | None:
+        row = self._execute(
+            "SELECT encrypted_value FROM user_api_keys WHERE user_id = %s AND key_name = %s",
+            (user_id, key_name),
+        ).fetchone()
+        return row["encrypted_value"] if row else None
+
+    def set_user_key(self, user_id: str, key_name: str, encrypted_value: str) -> None:
+        self._execute(
+            "INSERT INTO user_api_keys (user_id, key_name, encrypted_value, created_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id, key_name) DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value, "
+            "created_at = EXCLUDED.created_at",
+            (user_id, key_name, encrypted_value, utcnow().isoformat()),
+        )
+        self._commit()
+
+    def delete_user_key(self, user_id: str, key_name: str) -> bool:
+        cur = self._execute(
+            "DELETE FROM user_api_keys WHERE user_id = %s AND key_name = %s",
+            (user_id, key_name),
+        )
+        self._commit()
+        return cur.rowcount > 0
+
+    # -- usage counts (daily per-user) ----------------------------------------
+
+    def check_and_increment_usage(self, user_id: str, resource: str, limit: int) -> bool:
+        today = utcnow().strftime("%Y-%m-%d")
+        row = self._execute(
+            "SELECT daily_count, last_reset_date FROM usage_counts "
+            "WHERE user_id = %s AND resource = %s",
+            (user_id, resource),
+        ).fetchone()
+        if row is None:
+            self._execute(
+                "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date) "
+                "VALUES (%s, %s, 1, %s)",
+                (user_id, resource, today),
+            )
+            self._commit()
+            return True
+        count = row["daily_count"] if row["last_reset_date"] == today else 0
+        if count >= limit:
+            return False
+        self._execute(
+            "UPDATE usage_counts SET daily_count = %s, last_reset_date = %s "
+            "WHERE user_id = %s AND resource = %s",
+            (count + 1, today, user_id, resource),
+        )
+        self._commit()
+        return True
+
+    def get_usage(self, user_id: str) -> list[dict]:
+        today = utcnow().strftime("%Y-%m-%d")
+        rows = self._execute(
+            "SELECT resource, daily_count, last_reset_date FROM usage_counts WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+        return [
+            {"resource": r["resource"],
+             "daily_count": r["daily_count"] if r["last_reset_date"] == today else 0}
+            for r in rows
+        ]
+
+    # -- user preferences -----------------------------------------------------
+
+    def get_preferences(self, user_id: str) -> list[dict]:
+        return [dict(r) for r in self._execute(
+            "SELECT pref_key, pref_value, updated_at FROM user_preferences WHERE user_id = %s",
+            (user_id,),
+        )]
+
+    def set_preference(self, user_id: str, pref_key: str, pref_value: str) -> None:
+        self._execute(
+            "INSERT INTO user_preferences (user_id, pref_key, pref_value, updated_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id, pref_key) DO UPDATE SET pref_value = EXCLUDED.pref_value, "
+            "updated_at = EXCLUDED.updated_at",
+            (user_id, pref_key, pref_value, utcnow().isoformat()),
+        )
+        self._commit()

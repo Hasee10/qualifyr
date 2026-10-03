@@ -243,9 +243,10 @@ class MxOnlyVerifier:
         return None
 
 
-async def build_verifier(mode: str = "auto", reacher_url: str | None = None) -> EmailVerifier:
+async def build_verifier(mode: str = "auto", reacher_url: str | None = None,
+                         *, hunter_api_key: str | None = None) -> EmailVerifier:
     reacher_url = reacher_url or os.environ.get("GTM_REACHER_URL")
-    hunter_key = os.environ.get("GTM_HUNTER_API_KEY")
+    hunter_key = hunter_api_key or os.environ.get("GTM_HUNTER_API_KEY")
     if mode == "off":
         return MxOnlyVerifier()
     if mode in ("auto", "reacher") and reacher_url:

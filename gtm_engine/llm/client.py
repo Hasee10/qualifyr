@@ -173,8 +173,10 @@ class GeminiLLM:
         raise last or RuntimeError("gemini: no model produced a response")
 
 
-def build_llm(provider: str = "auto", model: str | None = None) -> LLM | None:
-    groq, gemini = os.environ.get("GTM_GROQ_API_KEY"), os.environ.get("GTM_GEMINI_API_KEY")
+def build_llm(provider: str = "auto", model: str | None = None,
+              *, groq_api_key: str | None = None, gemini_api_key: str | None = None) -> LLM | None:
+    groq = groq_api_key or os.environ.get("GTM_GROQ_API_KEY")
+    gemini = gemini_api_key or os.environ.get("GTM_GEMINI_API_KEY")
     ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
     if provider in ("ollama", "auto"):
         try:

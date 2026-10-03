@@ -307,6 +307,23 @@ export const api = {
   referral: (leadId: string, accept: boolean) =>
     request<{ ok: boolean }>(`/leads/${leadId}/referral`, { method: "POST", body: JSON.stringify({ accept }) }),
   sequence: (id: string) => request<Lead[]>(`/campaigns/${id}/outreach/sequence`),
+
+  // Settings: API keys
+  listApiKeys: () => request<{ keys: { key_name: string; created_at: string }[]; encryption_available: boolean }>("/settings/api-keys"),
+  saveApiKey: (name: string, value: string) =>
+    request<{ ok: boolean; key_name: string }>(`/settings/api-keys/${name}`, { method: "PUT", body: JSON.stringify({ value }) }),
+  deleteApiKey: (name: string) =>
+    request<{ ok: boolean }>(`/settings/api-keys/${name}`, { method: "DELETE" }),
+  testApiKey: (name: string) =>
+    request<{ ok: boolean; message: string }>(`/settings/api-keys/${name}/test`, { method: "POST" }),
+
+  // Settings: usage
+  getUsage: () => request<{ usage: Record<string, { count: number; limit: number }> }>("/settings/usage"),
+
+  // Settings: preferences
+  getPreferences: () => request<{ preferences: Record<string, string> }>("/settings/preferences"),
+  setPreference: (key: string, value: string) =>
+    request<{ ok: boolean }>(`/settings/preferences/${key}`, { method: "PUT", body: JSON.stringify({ value }) }),
 }
 
 export const STEP_LABEL: Record<Step, string> = {

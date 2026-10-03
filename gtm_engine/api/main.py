@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from gtm_engine import __version__
 from gtm_engine.api.auth import auth_disabled, current_user_id, verify_request
+from gtm_engine.api.keys import ALLOWED_KEYS, decrypt_key, encrypt_key, encryption_available
+from gtm_engine.api.usage import get_all_usage
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
@@ -895,3 +897,134 @@ def outreach_sequence(campaign_id: str) -> list[dict]:
     rows = db.leads_by_status(campaign_id, active)
     db.close()
     return [_lead_summary(l) for l in rows]
+
+
+# -- settings: user API keys, usage, preferences ------------------------------------------
+
+@app.get("/settings/api-keys")
+def list_api_keys(user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage API keys")
+    db = _db()
+    keys = db.list_user_keys(user_id)
+    db.close()
+    return {"keys": keys, "encryption_available": encryption_available()}
+
+
+class ApiKeyBody(BaseModel):
+    value: str
+
+
+@app.put("/settings/api-keys/{key_name}")
+def save_api_key(key_name: str, body: ApiKeyBody, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage API keys")
+    if key_name not in ALLOWED_KEYS:
+        raise HTTPException(422, f"unknown key: {key_name}; allowed: {', '.join(sorted(ALLOWED_KEYS))}")
+    if not encryption_available():
+        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured — cannot store API keys")
+    encrypted = encrypt_key(body.value.strip())
+    db = _db()
+    db.set_user_key(user_id, key_name, encrypted)
+    db.close()
+    return {"ok": True, "key_name": key_name}
+
+
+@app.delete("/settings/api-keys/{key_name}")
+def delete_api_key(key_name: str, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to manage API keys")
+    db = _db()
+    deleted = db.delete_user_key(user_id, key_name)
+    db.close()
+    if not deleted:
+        raise HTTPException(404, "key not found")
+    return {"ok": True, "key_name": key_name}
+
+
+@app.post("/settings/api-keys/{key_name}/test")
+def test_api_key(key_name: str, user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to test API keys")
+    if key_name not in ALLOWED_KEYS:
+        raise HTTPException(422, f"unknown key: {key_name}")
+    db = _db()
+    encrypted = db.get_user_key(user_id, key_name)
+    db.close()
+    if not encrypted:
+        raise HTTPException(404, "key not configured")
+    try:
+        plaintext = decrypt_key(encrypted)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(500, str(exc))
+    ok, message = _test_key(key_name, plaintext)
+    return {"ok": ok, "message": message}
+
+
+def _test_key(key_name: str, key: str) -> tuple[bool, str]:
+    """Quick smoke test for an API key. Synchronous, one lightweight call."""
+    try:
+        if key_name == "brave":
+            r = httpx.get("https://api.search.brave.com/res/v1/web/search",
+                          params={"q": "test", "count": "1"},
+                          headers={"X-Subscription-Token": key, "Accept": "application/json"},
+                          timeout=10)
+            return r.status_code == 200, f"Brave: {r.status_code}"
+        if key_name in ("groq",):
+            r = httpx.post("https://api.groq.com/openai/v1/chat/completions",
+                           json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": "hi"}],
+                                 "max_tokens": 1},
+                           headers={"Authorization": f"Bearer {key}"}, timeout=10)
+            return r.status_code == 200, f"Groq: {r.status_code}"
+        if key_name == "hunter":
+            r = httpx.get("https://api.hunter.io/v2/account", params={"api_key": key}, timeout=10)
+            return r.status_code == 200, f"Hunter: {r.status_code}"
+        if key_name == "places":
+            r = httpx.post("https://places.googleapis.com/v1/places:searchText",
+                           json={"textQuery": "test"},
+                           headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": "places.id",
+                                    "Content-Type": "application/json"},
+                           timeout=10)
+            return r.status_code == 200, f"Places: {r.status_code}"
+        if key_name == "gemini":
+            r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}",
+                           json={"contents": [{"parts": [{"text": "hi"}]}]}, timeout=10)
+            return r.status_code == 200, f"Gemini: {r.status_code}"
+    except httpx.HTTPError as exc:
+        return False, str(exc)
+    return False, f"unknown key type: {key_name}"
+
+
+@app.get("/settings/usage")
+def usage_dashboard(user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to view usage")
+    db = _db()
+    usage = get_all_usage(db, user_id)
+    db.close()
+    return {"usage": usage}
+
+
+@app.get("/settings/preferences")
+def get_preferences(user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to view preferences")
+    db = _db()
+    prefs = db.get_preferences(user_id)
+    db.close()
+    return {"preferences": {p["pref_key"]: p["pref_value"] for p in prefs}}
+
+
+class PreferenceBody(BaseModel):
+    value: str
+
+
+@app.put("/settings/preferences/{pref_key}")
+def set_preference(pref_key: str, body: PreferenceBody,
+                   user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to save preferences")
+    db = _db()
+    db.set_preference(user_id, pref_key, body.value.strip())
+    db.close()
+    return {"ok": True, "pref_key": pref_key}
