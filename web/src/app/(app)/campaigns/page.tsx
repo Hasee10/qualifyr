@@ -47,47 +47,41 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader><SheetTitle>New campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
-          {!result ? (
-            <>
-              <p className="text-sm text-muted-foreground">Describe what you&apos;re looking for in plain English. The engine figures out the cities, industries, and search categories automatically.</p>
-              <Textarea
-                rows={4}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Find grocery stores in Islamabad that need inventory management software"
-                autoFocus
-              />
-              <div className="flex flex-wrap gap-1.5">
-                {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (
-                  <button key={ex} type="button" onClick={() => setText(ex)} className="rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors">
-                    {ex}
-                  </button>
+          <p className="text-sm text-muted-foreground">Describe what you&apos;re looking for in plain English. The engine figures out the cities, industries, and search categories automatically.</p>
+          <Textarea
+            rows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Find grocery stores in Islamabad that need inventory management software"
+            autoFocus
+          />
+          {!result && (
+            <div className="flex flex-wrap gap-1.5">
+              {["find bakeries in Lahore", "grocery stores in Islamabad needing POS systems", "clothing retailers in Karachi without an online store"].map((ex) => (
+                <button key={ex} type="button" onClick={() => setText(ex)} className="rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors">
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {result && (
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm font-medium mb-3">Campaign created</p>
+              <div className="grid gap-2">
+                {rows.map((r) => (
+                  <div key={r.label} className="flex gap-2 text-sm">
+                    <span className="shrink-0 font-medium text-muted-foreground w-28">{r.label}</span>
+                    <span className="break-words min-w-0">{r.value}</span>
+                  </div>
                 ))}
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
-                <Button onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create campaign"}</Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <p className="text-sm font-medium mb-3">Campaign created</p>
-                <div className="grid gap-2">
-                  {rows.map((r) => (
-                    <div key={r.label} className="flex gap-2 text-sm">
-                      <span className="shrink-0 font-medium text-muted-foreground w-28">{r.label}</span>
-                      <span className="break-words min-w-0">{r.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={close}>Done</Button>
-              </div>
-            </>
+            </div>
           )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
+            <Button onClick={submit} disabled={busy}>{busy ? "Creating…" : result ? "Recreate campaign" : "Create campaign"}</Button>
+          </div>
         </div>
       </SheetContent>
     </Sheet>
