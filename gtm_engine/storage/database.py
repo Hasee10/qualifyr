@@ -328,7 +328,7 @@ class Database:
         self._commit()
 
     def hidden_campaign_ids(self) -> set[str]:
-        return {r[0] for r in self._execute("SELECT campaign_id FROM hidden_campaigns").fetchall()}
+        return {r["campaign_id"] for r in self._execute("SELECT campaign_id FROM hidden_campaigns").fetchall()}
 
     def start_run(self, run_id: str, campaign_id: str) -> None:
         self._execute(
