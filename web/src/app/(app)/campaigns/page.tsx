@@ -16,7 +16,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const [text, setText] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [result, setResult] = React.useState<{ config: Record<string, unknown>; explanation: string } | null>(null)
+  const [result, setResult] = React.useState<{ config: Record<string, unknown>; explanation: Record<string, unknown> | string } | null>(null)
 
   const submit = async () => {
     setError(null)
@@ -78,7 +78,14 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
                     <Badge key={c.label} variant="outline"><span className="font-medium mr-1">{c.label}:</span> {c.value}</Badge>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">{result.explanation}</p>
+                <p className="text-xs text-muted-foreground">
+                  {typeof result.explanation === "string"
+                    ? result.explanation
+                    : Object.entries(result.explanation)
+                        .filter(([, v]) => v != null && v !== false && !(Array.isArray(v) && v.length === 0) && !(typeof v === "object" && !Array.isArray(v) && Object.keys(v as Record<string, unknown>).length === 0))
+                        .map(([k, v]) => `${k.replace(/_/g, " ")}: ${Array.isArray(v) ? v.join(", ") : String(v)}`)
+                        .join(" · ")}
+                </p>
               </div>
               <div className="flex justify-end">
                 <Button onClick={close}>Done</Button>
@@ -190,7 +197,7 @@ export default function CampaignsPage() {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <CardTitle>{c.name}</CardTitle>
-                <CardDescription>{c.offer}</CardDescription>
+                <CardDescription>{typeof c.offer === "string" ? c.offer : JSON.stringify(c.offer)}</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-1">
                 {c.cities.map((city) => <Badge key={city} variant="outline">{city}</Badge>)}
