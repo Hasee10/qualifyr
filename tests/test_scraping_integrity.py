@@ -258,7 +258,7 @@ async def test_mismatched_website_contributes_no_contact_details(campaign, setti
 
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="D-12 Markaz", website="https://islamabadinns.wordpress.com",
-                                  city="Islamabad", country="Pakistan", source="overture", category="shop=mall")]
+                                  city="Islamabad", country="Pakistan", source="overture")]
 
     async with HttpFetcher(settings) as fetcher:
         p = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
