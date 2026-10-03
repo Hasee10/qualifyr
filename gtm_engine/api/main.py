@@ -252,24 +252,29 @@ def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
     """File-based example campaigns (shared) plus the caller's own DB campaigns. A file wins
     if an id exists in both, so editing a shipped example on disk is not shadowed by a stale
     DB copy. With no signed-in user (local operator) every DB campaign is returned."""
-    db = _db()
-    hidden = db.hidden_campaign_ids()
-    out, seen = [], set()
-    for cid, path in _campaign_files().items():
-        if cid in hidden:
+    import traceback as _tb
+    try:
+        db = _db()
+        hidden = db.hidden_campaign_ids()
+        out, seen = [], set()
+        for cid, path in _campaign_files().items():
+            if cid in hidden:
+                seen.add(cid)
+                continue
+            out.append(_campaign_summary(db, load_campaign(path), path.name))
             seen.add(cid)
-            continue
-        out.append(_campaign_summary(db, load_campaign(path), path.name))
-        seen.add(cid)
-    for row in db.list_campaigns(user_id):
-        if row["campaign_id"] in seen:
-            continue
-        try:
-            out.append(_campaign_summary(db, CampaignConfig.model_validate(row["config"]), None))
-        except Exception as exc:  # noqa: BLE001 - one bad stored config must not hide the rest
-            log.warning("skipping DB campaign %s: %s", row["campaign_id"], exc)
-    db.close()
-    return out
+        for row in db.list_campaigns(user_id):
+            if row["campaign_id"] in seen:
+                continue
+            try:
+                out.append(_campaign_summary(db, CampaignConfig.model_validate(row["config"]), None))
+            except Exception as exc:  # noqa: BLE001 - one bad stored config must not hide the rest
+                log.warning("skipping DB campaign %s: %s", row["campaign_id"], exc)
+        db.close()
+        return out
+    except Exception as exc:
+        log.error("campaigns endpoint crash: %s\n%s", exc, _tb.format_exc())
+        raise HTTPException(500, f"campaigns error: {exc}")
 
 
 class CampaignCreate(BaseModel):
