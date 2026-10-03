@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (discovery relevance filter, campaign edit UI, NL parser fixes)
+Last updated: 2026-10-03 (NL parser sector naming, dark theme dropdown fix, campaigns dual-mode)
 
 ---
 
@@ -93,9 +93,20 @@ seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.*
 - `gtm_engine/campaign/nl_parser.py` — accepts text like "find grocery stores in Islamabad that
   need inventory software", auto-builds CampaignConfig. Two-stage: deterministic regex always
   runs, optional LLM fills gaps (never overwrites). `POST /campaigns/nl` + `gtm nl` CLI.
-- Frontend: old 10-field form replaced with NL text input (always editable, stays visible after
-  creation). Editable `max_companies` field (default 30). "Run now" button in result panel
-  triggers discovery immediately. `POST /campaigns/nl` accepts optional `max_companies` override.
+- **NL parser naming improvements:** sectors now used for campaign name/offer when no explicit
+  offer given (e.g. "grocery stores in Islamabad" → "Find grocery supermarket businesses in
+  Islamabad"). Bare location inputs ("in Lahore") produce "Businesses in Lahore" instead of
+  using raw text as name. 49 NL tests passing.
+- Frontend: **dual-mode adaptive form** — checks API keys on open:
+  - Groq key present → NL text input (describe in plain English, engine handles the rest)
+  - Groq absent → manual structured form (name, offer, industries, cities, keywords) + info
+    banner nudging user to add Groq key in Settings
+  - Brave absent (either mode) → extra fields for OSM categories / search queries
+  - Example prompts shown in NL mode for quick start
+- Editable `max_companies` field (default 30). "Run now" button in result panel triggers
+  discovery immediately. `POST /campaigns/nl` accepts optional `max_companies` override.
+- **Dark theme fix:** select dropdowns in settings page and campaign picker now use
+  `bg-background`/`text-foreground` instead of `bg-transparent` (was white-on-white in dark mode).
 
 **Frontend cleanup** ✅ **DONE (2026-10-03):**
 - Campaigns page: compact cards (redundant offer line hidden when it matches name, sectors/keywords
