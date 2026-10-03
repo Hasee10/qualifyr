@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-09-26 (E2 verified + interleave fix; E4 async DB / token pacing / reconnect / Nominatim / cron-alert all done)
+Last updated: 2026-10-03 (Phase 6 scoring + NL campaign + Places API hardening)
 
 ---
 
@@ -72,6 +72,29 @@ operator, tests) — `current_user_id` is None. Suppressions + mailboxes are glo
 `scripts/golden_eval.py`. `tests/test_golden_set.py` enforces accuracy floor 0.8 (baseline
 100%) + hard invariants: an agency is never a buyer, a real retailer is never rejected. **The
 seed is small — grow it to 50+, esp. intent-judge cases, to trust the number.**
+
+**Phase 5 — Business profile enrichment** ✅ **DONE (2026-10-02):**
+- Track A: OSM `opening_hours` extraction + structured parser (`enrichment/hours.py`)
+- Track B: Google Places API (`enrichment/places.py`) — Text Search (unlimited free) + Place
+  Details Enterprise for rating, review count, hours. Budget: 20/run, auto-enables when
+  `GTM_GOOGLE_PLACES_API_KEY` is set. Key stored in GitHub Secrets only, never logged.
+- Online presence audit: `enrichment/online_presence.py` — detects ecommerce, WhatsApp, social,
+  delivery platforms, mobile app. `OnlinePresence` model with `online_gap_score` (inverse
+  digital maturity). Gap labels: `no_website`, `no_app`, `no_whatsapp`, etc.
+
+**Phase 6 — Decomposed scoring + pain mining** ✅ **DONE (2026-10-03):**
+- Scoring reworked: `review_band(0-30) + rating(0-10) + proximity_tier(0-15) + online_gap(0-25)
+  + pain_evidence(0-20) = max 100`. Replaces old 6-dimension ICP scoring.
+- Proximity/tier: haversine from configurable anchor (`anchor_lat`/`anchor_lon`), Tier 1/2/3.
+- Review text pain mining: keyword patterns + optional LLM refinement on Google review text.
+- Config: `enable_review_text`, `anchor_lat`, `anchor_lon`, `proximity_tier1_km/2_km`.
+
+**NL campaign interface** ✅ **DONE (2026-10-03):**
+- `gtm_engine/campaign/nl_parser.py` — accepts text like "find grocery stores in Islamabad that
+  need inventory software", auto-builds CampaignConfig. Two-stage: deterministic regex always
+  runs, optional LLM fills gaps (never overwrites). `POST /campaigns/nl` + `gtm nl` CLI.
+- Hard filters: `min_google_reviews`, `max_proximity_tier`, `require_online_gap` — applied
+  post-scoring in the pipeline. City/province extraction from `config/defaults/pk_cities.yaml`.
 
 **CI** — `ci.yml`: `test` job runs the DB-backed tests against a throwaway `postgres:16`
 service (`GTM_TEST_DATABASE_URL`); `web` job runs `npm ci` + `next build` (tsc + ESLint). Both
@@ -149,8 +172,11 @@ API on Vercel, crawls in GitHub Actions (`gather-leads.yml`), DB on Supabase.
 - `llm/` — `client.py` (Groq/Gemini/Ollama, retry w/ backoff), `tasks.py` (generate_keywords,
   judge_intent, extract_requirement, classify_reply, draft_hook). All grounded; deterministic
   fallback; **off does not break the engine**.
-- `scoring/scoring.py` — deterministic 0–100 with reasons.
-- `enrichment/` — contacts, email patterns/verify, phones, research brief, external signals.
+- `scoring/scoring.py` — decomposed 0–100: review_band + rating + proximity + online_gap +
+  pain_evidence. `scoring/proximity.py` — haversine tier scoring.
+- `enrichment/` — contacts, email patterns/verify, phones, research brief, external signals,
+  `online_presence.py` (gap audit), `places.py` (Google Places API), `hours.py` (OSM hours).
+- `campaign/nl_parser.py` — NL text → CampaignConfig (deterministic + optional LLM).
 - `outreach/` — sequencer, sender, reply classify, mailboxes (secondary; human-approved).
 - `storage/database.py` — thin plain-SQL repo; schema is `CREATE TABLE IF NOT EXISTS` applied
   once per DSN, guarded by an advisory lock; campaigns/leads/runs/drafts/etc.
