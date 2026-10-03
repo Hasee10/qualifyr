@@ -1,4 +1,4 @@
-"""The three sanctioned LLM tasks. Each has a deterministic fallback and grounds its
+"""Sanctioned LLM tasks. Each has a deterministic fallback and grounds its
 output in the text it was given."""
 
 from __future__ import annotations
@@ -326,3 +326,44 @@ async def draft_hook(llm: LLM | None, company: str, facts: list[str]) -> str | N
     if not any(k in low for k in keywords):
         return None
     return sentence
+
+
+async def parse_campaign_nl(llm: LLM | None, text: str,
+                            taxonomy_sectors: list[str]) -> dict:
+    """Extract structured campaign fields from free-form user text.
+
+    Returns a dict with optional keys: offer, cities, target_industries,
+    buyer_keywords, negative_keywords, sectors, exclude_chains, max_companies.
+    Deterministic fallback: empty dict (the caller's own regex parse is primary).
+    """
+    if llm is None or not (text or "").strip():
+        return {}
+    system = (
+        "You are a campaign configuration assistant for a B2B lead-generation engine "
+        "focused on Pakistan. Given a user's natural-language description of who they "
+        "want to find, extract structured fields.\n\n"
+        "Choose sectors ONLY from this list: " + str(taxonomy_sectors) + "\n\n"
+        "Cities must be real Pakistani cities.\n\n"
+        "Output a single JSON object with these optional keys:\n"
+        "  offer (string): what the user sells\n"
+        "  cities (array of strings): Pakistani cities to search\n"
+        "  target_industries (array of strings): industry terms\n"
+        "  buyer_keywords (array of strings): terms that identify a buyer company\n"
+        "  negative_keywords (array of strings): terms to exclude\n"
+        "  sectors (array of strings from the list above): which taxonomy sectors apply\n"
+        "  exclude_chains (boolean): whether to skip chain stores\n"
+        "  max_companies (integer): how many results the user wants\n\n"
+        "Omit any key you cannot determine from the text. Output ONLY the JSON object."
+    )
+    try:
+        raw = await llm.complete(system, text, max_tokens=500)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("llm campaign parse failed: %s", exc)
+        return {}
+    obj = parse_json_object(raw)
+    if not obj:
+        return {}
+    valid_sectors = set(taxonomy_sectors)
+    if "sectors" in obj:
+        obj["sectors"] = [s for s in obj["sectors"] if s in valid_sectors]
+    return obj

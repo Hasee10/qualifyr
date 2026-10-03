@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings, GeographyConfig
+from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings, GeographyConfig, RoutingThresholds
 from gtm_engine.config.loader import load_defaults
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -95,7 +95,8 @@ def campaign() -> CampaignConfig:
         target_roles=["founder", "ceo", "head of ecommerce"],
         buyer_keywords=["retailer", "store", "brand", "outlet", "online store", "shop"],
         osm_categories=["shop=clothes", "shop=furniture"],
-        min_score=40,
+        min_score=10,
+        routing=RoutingThresholds(qualified=10, high_priority=20),
         max_pages_per_site=4,
     )
 

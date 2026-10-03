@@ -308,6 +308,42 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
     return {"campaign_id": cfg.campaign_id, "name": cfg.name}
 
 
+class CampaignNLRequest(BaseModel):
+    text: str
+
+
+@app.post("/campaigns/nl", status_code=201)
+async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depends(current_user_id)) -> dict:
+    """Create a campaign from natural-language description.
+
+    Parses the text into a CampaignConfig (deterministic extraction + optional LLM
+    refinement), saves it to the DB, and returns the interpreted config with an
+    explanation of what was extracted."""
+    if not body.text.strip():
+        raise HTTPException(422, "text is required")
+    from gtm_engine.campaign.nl_parser import build_campaign_from_nl
+    from gtm_engine.llm.client import build_llm
+
+    db = _db()
+    existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
+
+    llm = build_llm(_settings) if _settings.enable_llm else None
+    try:
+        cfg, explanation = await build_campaign_from_nl(body.text, llm=llm, existing_ids=existing)
+    except Exception as exc:  # noqa: BLE001
+        db.close()
+        raise HTTPException(422, str(exc))
+
+    db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
+    db.close()
+    return {
+        "campaign_id": cfg.campaign_id,
+        "config": cfg.model_dump(mode="json"),
+        "explanation": explanation,
+        "status": "draft",
+    }
+
+
 @app.delete("/campaigns/{campaign_id}", status_code=204, response_class=Response, dependencies=[Depends(require_campaign_access)])
 def delete_campaign(campaign_id: str) -> Response:
     """Delete a user-created campaign. File-based example campaigns cannot be deleted here."""

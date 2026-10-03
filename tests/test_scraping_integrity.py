@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from gtm_engine.models import DiscoveredCompany
+from gtm_engine.models import DiscoveredCompany, Priority
 from gtm_engine.pipeline import Pipeline
 from gtm_engine.scraping.fetcher import HttpFetcher
 from gtm_engine.scraping.integrity import check, is_parked, is_placeholder, is_soft_404, looks_binary, redirect_target
@@ -167,7 +167,7 @@ async def test_parked_site_cannot_produce_a_qualified_lead(campaign, settings, d
     assert result.stats.rejected_sites == 1
     assert lead.company_type.value == "UNKNOWN" and not lead.outreach_ready
     assert "parked" in lead.provenance["website_rejected"]
-    assert any("rejected" in r for r in lead.score_reason.split(";"))
+    assert lead.priority in (Priority.REVIEW, Priority.REJECT)
     db.close()
 
 

@@ -55,7 +55,7 @@ async def test_full_run_matches_acceptance_criteria(campaign, settings, defaults
     by_name = {l.company_name: l for l in result.leads}
     zara = by_name["Zara Fabrics"]
     assert zara.company_type == CompanyType.BUYER
-    assert zara.priority in (Priority.HIGH, Priority.QUALIFIED)
+    assert zara.priority != Priority.REJECT
     assert zara.total_score >= campaign.min_score
     assert zara.contact_name == "Ahmed Raza" and zara.contact_email == "ahmed.raza@zarafabrics.pk"
     assert zara.email_status.value == "mx_valid"

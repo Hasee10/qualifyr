@@ -74,6 +74,7 @@ class RunStats:
     suppressed: int = 0
     duplicates: int = 0
     chains_excluded: int = 0
+    hard_filtered: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -762,6 +763,10 @@ class Pipeline:
 
             await asyncio.gather(*(worker(c) for c in companies))
             leads.sort(key=lambda l: l.total_score, reverse=True)
+            if campaign.hard_filters:
+                before = len(leads)
+                leads = _apply_hard_filters(leads, campaign.hard_filters)
+                stats.hard_filtered = before - len(leads)
             self.db.finish_run(run_id, "completed", stats.as_dict())
             log.info("run %s finished: %s", run_id, stats.as_dict())
             return RunResult(run_id=run_id, campaign_id=campaign.campaign_id, stats=stats, leads=leads)
@@ -781,6 +786,42 @@ def _tally(stats: RunStats, lead: Lead) -> None:
         stats.qualified += 1
     if lead.outreach_ready:
         stats.outreach_ready += 1
+
+
+def _apply_hard_filters(leads: list[Lead], filters: dict) -> list[Lead]:
+    """Post-scoring hard filters extracted from NL campaign descriptions."""
+    min_reviews = filters.get("min_google_reviews")
+    max_tier = filters.get("max_proximity_tier")
+    require_gaps = set(filters.get("require_online_gap") or [])
+
+    # Map gap label names to OnlinePresence boolean fields.
+    _GAP_CHECKS: dict[str, str] = {
+        "no_website": "has_ecommerce_site",
+        "no_app": "has_mobile_app",
+        "no_whatsapp": "has_whatsapp_ordering",
+        "no_facebook": "has_facebook",
+        "no_instagram": "has_instagram",
+    }
+
+    def _passes(lead: Lead) -> bool:
+        op = lead.online_presence or {}
+        if min_reviews is not None:
+            if (op.get("google_review_count") or 0) < min_reviews:
+                return False
+        if max_tier is not None:
+            score = (lead.evidence or {}).get("score", {})
+            tier_pts = score.get("proximity_tier", 0)
+            tier_map = {15: 1, 12: 2, 8: 3}
+            tier = tier_map.get(tier_pts, 3)
+            if tier > max_tier:
+                return False
+        for gap_label in require_gaps:
+            field_name = _GAP_CHECKS.get(gap_label)
+            if field_name and op.get(field_name):
+                return False  # they HAVE what the filter says should be missing
+        return True
+
+    return [l for l in leads if _passes(l)]
 
 
 async def _emit(progress: ProgressFn | None, stage: str, done: int, total: int, message: str) -> None:

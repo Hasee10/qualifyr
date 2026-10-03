@@ -101,6 +101,10 @@ class CampaignConfig(BaseModel):
     # Drop branches of national/international chains (OSM `brand` tag): decisions are not
     # made at the outlet and the only public contact is a customer-care mailbox.
     exclude_chains: bool = False
+    # Post-scoring hard filters extracted from NL campaign descriptions.
+    # Keys: min_google_reviews (int), max_proximity_tier (int),
+    # require_online_gap (list of gap labels like "no_website", "no_app").
+    hard_filters: dict = Field(default_factory=dict)
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
     routing: RoutingThresholds = Field(default_factory=RoutingThresholds)
 

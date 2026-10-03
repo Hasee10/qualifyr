@@ -140,7 +140,6 @@ async def test_pipeline_discovers_decision_maker_email(campaign, settings, defau
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     campaign.osm_categories = []
     campaign.geography.cities = ["Islamabad"]
-
     async def fake_discover(_c, _p=None):
         return [DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk", city="Islamabad",
                                   country="Pakistan", source="osm", phone="0300 1234567")]
@@ -158,7 +157,7 @@ async def test_pipeline_discovers_decision_maker_email(campaign, settings, defau
     assert lead.provenance["contact_email"].startswith("pattern first.last, confirmed by scripted")
     assert "email_discovery" in lead.provenance and "contact_name" in lead.provenance
     assert lead.phone_type in ("mobile", "landline")
-    assert "decision-maker mailbox confirmed" in lead.score_reason
+    assert "decision-maker" in lead.score_reason and "email confirmed" in lead.score_reason
     db.close()
 
 

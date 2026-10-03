@@ -125,6 +125,71 @@ def _runs(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _nl(args: argparse.Namespace) -> int:
+    """Parse natural-language text into a campaign, optionally run it."""
+    from gtm_engine.campaign.nl_parser import build_campaign_from_nl
+    from gtm_engine.llm.client import build_llm
+
+    settings = load_settings()
+    _setup_logging(args.log_level or settings.log_level)
+    db = Database(settings.database_url)
+    existing = {r["campaign_id"] for r in db.list_campaigns()}
+
+    llm = build_llm(settings) if settings.enable_llm else None
+    cfg, explanation = await build_campaign_from_nl(args.text, llm=llm, existing_ids=existing)
+
+    print("\n--- Interpreted Campaign ---")
+    print(f"  campaign_id:  {cfg.campaign_id}")
+    print(f"  offer:        {cfg.offer}")
+    print(f"  cities:       {cfg.geography.cities}")
+    print(f"  industries:   {cfg.target_industries}")
+    print(f"  exclusions:   {cfg.negative_keywords}")
+    print(f"  chains:       {'excluded' if cfg.exclude_chains else 'included'}")
+    print(f"  max_companies:{cfg.max_companies}")
+    print(f"  hard_filters: {cfg.hard_filters}")
+    print(f"  sectors:      {explanation.get('sectors_matched', [])}")
+    print(f"  places:       {explanation.get('enable_places', False)}")
+
+    if not args.yes:
+        answer = input("\nRun this campaign? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("aborted")
+            db.close()
+            return 0
+
+    db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"))
+
+    defaults = load_defaults()
+    progress_db = Database(settings.database_url, ensure_schema=False)
+    try:
+        async with build_fetcher(settings) as fetcher:
+            pipeline = Pipeline(settings, defaults, db, fetcher)
+            result = await pipeline.run(cfg, progress=_make_progress(progress_db, cfg.campaign_id))
+    except Exception as exc:
+        progress_db.set_run_progress(cfg.campaign_id, None, "failed", 0, 0, str(exc))
+        progress_db.close()
+        db.close()
+        raise
+    progress_db.set_run_progress(cfg.campaign_id, result.run_id, "completed", 0, 0, "done")
+    progress_db.close()
+
+    s = result.stats
+    print(f"\nrun {result.run_id} finished")
+    print(f"  discovered {s.discovered} -> {s.after_dedupe} unique; processed {s.processed}")
+    print(f"  BUYER {s.buyer} | VENDOR {s.vendor} | UNKNOWN {s.unknown}")
+    print(f"  qualified {s.qualified} | outreach-ready {s.outreach_ready}")
+    if s.hard_filtered:
+        print(f"  hard-filtered {s.hard_filtered} leads")
+
+    qualified = [l for l in result.leads if l.company_type == CompanyType.BUYER and l.total_score >= cfg.min_score]
+    out_q = write_csv(qualified, export_path(settings.export_dir, cfg.campaign_id, result.run_id, True))
+    out_all = write_csv(result.leads, export_path(settings.export_dir, cfg.campaign_id, result.run_id, False))
+    print(f"  qualified CSV: {out_q}")
+    print(f"  full CSV:      {out_all}")
+    db.close()
+    return 0
+
+
 def _campaign_id(args: argparse.Namespace) -> int:
     """Print the campaign_id for a YAML path or a DB id, so a workflow can name its output
     folder without re-parsing the input (which fails when the input is an id, not a file)."""
@@ -170,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
     cid = sub.add_parser("campaign-id", help="print the campaign_id for a YAML path or DB id")
     cid.add_argument("campaign", help="campaign YAML path, or a campaign_id stored in the DB")
     cid.set_defaults(func=_campaign_id)
+
+    nl = sub.add_parser("nl", help="create and run a campaign from natural-language text")
+    nl.add_argument("text", help="free-form description of what you want to find")
+    nl.add_argument("--yes", "-y", action="store_true", help="skip confirmation prompt")
+    nl.add_argument("--log-level", default=None)
+    nl.set_defaults(func=lambda a: asyncio.run(_nl(a)))
 
     add_outreach_parser(sub)
     return p

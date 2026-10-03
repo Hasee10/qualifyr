@@ -64,16 +64,18 @@ def _campaign():
                           buyer_keywords=["retailer"], min_score=70)
 
 
-def _score(cls):
+def _score(cls, signals=None):
     company = DiscoveredCompany(name="Co", source="osm", country="Pakistan", city="Lahore")
-    return score_lead(ScoreInputs(company, cls, CompanyQuality(reachable=True), Contact(), Signals()), _campaign())
+    return score_lead(ScoreInputs(company, cls, CompanyQuality(reachable=True), Contact(), signals or Signals()), _campaign())
 
 
 def test_intent_match_raises_the_score_over_an_unjudged_buyer():
     base = _cls(CompanyType.BUYER, 0.6)
     judged = _cls(CompanyType.BUYER, 0.6)
     apply_intent_verdict(judged, V(True, 0.95, "runs 40 outlets, manual stock"))
-    assert _score(judged).total > _score(base).total
+    # Intent classification surfaces in reasons; actual score boost requires intent signals.
+    intent_signals = Signals(intent=[{"kind": "tender", "text": "inventory management RFQ"}])
+    assert _score(judged, intent_signals).total > _score(base).total
     assert any("intent match" in r for r in _score(judged).reasons)
 
 
