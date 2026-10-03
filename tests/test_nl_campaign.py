@@ -535,3 +535,39 @@ def test_discovery_relevance_filter_passes_no_category():
     kept, dropped = _discovery_relevance_filter(companies, ["laser", "equipment"])
     assert dropped == 0
     assert len(kept) == 1
+
+
+def test_areas_wired_into_geography():
+    draft = parse_intent("find newspaper offices near G-7 Islamabad")
+    cfg = build_campaign_config(draft)
+    assert "G-7" in cfg.geography.areas
+
+
+def test_areas_search_queries_include_area():
+    draft = parse_intent("find grocery stores near F-11 Islamabad")
+    cfg = build_campaign_config(draft)
+    assert any("F-11" in q for q in cfg.search_queries)
+
+
+async def test_check_discovery_relevance_no_llm():
+    from gtm_engine.llm.tasks import check_discovery_relevance
+
+    companies = [{"name": "Metro EVs", "category": "shop=car"}]
+    result = await check_discovery_relevance(None, "newspaper offices", companies)
+    assert result == [True]
+
+
+async def test_check_discovery_relevance_with_llm():
+    from gtm_engine.llm.tasks import check_discovery_relevance
+
+    class FakeLLM:
+        name = "fake"
+        async def complete(self, system, user, *, max_tokens=400):
+            return '[true, false]'
+
+    companies = [
+        {"name": "Daily News Office", "category": "office=newspaper"},
+        {"name": "Metro EVs", "category": "shop=car"},
+    ]
+    result = await check_discovery_relevance(FakeLLM(), "newspaper offices", companies)
+    assert result == [True, False]

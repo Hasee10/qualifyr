@@ -333,6 +333,7 @@ def build_campaign_config(
         countries=draft.countries or ["Pakistan"],
         provinces=draft.provinces,
         cities=draft.cities,
+        areas=draft.areas,
     )
 
     hard_filters = draft.hard_filters.as_dict() if draft.hard_filters else {}

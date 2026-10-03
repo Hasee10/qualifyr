@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (NL parser sector naming, dark theme dropdown fix, campaigns dual-mode)
+Last updated: 2026-10-03 (Phase 8: LLM-driven discovery, niche fallback, areas passthrough)
 
 ---
 
@@ -179,14 +179,22 @@ reframed, but **discovery was still conventional lead-gen** — it ran ONLY on
 never drove *what* was searched, only filtered afterward. A campaign with an offer but no
 categories discovered nothing, silently.
 
-- **E1 — offer → discovery targets** ✅ **DONE.** `config/defaults/discovery_taxonomy.yaml`
-  maps 16 sectors → valid OSM tags + Overture substrings.
-  `discovery/targeting.derive_discovery_targets(offer, industries, llm)` picks sectors
-  deterministically (offer/industry keyword match) + LLM-widened — **both only from the
-  taxonomy**, so every derived category is a real tag (never an invented `shop=apparel` that
-  matches nothing). `pipeline.run()` derives categories when the user gave none; **explicit
-  user categories always win**. Sectors → `stats.discovery_sectors`, shown as chips; form says
-  categories are optional. Tests: `tests/test_discovery_targeting.py`. Live-verified on Groq.
+- **E1 — offer → discovery targets** ✅ **DONE + Phase 8 niche expansion.**
+  `config/defaults/discovery_taxonomy.yaml` maps 16 sectors → valid OSM tags + Overture
+  substrings. `discovery/targeting.derive_discovery_targets(offer, industries, llm)` picks
+  sectors deterministically + LLM-widened. **Phase 8 addition:** when no taxonomy sector
+  matches but `target_industries` exist, a **niche fallback** constructs valid OSM/Overture
+  categories directly from the industry terms — validated against `config/defaults/valid_osm_tags.yaml`
+  (~200 valid tags across shop/office/amenity/craft/healthcare/leisure/tourism). Synonym lookup +
+  fuzzy matching + per-word decomposition. LLM can also suggest categories (validated against the
+  same list). Result: "newspaper offices" → `office=newspaper`, not `shop=*`. "watch repair" →
+  matches jewellery sector → `shop=watches`. "law firms" → `office=lawyer`. `_niche` pseudo-sector
+  for niche matches. `pipeline.run()` derives categories when the user gave none; **explicit user
+  categories always win**. `areas` field added to `GeographyConfig` and wired through NL parser →
+  pipeline → targeting → seed queries (e.g. "newspaper offices G-7 Islamabad"). Post-discovery
+  **LLM relevance check** (`check_discovery_relevance` in `llm/tasks.py`) demotes map-sourced
+  companies the LLM flags as not matching the target type. Tests: `tests/test_discovery_targeting.py`
+  (15 tests). Sectors → `stats.discovery_sectors`, shown as chips.
 - **E2 — web-search discovery** ✅ **DONE.** `derive_discovery_targets` now also emits
   `search_queries` — deterministic seeds (industries/sector terms × cities) + optional LLM
   queries aimed at buyers (`llm/tasks.generate_search_queries`; queries are free text so the

@@ -2,7 +2,7 @@
 derived category is valid."""
 
 from gtm_engine.discovery.targeting import (
-    derive_discovery_targets, load_taxonomy, match_sectors,
+    _niche_fallback, derive_discovery_targets, load_taxonomy, load_valid_osm_tags, match_sectors,
 )
 
 
@@ -59,3 +59,61 @@ async def test_llm_widens_sectors_but_only_valid_keys():
 async def test_no_offer_returns_empty():
     t = await derive_discovery_targets("")
     assert t.empty and t.sectors == []
+
+
+def test_valid_osm_tags_loads():
+    tags = load_valid_osm_tags()
+    assert "shop" in tags and "office" in tags and "craft" in tags
+    assert "watches" in tags["shop"]
+    assert "newspaper" in tags["office"]
+    assert "watchmaker" in tags["craft"]
+
+
+def test_niche_fallback_newspaper():
+    tags = load_valid_osm_tags()
+    result = _niche_fallback(["newspaper"], tags)
+    assert not result.empty
+    assert result.sectors == ["_niche"]
+    assert "office=newspaper" in result.osm_categories
+
+
+def test_niche_fallback_watchmaker():
+    tags = load_valid_osm_tags()
+    result = _niche_fallback(["watch repair"], tags)
+    assert not result.empty
+    osm_str = " ".join(result.osm_categories)
+    assert "watches" in osm_str or "watchmaker" in osm_str
+
+
+def test_niche_fallback_travel_agency():
+    tags = load_valid_osm_tags()
+    result = _niche_fallback(["travel agency"], tags)
+    assert not result.empty
+    assert any("travel" in t for t in result.osm_categories)
+
+
+def test_niche_fallback_unknown_returns_overture_only():
+    tags = load_valid_osm_tags()
+    result = _niche_fallback(["quantum widgets"], tags)
+    assert "quantum widgets" in result.overture_categories
+
+
+async def test_derive_targets_niche_uses_fallback_not_general_retail():
+    t = await derive_discovery_targets("Find newspaper offices in Islamabad",
+                                       industries=["newspaper offices"])
+    assert "_niche" in t.sectors or "office=newspaper" in t.osm_categories
+    assert "general_retail" not in t.sectors
+
+
+async def test_derive_targets_grocery_still_matches_taxonomy():
+    t = await derive_discovery_targets("Find grocery stores in Islamabad",
+                                       industries=["grocery stores"])
+    assert "grocery_supermarket" in t.sectors
+    assert "shop=supermarket" in t.osm_categories
+
+
+async def test_seed_queries_include_areas():
+    t = await derive_discovery_targets("Find newspaper offices near G-7 Islamabad",
+                                       industries=["newspaper offices"],
+                                       cities=["Islamabad"], areas=["G-7"])
+    assert any("G-7" in q for q in t.search_queries)

@@ -30,7 +30,7 @@ from gtm_engine.enrichment.research import build_research_brief
 from gtm_engine.intent.company_pages import intent_from_pages
 from gtm_engine.intent.ppra import PPRATenders
 from gtm_engine.llm.client import build_llm
-from gtm_engine.llm.tasks import draft_hook, extract_requirement, extract_review_pain, generate_keywords, generate_pitch_angle, judge_intent
+from gtm_engine.llm.tasks import check_discovery_relevance, draft_hook, extract_requirement, extract_review_pain, generate_keywords, generate_pitch_angle, judge_intent
 from gtm_engine.qualification.relevance import relevant_terms
 from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
@@ -65,6 +65,7 @@ class RunStats:
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
     discovery_relevance_dropped: int = 0  # companies dropped post-discovery for not matching offer keywords
+    llm_relevance_demoted: int = 0  # companies the LLM flagged as not matching the target type
     relevance_keywords: list[str] = field(default_factory=list)  # the offer's need-terms this run used
     discovery_sectors: list[str] = field(default_factory=list)   # sectors derived from the offer (E1)
     buyer: int = 0
@@ -771,7 +772,8 @@ class Pipeline:
         if campaign.offer and (needs_categories or not campaign.search_queries):
             targets = await derive_discovery_targets(
                 campaign.offer, campaign.target_industries, self.llm,
-                cities=campaign.geography.cities, countries=campaign.geography.countries)
+                cities=campaign.geography.cities, countries=campaign.geography.countries,
+                areas=campaign.geography.areas)
             if targets.osm_categories or targets.overture_categories or targets.search_queries:
                 # Copy before mutating, unless the relevance step already made a private copy.
                 if not self._relevance_keywords:
@@ -795,6 +797,20 @@ class Pipeline:
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
                 discovered, self._relevance_keywords, campaign_cats,
                 user_configured_categories=user_configured_categories)
+            if self.llm and campaign.target_industries and discovered:
+                target_desc = ", ".join(campaign.target_industries[:3])
+                map_sourced = [c for c in discovered if c.source not in ("web_search", "ppra", "kcci", "seed_csv")]
+                if map_sourced:
+                    batch_dicts = [{"name": c.name, "category": c.category, "address": c.address} for c in map_sourced]
+                    verdicts = await check_discovery_relevance(self.llm, target_desc, batch_dicts)
+                    demoted_set = {id(map_sourced[i]) for i, v in enumerate(verdicts) if not v}
+                    if demoted_set:
+                        stats.llm_relevance_demoted = len(demoted_set)
+                        kept = [c for c in discovered if id(c) not in demoted_set]
+                        demoted = [c for c in discovered if id(c) in demoted_set]
+                        discovered = kept + demoted
+                        log.info("llm relevance check: demoted %d/%d map-sourced companies",
+                                 len(demoted_set), len(map_sourced))
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)

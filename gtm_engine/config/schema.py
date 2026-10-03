@@ -14,8 +14,10 @@ class GeographyConfig(BaseModel):
     # to a bbox that covers many towns). Optional middle tier between country and city.
     provinces: list[str] = Field(default_factory=list)
     cities: list[str] = Field(default_factory=list)
+    # Specific localities/sectors/neighborhoods within a city (e.g. G-7, DHA, Saddar).
+    areas: list[str] = Field(default_factory=list)
 
-    @field_validator("countries", "provinces", "cities")
+    @field_validator("countries", "provinces", "cities", "areas")
     @classmethod
     def _strip(cls, values: list[str]) -> list[str]:
         return [v.strip() for v in values if v and v.strip()]

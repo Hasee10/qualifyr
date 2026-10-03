@@ -303,6 +303,49 @@ async def extract_review_pain(llm: LLM | None, company: str,
     return pains if pains else deterministic
 
 
+async def check_discovery_relevance(llm: LLM | None, target_description: str,
+                                     companies: list[dict]) -> list[bool]:
+    """Post-discovery LLM relevance check: for each company, is it actually a {target}?
+
+    Input companies are dicts with at least 'name' and optionally 'category', 'address'.
+    Returns a list of booleans parallel to input. Fallback: all True (no filtering without LLM).
+    Batches up to 20 companies per call."""
+    if llm is None or not target_description or not companies:
+        return [True] * len(companies)
+    batch = companies[:20]
+    lines = []
+    for i, c in enumerate(batch):
+        parts = [c.get("name", "Unknown")]
+        if c.get("category"):
+            parts.append(f"({c['category']})")
+        if c.get("address"):
+            parts.append(f"at {c['address']}")
+        lines.append(f"{i+1}. {' '.join(parts)}")
+    system = (
+        "You check whether discovered businesses match the target business type. "
+        "For each company, answer true if it is plausibly the target type, false otherwise. "
+        "Output ONLY a JSON array of booleans, one per company."
+    )
+    user = (
+        f"Target business type: {target_description}\n\n"
+        f"Companies:\n" + "\n".join(lines) + "\n\n"
+        "JSON array of booleans (true = matches target type, false = does not)."
+    )
+    try:
+        raw = await llm.complete(system, user, max_tokens=200)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("llm discovery relevance check failed: %s", exc)
+        return [True] * len(companies)
+    parsed = _parse_keyword_list(raw)
+    results: list[bool] = []
+    for item in parsed:
+        item_str = str(item).strip().lower()
+        results.append(item_str in ("true", "1", "yes"))
+    while len(results) < len(companies):
+        results.append(True)
+    return results[:len(companies)]
+
+
 async def draft_hook(llm: LLM | None, company: str, facts: list[str]) -> str | None:
     """One natural sentence from observed facts only. Every fact keyword must survive."""
     if llm is None or not facts:
