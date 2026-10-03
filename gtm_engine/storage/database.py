@@ -154,6 +154,11 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (user_id, pref_key)
 );
+
+CREATE TABLE IF NOT EXISTS hidden_campaigns (
+    campaign_id TEXT PRIMARY KEY,
+    hidden_at TEXT NOT NULL
+);
 """
 
 
@@ -310,6 +315,20 @@ class Database:
     def delete_campaign(self, campaign_id: str) -> None:
         self._execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
         self._commit()
+
+    def hide_campaign(self, campaign_id: str) -> None:
+        self._execute(
+            "INSERT INTO hidden_campaigns (campaign_id, hidden_at) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (campaign_id, utcnow().isoformat()),
+        )
+        self._commit()
+
+    def unhide_campaign(self, campaign_id: str) -> None:
+        self._execute("DELETE FROM hidden_campaigns WHERE campaign_id = %s", (campaign_id,))
+        self._commit()
+
+    def hidden_campaign_ids(self) -> set[str]:
+        return {r[0] for r in self._execute("SELECT campaign_id FROM hidden_campaigns").fetchall()}
 
     def start_run(self, run_id: str, campaign_id: str) -> None:
         self._execute(

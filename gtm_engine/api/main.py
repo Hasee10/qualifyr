@@ -253,8 +253,12 @@ def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
     if an id exists in both, so editing a shipped example on disk is not shadowed by a stale
     DB copy. With no signed-in user (local operator) every DB campaign is returned."""
     db = _db()
+    hidden = db.hidden_campaign_ids()
     out, seen = [], set()
     for cid, path in _campaign_files().items():
+        if cid in hidden:
+            seen.add(cid)
+            continue
         out.append(_campaign_summary(db, load_campaign(path), path.name))
         seen.add(cid)
     for row in db.list_campaigns(user_id):
@@ -353,10 +357,12 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
 
 @app.delete("/campaigns/{campaign_id}", status_code=204, response_class=Response, dependencies=[Depends(require_campaign_access)])
 def delete_campaign(campaign_id: str) -> Response:
-    """Delete a user-created campaign. File-based example campaigns cannot be deleted here."""
-    if campaign_id in _campaign_files():
-        raise HTTPException(400, "this is a file-based example campaign; delete its YAML instead")
+    """Delete a campaign. DB campaigns are removed; file-based ones are hidden."""
     db = _db()
+    if campaign_id in _campaign_files():
+        db.hide_campaign(campaign_id)
+        db.close()
+        return Response(status_code=204)
     if not db.campaign_config(campaign_id):
         db.close()
         raise HTTPException(404, f"campaign '{campaign_id}' not found")

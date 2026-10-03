@@ -575,11 +575,9 @@ export default function CampaignsPage() {
                   <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-primary" onClick={() => setEditing(c)}>
                     <Pencil className="size-3.5" />
                   </Button>
-                  {!c.file && (
-                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
                 </div>
               </div>
 
