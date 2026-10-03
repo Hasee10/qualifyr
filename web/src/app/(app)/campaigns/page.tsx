@@ -129,9 +129,9 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
         <Button onClick={start} disabled={!!running}>
           <Play data-icon="inline-start" /> {running ? "Running…" : "Run discovery"}
         </Button>
-        <a href={api.exportUrl(campaign.campaign_id, campaign.min_score)}>
-          <Button variant="outline"><Download data-icon="inline-start" /> Qualified CSV</Button>
-        </a>
+        <Button variant="outline" onClick={() => api.downloadExport(campaign.campaign_id, { min_score: campaign.min_score })}>
+          <Download data-icon="inline-start" /> Qualified CSV
+        </Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {progress && progress.stage !== "idle" && (
