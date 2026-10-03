@@ -452,7 +452,8 @@ class Database:
 
     def list_leads(self, campaign_id: str, *, run_id: str | None = None,
                    min_score: int | None = None, company_type: str | None = None,
-                   outreach_ready: bool | None = None) -> list[Lead]:
+                   outreach_ready: bool | None = None,
+                   limit: int | None = None, offset: int = 0) -> list[Lead]:
         sql = "SELECT data_json FROM leads WHERE campaign_id = %s"
         params: list = [campaign_id]
         if run_id:
@@ -468,8 +469,27 @@ class Database:
             sql += " AND outreach_ready = %s"
             params.append(int(outreach_ready))
         sql += " ORDER BY total_score DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
         rows = self._execute(sql, params).fetchall()
         return [Lead.model_validate_json(r["data_json"]) for r in rows]
+
+    def count_leads(self, campaign_id: str, *, min_score: int | None = None,
+                    company_type: str | None = None,
+                    outreach_ready: bool | None = None) -> int:
+        sql = "SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = %s"
+        params: list = [campaign_id]
+        if min_score is not None:
+            sql += " AND total_score >= %s"
+            params.append(min_score)
+        if company_type:
+            sql += " AND company_type = %s"
+            params.append(company_type)
+        if outreach_ready is not None:
+            sql += " AND outreach_ready = %s"
+            params.append(int(outreach_ready))
+        return self._execute(sql, params).fetchone()["cnt"]
 
     def leads_by_status(self, campaign_id: str, statuses: list[str]) -> list[Lead]:
         placeholders = ",".join("%s" for _ in statuses)
@@ -498,6 +518,72 @@ class Database:
         ).fetchone()
         return {"leads": row["leads"], "buyers": row["buyers"],
                 "qualified": row["qualified"], "outreach_ready": row["outreach_ready"]}
+
+    def campaign_stats(self, campaign_id: str, min_score: int) -> dict:
+        """Full dashboard stats computed in SQL — no Python deserialization of lead JSON."""
+        row = self._execute(
+            "SELECT "
+            "COUNT(*) AS leads, "
+            "COUNT(*) FILTER (WHERE company_type = 'BUYER') AS buyers, "
+            "COUNT(*) FILTER (WHERE company_type = 'VENDOR') AS vendors, "
+            "COUNT(*) FILTER (WHERE company_type = 'UNKNOWN') AS unknowns, "
+            "COUNT(*) FILTER (WHERE company_type = 'BUYER' AND total_score >= %s) AS qualified, "
+            "COUNT(*) FILTER (WHERE outreach_ready = 1) AS outreach_ready, "
+            "COUNT(*) FILTER (WHERE total_score < 50) AS band_0_49, "
+            "COUNT(*) FILTER (WHERE total_score >= 50 AND total_score < 70) AS band_50_69, "
+            "COUNT(*) FILTER (WHERE total_score >= 70 AND total_score < 80) AS band_70_79, "
+            "COUNT(*) FILTER (WHERE total_score >= 80) AS band_80_100, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'email_1_sent') AS st_email_1_sent, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'followup_1_sent') AS st_followup_1_sent, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'followup_2_sent') AS st_followup_2_sent, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'replied') AS st_replied, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'bounced') AS st_bounced, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'completed') AS st_completed, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'unsubscribed') AS st_unsubscribed, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'not_queued') AS st_not_queued, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'queued') AS st_queued, "
+            "COUNT(*) FILTER (WHERE sequence_status = 'suppressed') AS st_suppressed, "
+            "COUNT(*) FILTER (WHERE data_json::jsonb->>'review_verdict' IS NOT NULL "
+            "  AND data_json::jsonb->>'review_verdict' != '') AS reviewed, "
+            "COUNT(*) FILTER (WHERE data_json::jsonb->>'review_verdict' = 'correct') AS verdict_correct, "
+            "COUNT(*) FILTER (WHERE data_json::jsonb->>'review_verdict' = 'wrong_company') AS verdict_wrong_company, "
+            "COUNT(*) FILTER (WHERE data_json::jsonb->>'review_verdict' = 'wrong_person') AS verdict_wrong_person, "
+            "COUNT(*) FILTER (WHERE data_json::jsonb->>'review_verdict' = 'wrong_email') AS verdict_wrong_email, "
+            "COUNT(*) FILTER (WHERE jsonb_array_length(COALESCE(data_json::jsonb->'intent_signals', '[]'::jsonb)) > 0) AS with_intent, "
+            "COUNT(*) FILTER (WHERE priority = 'high_priority') AS pr_high, "
+            "COUNT(*) FILTER (WHERE priority = 'qualified') AS pr_qualified, "
+            "COUNT(*) FILTER (WHERE priority = 'review') AS pr_review, "
+            "COUNT(*) FILTER (WHERE priority = 'reject') AS pr_reject "
+            "FROM leads WHERE campaign_id = %s",
+            (min_score, campaign_id),
+        ).fetchone()
+        by_status = {
+            "not_queued": row["st_not_queued"], "queued": row["st_queued"],
+            "email_1_sent": row["st_email_1_sent"], "followup_1_sent": row["st_followup_1_sent"],
+            "followup_2_sent": row["st_followup_2_sent"], "completed": row["st_completed"],
+            "replied": row["st_replied"], "bounced": row["st_bounced"],
+            "unsubscribed": row["st_unsubscribed"], "suppressed": row["st_suppressed"],
+        }
+        sent = row["st_email_1_sent"] + row["st_followup_1_sent"] + row["st_followup_2_sent"] + row["st_replied"] + row["st_bounced"] + row["st_unsubscribed"]
+        reviewed = row["reviewed"]
+        correct = row["verdict_correct"]
+        return {
+            "campaign_id": campaign_id,
+            "leads": row["leads"],
+            "by_type": {"BUYER": row["buyers"], "VENDOR": row["vendors"], "UNKNOWN": row["unknowns"]},
+            "by_status": by_status,
+            "by_priority": {"high_priority": row["pr_high"], "qualified": row["pr_qualified"],
+                            "review": row["pr_review"], "reject": row["pr_reject"]},
+            "score_bands": {"0-49": row["band_0_49"], "50-69": row["band_50_69"],
+                            "70-79": row["band_70_79"], "80-100": row["band_80_100"]},
+            "qualified": row["qualified"], "outreach_ready": row["outreach_ready"],
+            "reviewed": reviewed, "correct": correct,
+            "accuracy": round(correct / reviewed, 3) if reviewed else None,
+            "verdicts": {"correct": correct, "wrong_company": row["verdict_wrong_company"],
+                         "wrong_person": row["verdict_wrong_person"], "wrong_email": row["verdict_wrong_email"]},
+            "with_intent": row["with_intent"],
+            "emails_sent": sent, "replied": row["st_replied"], "bounced": row["st_bounced"],
+        }
 
     def campaign_of_lead(self, lead_id: str) -> str | None:
         """The campaign a lead belongs to, or None if the lead is unknown. Used to scope

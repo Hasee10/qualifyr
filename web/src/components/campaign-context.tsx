@@ -7,7 +7,7 @@ interface Ctx {
   campaigns: Campaign[]
   campaignId: string | null
   setCampaignId: (id: string) => void
-  refresh: () => Promise<void>
+  refresh: (force?: boolean) => Promise<void>
   loading: boolean
   error: string | null
 }
@@ -19,8 +19,12 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   const [campaignId, setCampaignIdState] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const lastFetch = React.useRef(0)
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastFetch.current < 5000) return
+    lastFetch.current = now
     try {
       const list = await api.campaigns()
       setCampaigns(list)
@@ -39,7 +43,7 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  React.useEffect(() => { refresh() }, [refresh])
+  React.useEffect(() => { refresh(true) }, [refresh])
 
   const setCampaignId = (id: string) => {
     setCampaignIdState(id)

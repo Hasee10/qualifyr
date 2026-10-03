@@ -421,44 +421,22 @@ def progress(campaign_id: str) -> dict:
 def stats(campaign_id: str) -> dict:
     campaign = _campaign(campaign_id)
     db = _db()
-    leads = db.list_leads(campaign_id)
+    row = db.campaign_stats(campaign_id, campaign.min_score)
     db.close()
-    by_type = {t.value: 0 for t in CompanyType}
-    by_status = {s.value: 0 for s in SequenceStatus}
-    by_priority: dict[str, int] = {}
-    bands = {"0-49": 0, "50-69": 0, "70-79": 0, "80-100": 0}
-    for l in leads:
-        by_type[l.company_type.value] += 1
-        by_status[l.sequence_status.value] += 1
-        by_priority[l.priority.value] = by_priority.get(l.priority.value, 0) + 1
-        s = l.total_score
-        bands["0-49" if s < 50 else "50-69" if s < 70 else "70-79" if s < 80 else "80-100"] += 1
-    sent = sum(v for k, v in by_status.items() if k.endswith("_sent") or k in ("replied", "bounced", "unsubscribed"))
-    reviewed = [l for l in leads if l.review_verdict]
-    correct = sum(1 for l in reviewed if l.review_verdict == "correct")
-    with_intent = sum(1 for l in leads if l.intent_signals)
-    return {
-        "reviewed": len(reviewed), "correct": correct,
-        "accuracy": round(correct / len(reviewed), 3) if reviewed else None,
-        "verdicts": {v: sum(1 for l in reviewed if l.review_verdict == v) for v in ("correct", "wrong_company", "wrong_person", "wrong_email")},
-        "with_intent": with_intent,
-        "campaign_id": campaign_id, "leads": len(leads), "by_type": by_type, "by_status": by_status,
-        "by_priority": by_priority, "score_bands": bands,
-        "qualified": sum(1 for l in leads if l.company_type == CompanyType.BUYER and l.total_score >= campaign.min_score),
-        "outreach_ready": sum(1 for l in leads if l.outreach_ready),
-        "emails_sent": sent, "replied": by_status["replied"], "bounced": by_status["bounced"],
-    }
+    return row
 
 
 # -- leads --------------------------------------------------------------------------------
 
 @app.get("/campaigns/{campaign_id}/leads", dependencies=[Depends(require_campaign_access)])
 def leads(campaign_id: str, min_score: int = 0, company_type: str | None = None,
-          outreach_ready: bool | None = None, limit: int = 500) -> list[dict]:
+          outreach_ready: bool | None = None, limit: int = 50, offset: int = 0) -> dict:
     db = _db()
-    rows = db.list_leads(campaign_id, min_score=min_score, company_type=company_type, outreach_ready=outreach_ready)
+    total = db.count_leads(campaign_id, min_score=min_score, company_type=company_type, outreach_ready=outreach_ready)
+    rows = db.list_leads(campaign_id, min_score=min_score, company_type=company_type,
+                         outreach_ready=outreach_ready, limit=limit, offset=offset)
     db.close()
-    return [_lead_summary(l) for l in rows[:limit]]
+    return {"items": [_lead_summary(l) for l in rows], "total": total}
 
 
 def _lead_summary(l) -> dict:

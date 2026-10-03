@@ -42,7 +42,7 @@ export default function DashboardPage() {
   React.useEffect(() => {
     if (!campaignId) return
     api.stats(campaignId).then(setStats).catch(() => setStats(null))
-    api.leads(campaignId, { company_type: "BUYER" }).then((l) => setTop(l.slice(0, 8))).catch(() => setTop([]))
+    api.leads(campaignId, { company_type: "BUYER", limit: 8 }).then((r) => setTop(r.items)).catch(() => setTop([]))
   }, [campaignId])
 
   const campaign = campaigns.find((c) => c.campaign_id === campaignId)

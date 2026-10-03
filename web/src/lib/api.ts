@@ -238,12 +238,14 @@ export const api = {
     request<Progress>(`/campaigns/${id}/run`, { method: "POST", body: JSON.stringify({ max_companies }) }),
   progress: (id: string) => request<Progress>(`/campaigns/${id}/progress`),
   stats: (id: string) => request<Stats>(`/campaigns/${id}/stats`),
-  leads: (id: string, q: { min_score?: number; company_type?: string; outreach_ready?: boolean } = {}) => {
+  leads: (id: string, q: { min_score?: number; company_type?: string; outreach_ready?: boolean; limit?: number; offset?: number } = {}) => {
     const p = new URLSearchParams()
     if (q.min_score) p.set("min_score", String(q.min_score))
     if (q.company_type) p.set("company_type", q.company_type)
     if (q.outreach_ready !== undefined) p.set("outreach_ready", String(q.outreach_ready))
-    return request<Lead[]>(`/campaigns/${id}/leads?${p}`)
+    if (q.limit !== undefined) p.set("limit", String(q.limit))
+    if (q.offset !== undefined) p.set("offset", String(q.offset))
+    return request<{ items: Lead[]; total: number }>(`/campaigns/${id}/leads?${p}`)
   },
   lead: (leadId: string) => request<Lead>(`/leads/${leadId}`),
   suppress: (leadId: string, reason?: string) =>

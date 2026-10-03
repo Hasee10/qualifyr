@@ -537,13 +537,13 @@ export default function CampaignsPage() {
   const { campaigns, refresh, loading, error } = useCampaign()
   const [creating, setCreating] = React.useState(false)
   const [editing, setEditing] = React.useState<Campaign | null>(null)
-  const onFinished = React.useCallback(() => { refresh() }, [refresh])
+  const onFinished = React.useCallback(() => { refresh(true) }, [refresh])
 
-  const onCreated = React.useCallback(async () => { await refresh() }, [refresh])
+  const onCreated = React.useCallback(async () => { await refresh(true) }, [refresh])
 
   const remove = async (c: Campaign) => {
     if (!confirm(`Delete campaign "${c.name}"? Leads already generated are kept.`)) return
-    try { await api.deleteCampaign(c.campaign_id); await refresh() } catch (e) { alert((e as Error).message) }
+    try { await api.deleteCampaign(c.campaign_id); await refresh(true) } catch (e) { alert((e as Error).message) }
   }
 
   return (
@@ -556,7 +556,7 @@ export default function CampaignsPage() {
         <Button onClick={() => setCreating(true)}><Plus data-icon="inline-start" /> New campaign</Button>
       </div>
       <NewCampaign open={creating} onClose={() => setCreating(false)} onCreated={onCreated} />
-      {editing && <EditCampaign campaign={editing} open={true} onClose={() => setEditing(null)} onSaved={() => { refresh(); setEditing(null) }} />}
+      {editing && <EditCampaign campaign={editing} open={true} onClose={() => setEditing(null)} onSaved={() => { refresh(true); setEditing(null) }} />}
       {error && <p className="text-sm text-destructive">API error: {error}</p>}
       {loading && <p className="text-muted-foreground">Loading…</p>}
       {!loading && campaigns.length === 0 && (

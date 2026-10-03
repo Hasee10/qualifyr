@@ -145,6 +145,7 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
 export default function LeadsPage() {
   const { campaignId } = useCampaign()
   const [leads, setLeads] = React.useState<Lead[]>([])
+  const [total, setTotal] = React.useState(0)
   const [type, setType] = React.useState<string>("BUYER")
   const [minScore, setMinScore] = React.useState("0")
   const [search, setSearch] = React.useState("")
@@ -160,7 +161,6 @@ export default function LeadsPage() {
     setDownloading(true)
     setShowSheetsLink(false)
     try {
-      // Match the CSV to the current filters: the active type tab (All → every type) and min score.
       await api.downloadExport(campaignId, {
         min_score: Number(minScore) || 0,
         company_type: type === "ALL" ? undefined : type,
@@ -175,19 +175,26 @@ export default function LeadsPage() {
 
   const load = React.useCallback(() => {
     if (!campaignId) return
-    api.leads(campaignId, { company_type: type === "ALL" ? undefined : type, min_score: Number(minScore) || 0 })
-      .then(setLeads).catch(() => setLeads([]))
-  }, [campaignId, type, minScore])
+    const offset = (page - 1) * pageSize
+    api.leads(campaignId, {
+      company_type: type === "ALL" ? undefined : type,
+      min_score: Number(minScore) || 0,
+      limit: pageSize,
+      offset,
+    }).then((r) => { setLeads(r.items); setTotal(r.total) })
+      .catch(() => { setLeads([]); setTotal(0) })
+  }, [campaignId, type, minScore, page])
   React.useEffect(() => { load() }, [load])
 
   const q = search.toLowerCase()
-  const visible = leads.filter((l) => !q || l.company_name.toLowerCase().includes(q) || (l.domain ?? "").includes(q) || (l.contact_email ?? "").includes(q))
+  const visible = q ? leads.filter((l) => l.company_name.toLowerCase().includes(q) || (l.domain ?? "").includes(q) || (l.contact_email ?? "").includes(q)) : leads
 
-  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize))
+  const totalCount = q ? visible.length : total
+  const totalPages = Math.max(1, Math.ceil((q ? visible.length : total) / pageSize))
   const safePage = Math.min(page, totalPages)
-  const pageItems = visible.slice((safePage - 1) * pageSize, safePage * pageSize)
-  const firstShown = visible.length === 0 ? 0 : (safePage - 1) * pageSize + 1
-  const lastShown = Math.min(safePage * pageSize, visible.length)
+  const pageItems = q ? visible.slice((safePage - 1) * pageSize, safePage * pageSize) : visible
+  const firstShown = totalCount === 0 ? 0 : (q ? (safePage - 1) * pageSize + 1 : (page - 1) * pageSize + 1)
+  const lastShown = q ? Math.min(safePage * pageSize, visible.length) : Math.min(page * pageSize, total)
 
   return (
     <div className="grid gap-6">
@@ -231,7 +238,7 @@ export default function LeadsPage() {
               <Input className="w-20" value={minScore} onChange={(e) => { setMinScore(e.target.value); setPage(1) }} />
             </div>
             <Input className="max-w-xs" placeholder="Search company, domain, email…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
-            <CardDescription className="ml-auto">{visible.length === 0 ? "0 shown" : `${firstShown}–${lastShown} of ${visible.length}`}</CardDescription>
+            <CardDescription className="ml-auto">{totalCount === 0 ? "0 shown" : `${firstShown}–${lastShown} of ${totalCount}`}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
