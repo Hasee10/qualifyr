@@ -123,7 +123,7 @@ def test_no_max_companies_default():
     draft = parse_intent("grocery stores in Islamabad")
     assert draft.max_companies is None
     cfg = build_campaign_config(draft)
-    assert cfg.max_companies == 150
+    assert cfg.max_companies == 30
 
 
 # ---------------------------------------------------------------------------
