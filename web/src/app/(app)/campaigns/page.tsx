@@ -17,7 +17,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const [maxCo, setMaxCo] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [result, setResult] = React.useState<{ config: Record<string, unknown>; explanation: Record<string, unknown> | string } | null>(null)
+  const [result, setResult] = React.useState<{ campaignId: string; config: Record<string, unknown>; explanation: Record<string, unknown> | string } | null>(null)
 
   const submit = async () => {
     setError(null)
@@ -26,14 +26,22 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     try {
       const mc = maxCo.trim() ? parseInt(maxCo, 10) : undefined
       const res = await api.createCampaignNL(text.trim(), mc ? { max_companies: mc } : undefined)
-      setResult({ config: res.config, explanation: res.explanation })
+      setResult({ campaignId: res.campaign_id, config: res.config, explanation: res.explanation })
       const returned = typeof res.explanation === "object" && res.explanation?.max_companies
       if (returned) setMaxCo(String(returned))
       onCreated()
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
-  const close = () => { setText(""); setError(null); setResult(null); onClose() }
+  const runNow = async () => {
+    if (!result) return
+    try {
+      await api.runCampaign(result.campaignId, Number(maxCo) || undefined)
+    } catch { /* run will show in the campaign card */ }
+    close()
+  }
+
+  const close = () => { setText(""); setMaxCo(""); setError(null); setResult(null); onClose() }
 
   const exp = result?.explanation
   const rows: { label: string; value: string }[] = []
@@ -91,6 +99,10 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
                     <span className="break-words min-w-0">{r.value}</span>
                   </div>
                 ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" onClick={runNow}><Play data-icon="inline-start" /> Run now</Button>
+                <p className="text-xs text-muted-foreground self-center">Starts discovery immediately. Progress shows on the campaign card.</p>
               </div>
             </div>
           )}
