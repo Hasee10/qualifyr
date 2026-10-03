@@ -92,12 +92,12 @@ function CampaignPicker() {
   }
   return (
     <select
-      className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
+      className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
       value={campaignId ?? ""}
       onChange={(e) => setCampaignId(e.target.value)}
     >
       {campaigns.map((c) => (
-        <option key={c.campaign_id} value={c.campaign_id}>{c.name}</option>
+        <option key={c.campaign_id} value={c.campaign_id} className="bg-background text-foreground">{c.name}</option>
       ))}
     </select>
   )

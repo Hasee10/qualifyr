@@ -62,11 +62,21 @@ def test_extract_offer_providing():
     assert "erp" in draft.offer.lower()
 
 
-def test_no_offer_uses_raw_text():
+def test_no_offer_uses_sectors_for_offer():
     text = "grocery stores in Islamabad"
     draft = parse_intent(text)
     assert draft.offer is None
     cfg = build_campaign_config(draft)
+    assert "grocery" in cfg.offer.lower()
+    assert "Islamabad" in cfg.offer
+
+
+def test_bare_location_gets_sensible_name():
+    text = "in Lahore"
+    draft = parse_intent(text)
+    assert draft.offer is None
+    cfg = build_campaign_config(draft)
+    assert cfg.name == "Businesses in Lahore"
     assert cfg.offer == text
 
 

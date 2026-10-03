@@ -239,17 +239,21 @@ def parse_intent(text: str) -> CampaignDraft:
 def _name_from_draft(draft: CampaignDraft) -> str:
     if draft.name:
         return draft.name.strip()[:80]
-    has_subject = bool(draft.target_industries or draft.offer)
-    if has_subject:
-        parts: list[str] = []
-        if draft.target_industries:
-            parts.append(", ".join(draft.target_industries[:2]).title())
-        elif draft.offer:
-            parts.append(draft.offer[:40].strip())
-        if draft.areas:
-            parts.append("near " + ", ".join(draft.areas[:3]))
-        if draft.cities:
-            parts.append("in " + ", ".join(draft.cities[:2]))
+    has_subject = bool(draft.target_industries or draft.sectors or draft.offer)
+    parts: list[str] = []
+    if draft.target_industries:
+        parts.append(", ".join(draft.target_industries[:2]).title())
+    elif draft.sectors:
+        parts.append(", ".join(s.replace("_", " ").title() for s in draft.sectors[:2]))
+    elif draft.offer:
+        parts.append(draft.offer[:40].strip())
+    if draft.areas:
+        parts.append("near " + ", ".join(draft.areas[:3]))
+    if draft.cities:
+        parts.append("in " + ", ".join(draft.cities[:2]))
+    if parts:
+        if not has_subject:
+            parts.insert(0, "Businesses")
         return " ".join(parts)[:80]
     raw = draft.raw_text.strip()
     if len(raw) <= 60:
@@ -277,6 +281,10 @@ def build_campaign_config(
             f"Find {', '.join(draft.target_industries[:3])} "
             f"in {', '.join(draft.cities) or 'Pakistan'}"
         )
+    elif draft.sectors:
+        sector_label = ", ".join(s.replace("_", " ") for s in draft.sectors[:3])
+        location = ", ".join(draft.cities) or "Pakistan"
+        offer = f"Find {sector_label} businesses in {location}"
     else:
         offer = draft.raw_text.strip()[:200]
 

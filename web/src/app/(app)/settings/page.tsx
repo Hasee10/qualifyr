@@ -569,9 +569,9 @@ function CampaignEditor() {
             <CardDescription>Create or edit a campaign here — a new one is saved to your account. Validation runs the same schema the engine uses.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <select className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm" value={selected} onChange={(e) => setSelected(e.target.value)}>
-              {campaigns.map((c) => <option key={c.campaign_id} value={c.campaign_id}>{c.name}</option>)}
-              <option value="new">+ New campaign</option>
+            <select className="h-8 rounded-lg border border-input bg-background px-2 text-sm text-foreground" value={selected} onChange={(e) => setSelected(e.target.value)}>
+              {campaigns.map((c) => <option key={c.campaign_id} value={c.campaign_id} className="bg-background text-foreground">{c.name}</option>)}
+              <option value="new" className="bg-background text-foreground">+ New campaign</option>
             </select>
             {selected !== "new" && <Button variant="outline" size="sm" onClick={() => setSelected("new")}><Plus data-icon="inline-start" /> New</Button>}
           </div>
