@@ -14,6 +14,10 @@ import { useCampaign } from "@/components/campaign-context"
 import { ReplyLabelBadge, ReviewButtons, ScoreBadge, StatusBadge } from "@/components/lead-badges"
 import { cn } from "@/lib/utils"
 
+// How many queue rows to show per page in the "Due now" list, so the left column never grows
+// taller than the draft editor on the right.
+const QUEUE_PAGE_SIZE = 8
+
 function DraftBadge({ status }: { status: Draft["status"] }) {
   const variant = status === "approved" ? "default" : status === "rejected" ? "destructive" : status === "sent" ? "secondary" : "outline"
   return <Badge variant={variant}>{status}</Badge>
@@ -165,6 +169,7 @@ export default function OutreachPage() {
   const { campaignId } = useCampaign()
   const [queue, setQueue] = React.useState<Queue | null>(null)
   const [selected, setSelected] = React.useState<number>(0)
+  const [queuePage, setQueuePage] = React.useState(1)
   const [tab, setTab] = React.useState("review")
   const [sequence, setSequence] = React.useState<Lead[]>([])
   const [activity, setActivity] = React.useState<OutreachEvent[]>([])
@@ -186,6 +191,13 @@ export default function OutreachPage() {
   const items = queue?.items ?? []
   const current = items[selected] ?? items[0]
   const pending = items.filter((i) => i.draft.status === "pending").length
+
+  // Client-side pagination for the "Due now" list (the queue is already fully loaded). Clamping
+  // the page keeps it valid when the queue shrinks after an approve/reject — no reset effect.
+  const queueTotalPages = Math.max(1, Math.ceil(items.length / QUEUE_PAGE_SIZE))
+  const safeQueuePage = Math.min(queuePage, queueTotalPages)
+  const queueOffset = (safeQueuePage - 1) * QUEUE_PAGE_SIZE
+  const pagedItems = items.slice(queueOffset, queueOffset + QUEUE_PAGE_SIZE)
 
   return (
     <div className="grid gap-6">
@@ -213,22 +225,37 @@ export default function OutreachPage() {
             <Card><CardContent className="py-10 text-center text-muted-foreground">Nothing is due. Leads become due after discovery (Email 1) and 3 / 4 days after each send.</CardContent></Card>
           ) : (
             <div className="grid gap-6 lg:grid-cols-[minmax(260px,1fr)_2fr]">
-              <Card>
+              <Card className="self-start">
                 <CardHeader><CardTitle>Due now ({items.length})</CardTitle></CardHeader>
                 <CardContent className="p-0">
-                  {items.map((i, idx) => (
-                    <button
-                      key={`${i.lead.lead_id}-${i.step}`}
-                      onClick={() => setSelected(idx)}
-                      className={cn("flex w-full flex-col items-start gap-0.5 border-t px-4 py-3 text-left text-sm hover:bg-muted", current === i && "bg-muted")}
-                    >
-                      <span className="flex w-full items-center justify-between gap-2">
-                        <span className="font-medium">{i.lead.company_name}</span>
-                        <DraftBadge status={i.draft.status} />
+                  {pagedItems.map((i, localIdx) => {
+                    const idx = queueOffset + localIdx
+                    return (
+                      <button
+                        key={`${i.lead.lead_id}-${i.step}`}
+                        onClick={() => setSelected(idx)}
+                        className={cn("flex w-full flex-col items-start gap-0.5 border-t px-4 py-3 text-left text-sm hover:bg-muted", current === i && "bg-muted")}
+                      >
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span className="font-medium">{i.lead.company_name}</span>
+                          <DraftBadge status={i.draft.status} />
+                        </span>
+                        <span className="text-xs text-muted-foreground">{STEP_LABEL[i.step]} · {i.lead.contact_email}</span>
+                      </button>
+                    )
+                  })}
+                  {queueTotalPages > 1 && (
+                    <div className="flex items-center justify-between gap-2 border-t px-4 py-3 text-xs">
+                      <span className="text-muted-foreground">
+                        {queueOffset + 1}–{queueOffset + pagedItems.length} of {items.length}
                       </span>
-                      <span className="text-xs text-muted-foreground">{STEP_LABEL[i.step]} · {i.lead.contact_email}</span>
-                    </button>
-                  ))}
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="xs" disabled={safeQueuePage <= 1} onClick={() => setQueuePage(safeQueuePage - 1)}>Prev</Button>
+                        <span className="text-muted-foreground">{safeQueuePage}/{queueTotalPages}</span>
+                        <Button variant="outline" size="xs" disabled={safeQueuePage >= queueTotalPages} onClick={() => setQueuePage(safeQueuePage + 1)}>Next</Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
               {current && <Editor item={current} onChange={updateDraft} />}
