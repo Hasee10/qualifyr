@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
 
-function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (campaignId: string) => void }) {
   // NL mode state
   const [text, setText] = React.useState("")
   // Manual mode state
@@ -53,7 +53,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       setResult({ campaignId: res.campaign_id, config: res.config, explanation: res.explanation })
       const returned = typeof res.explanation === "object" && res.explanation?.max_companies
       if (returned) setMaxCo(String(returned))
-      onCreated()
+      onCreated(res.campaign_id)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -77,7 +77,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       }
       const res = await api.createCampaign(body)
       setResult({ campaignId: res.campaign_id, config: body as unknown as Record<string, unknown>, explanation: `Campaign "${res.name}" created` })
-      onCreated()
+      onCreated(res.campaign_id)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -534,12 +534,15 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 export default function CampaignsPage() {
-  const { campaigns, refresh, loading, error } = useCampaign()
+  const { campaigns, setCampaignId, refresh, loading, error } = useCampaign()
   const [creating, setCreating] = React.useState(false)
   const [editing, setEditing] = React.useState<Campaign | null>(null)
   const onFinished = React.useCallback(() => { refresh(true) }, [refresh])
 
-  const onCreated = React.useCallback(async () => { await refresh(true) }, [refresh])
+  const onCreated = React.useCallback(async (campaignId: string) => {
+    await refresh(true)
+    setCampaignId(campaignId)
+  }, [refresh, setCampaignId])
 
   const remove = async (c: Campaign) => {
     if (!confirm(`Delete campaign "${c.name}"? Leads already generated are kept.`)) return
