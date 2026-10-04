@@ -466,7 +466,9 @@ class Database:
         params: list = [campaign_id]
         sql, params = self._apply_lead_filters(sql, params, run_id, min_score, company_type,
                                                outreach_ready, q)
-        sql += " ORDER BY updated_at DESC, total_score DESC" if order == "recent" else " ORDER BY total_score DESC, updated_at DESC"
+        # "score" keeps its original single-key sort (ties fall back to physical/insertion order,
+        # which existing callers and tests rely on); only "recent" adds the recency key.
+        sql += " ORDER BY updated_at DESC, total_score DESC" if order == "recent" else " ORDER BY total_score DESC"
         if limit is not None:
             sql += " LIMIT %s OFFSET %s"
             params.extend([limit, offset])
