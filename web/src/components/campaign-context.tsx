@@ -45,6 +45,19 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => { refresh(true) }, [refresh])
 
+  // While any campaign has an active run, keep the list fresh so run status and counts stay
+  // live across the whole app — a dispatched run must never look like "nothing ran", on any
+  // page, after navigating away and back. The provider lives at the app shell, so this poll
+  // survives page navigation.
+  const anyRunActive = campaigns.some(
+    (c) => c.live && !["idle", "completed", "failed"].includes(c.live.stage),
+  )
+  React.useEffect(() => {
+    if (!anyRunActive) return
+    const t = setInterval(() => { void refresh(true) }, 4000)
+    return () => clearInterval(t)
+  }, [anyRunActive, refresh])
+
   // Flush the sign-up monetization vote once there is an authenticated session (it may have
   // been stashed before e-mail confirmation, when no token existed yet).
   React.useEffect(() => {

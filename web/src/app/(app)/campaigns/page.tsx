@@ -473,6 +473,17 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
   const [error, setError] = React.useState<string | null>(null)
   const running = progress && !["idle", "completed", "failed"].includes(progress.stage)
 
+  // Adopt the server's live status whenever the campaign list refreshes (e.g. after returning
+  // to the page) — unless a local poll is already tracking an active run, so finer-grained
+  // local progress is never clobbered by a slightly older list snapshot. This is what stops a
+  // dispatched/running campaign from rendering as "nothing ran" after navigation.
+  React.useEffect(() => {
+    setProgress((cur) => {
+      if (cur && !["idle", "completed", "failed"].includes(cur.stage)) return cur
+      return campaign.live ?? cur
+    })
+  }, [campaign.live])
+
   React.useEffect(() => {
     if (!running) return
     const t = setInterval(async () => {
@@ -489,6 +500,9 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
     setError(null)
     try {
       setProgress(await api.runCampaign(campaign.campaign_id, Number(max) || undefined))
+      // Refresh the shared list so campaign.live persists across navigation and the app-level
+      // poll picks up the active run immediately.
+      onFinished()
     } catch (e) {
       setError((e as Error).message)
     }
@@ -556,6 +570,11 @@ export default function CampaignsPage() {
     await refresh(true)
     setCampaignId(campaignId)
   }, [refresh, setCampaignId])
+
+  // Always get fresh run status + counts when landing on this page, so a run dispatched
+  // earlier (now in progress or finished on GitHub Actions) is reflected instead of a stale
+  // "nothing ran" snapshot from a cached list.
+  React.useEffect(() => { void refresh(true) }, [refresh])
 
   const remove = async (c: Campaign) => {
     if (!confirm(`Delete campaign "${c.name}"? Leads already generated are kept.`)) return

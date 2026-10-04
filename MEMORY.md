@@ -47,6 +47,11 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
   authenticated load (campaign-context) for the e-mail-confirm flow. Removed from settings.
 - **UI**: header campaign dropdown hidden on `/campaigns`; whole campaign card clickable →
   Leads (edit/delete/run stopPropagation).
+- **Live run status** (fix "dispatched run shows as 'nothing ran' after navigation): provider
+  (`campaign-context`) polls `refresh(true)` every 4s while any `campaign.live.stage` is active
+  (app-level, survives navigation); `RunPanel` adopts fresh `campaign.live` on change (unless a
+  local poll is mid-run); `RunPanel.start` calls `onFinished()` right after dispatch; Campaigns
+  page force-refreshes on mount.
 - **CI fix**: `tests/test_load_concurrency.py` — lift `FREE_MAX_*` in its fixture (concurrency
   tests, not quota), and `test_bulk_lead_listing_scales` reads `["items"]`/`["total"]` (the
   `/leads` endpoint returns `{items,total}` since the pagination change, not a bare list).
