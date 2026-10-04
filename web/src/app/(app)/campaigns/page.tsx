@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
-import { cn } from "@/lib/utils"
 
 function ExpandButton({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
   return (
