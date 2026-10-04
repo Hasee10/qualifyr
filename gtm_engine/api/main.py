@@ -493,11 +493,13 @@ def stats(campaign_id: str) -> dict:
 
 @app.get("/campaigns/{campaign_id}/leads", dependencies=[Depends(require_campaign_access)])
 def leads(campaign_id: str, min_score: int = 0, company_type: str | None = None,
-          outreach_ready: bool | None = None, limit: int = 50, offset: int = 0) -> dict:
+          outreach_ready: bool | None = None, q: str | None = None, order: str = "score",
+          limit: int = 50, offset: int = 0) -> dict:
     db = _db()
-    total = db.count_leads(campaign_id, min_score=min_score, company_type=company_type, outreach_ready=outreach_ready)
+    total = db.count_leads(campaign_id, min_score=min_score, company_type=company_type,
+                           outreach_ready=outreach_ready, q=q)
     rows = db.list_leads(campaign_id, min_score=min_score, company_type=company_type,
-                         outreach_ready=outreach_ready, limit=limit, offset=offset)
+                         outreach_ready=outreach_ready, q=q, order=order, limit=limit, offset=offset)
     db.close()
     return {"items": [_lead_summary(l) for l in rows], "total": total}
 

@@ -152,9 +152,16 @@ export default function LeadsPage() {
   const [selected, setSelected] = React.useState<string | null>(null)
   const [page, setPage] = React.useState(1)
   const [downloading, setDownloading] = React.useState(false)
+  const [debounced, setDebounced] = React.useState("")
   const pageSize = 25
 
   const [showSheetsLink, setShowSheetsLink] = React.useState(false)
+
+  // Debounce the search box so the server is queried once the user pauses, not per keystroke.
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
   const downloadCsv = async () => {
     if (!campaignId) return
@@ -179,22 +186,20 @@ export default function LeadsPage() {
     api.leads(campaignId, {
       company_type: type === "ALL" ? undefined : type,
       min_score: Number(minScore) || 0,
+      search: debounced || undefined,
+      order: "recent",       // newest scraped leads first
       limit: pageSize,
       offset,
     }).then((r) => { setLeads(r.items); setTotal(r.total) })
       .catch(() => { setLeads([]); setTotal(0) })
-  }, [campaignId, type, minScore, page])
+  }, [campaignId, type, minScore, debounced, page])
   React.useEffect(() => { load() }, [load])
 
-  const q = search.toLowerCase()
-  const visible = q ? leads.filter((l) => l.company_name.toLowerCase().includes(q) || (l.domain ?? "").includes(q) || (l.contact_email ?? "").includes(q)) : leads
-
-  const totalCount = q ? visible.length : total
-  const totalPages = Math.max(1, Math.ceil((q ? visible.length : total) / pageSize))
-  const safePage = Math.min(page, totalPages)
-  const pageItems = q ? visible.slice((safePage - 1) * pageSize, safePage * pageSize) : visible
-  const firstShown = totalCount === 0 ? 0 : (q ? (safePage - 1) * pageSize + 1 : (page - 1) * pageSize + 1)
-  const lastShown = q ? Math.min(safePage * pageSize, visible.length) : Math.min(page * pageSize, total)
+  // Server-side pagination + search: the server returns this page's rows and the full matching
+  // total, so every count below derives from `total`, never from the current page's length.
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const firstShown = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const lastShown = Math.min(page * pageSize, total)
 
   return (
     <div className="grid gap-6">
@@ -238,7 +243,7 @@ export default function LeadsPage() {
               <Input className="w-20" value={minScore} onChange={(e) => { setMinScore(e.target.value); setPage(1) }} />
             </div>
             <Input className="max-w-xs" placeholder="Search company, domain, email…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
-            <CardDescription className="ml-auto">{totalCount === 0 ? "0 shown" : `${firstShown}–${lastShown} of ${totalCount}`}</CardDescription>
+            <CardDescription className="ml-auto">{total === 0 ? "0 shown" : `${firstShown}–${lastShown} of ${total}`}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -254,7 +259,7 @@ export default function LeadsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageItems.map((l) => (
+              {leads.map((l) => (
                 <TableRow key={l.lead_id} className="cursor-pointer" onClick={() => setSelected(l.lead_id)}>
                   <TableCell>
                     <div className="flex flex-col">
@@ -279,18 +284,18 @@ export default function LeadsPage() {
                   <TableCell><StatusBadge status={l.sequence_status} /></TableCell>
                 </TableRow>
               ))}
-              {visible.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Nothing matches.</TableCell></TableRow>
+              {leads.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">Nothing matches.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-4 border-t pt-4 text-sm">
-              <span className="text-muted-foreground">Showing {firstShown}–{lastShown} of {visible.length}</span>
+              <span className="text-muted-foreground">Showing {firstShown}–{lastShown} of {total}</span>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Previous</Button>
-                <span className="text-muted-foreground">Page {safePage} of {totalPages}</span>
-                <Button variant="outline" size="sm" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>Next</Button>
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+                <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</Button>
               </div>
             </div>
           )}

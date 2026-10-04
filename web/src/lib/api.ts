@@ -8,6 +8,8 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000
 // The monetization choice made at sign-up is stashed here until there is an authenticated
 // session to save it against (accounts that need e-mail confirmation have no token yet).
 export const PENDING_MONETIZATION_KEY = "qualifyr.pending_monetization"
+// The optional free-text answer from sign-up, stashed alongside the vote until there is a token.
+export const PENDING_MONETIZATION_COMMENT_KEY = "qualifyr.pending_monetization_comment"
 
 export type CompanyType = "BUYER" | "VENDOR" | "UNKNOWN"
 export type SequenceStatus =
@@ -242,11 +244,13 @@ export const api = {
     request<Progress>(`/campaigns/${id}/run`, { method: "POST", body: JSON.stringify({ max_companies }) }),
   progress: (id: string) => request<Progress>(`/campaigns/${id}/progress`),
   stats: (id: string) => request<Stats>(`/campaigns/${id}/stats`),
-  leads: (id: string, q: { min_score?: number; company_type?: string; outreach_ready?: boolean; limit?: number; offset?: number } = {}) => {
+  leads: (id: string, q: { min_score?: number; company_type?: string; outreach_ready?: boolean; search?: string; order?: "recent" | "score"; limit?: number; offset?: number } = {}) => {
     const p = new URLSearchParams()
     if (q.min_score) p.set("min_score", String(q.min_score))
     if (q.company_type) p.set("company_type", q.company_type)
     if (q.outreach_ready !== undefined) p.set("outreach_ready", String(q.outreach_ready))
+    if (q.search) p.set("q", q.search)
+    if (q.order) p.set("order", q.order)
     if (q.limit !== undefined) p.set("limit", String(q.limit))
     if (q.offset !== undefined) p.set("offset", String(q.offset))
     return request<{ items: Lead[]; total: number }>(`/campaigns/${id}/leads?${p}`)

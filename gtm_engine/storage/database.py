@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS leads (
 );
 CREATE INDEX IF NOT EXISTS idx_leads_campaign ON leads(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_leads_company ON leads(company_key);
+-- Composite indexes so the paginated Leads list (newest-first) and the dashboard top-buyers
+-- (highest-score-first) both stay fast as a campaign accumulates leads.
+CREATE INDEX IF NOT EXISTS idx_leads_campaign_updated ON leads(campaign_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_campaign_score ON leads(campaign_id, total_score DESC);
 
 CREATE TABLE IF NOT EXISTS suppressions (
     value TEXT PRIMARY KEY,
@@ -450,12 +454,39 @@ class Database:
         row = self._execute("SELECT data_json FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
         return Lead.model_validate_json(row["data_json"]) if row else None
 
+    # `order` controls the sort: "score" (default, highest-scoring first — used by the dashboard
+    # top-buyers list) or "recent" (newest scraped first — the Leads page, so freshly discovered
+    # companies surface at the top rather than sinking by score).
     def list_leads(self, campaign_id: str, *, run_id: str | None = None,
                    min_score: int | None = None, company_type: str | None = None,
-                   outreach_ready: bool | None = None,
+                   outreach_ready: bool | None = None, q: str | None = None,
+                   order: str = "score",
                    limit: int | None = None, offset: int = 0) -> list[Lead]:
         sql = "SELECT data_json FROM leads WHERE campaign_id = %s"
         params: list = [campaign_id]
+        sql, params = self._apply_lead_filters(sql, params, run_id, min_score, company_type,
+                                               outreach_ready, q)
+        sql += " ORDER BY updated_at DESC, total_score DESC" if order == "recent" else " ORDER BY total_score DESC, updated_at DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+        rows = self._execute(sql, params).fetchall()
+        return [Lead.model_validate_json(r["data_json"]) for r in rows]
+
+    def count_leads(self, campaign_id: str, *, min_score: int | None = None,
+                    company_type: str | None = None,
+                    outreach_ready: bool | None = None, q: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = %s"
+        params: list = [campaign_id]
+        sql, params = self._apply_lead_filters(sql, params, None, min_score, company_type,
+                                               outreach_ready, q)
+        return self._execute(sql, params).fetchone()["cnt"]
+
+    @staticmethod
+    def _apply_lead_filters(sql: str, params: list, run_id, min_score, company_type,
+                            outreach_ready, q) -> tuple[str, list]:
+        """Shared WHERE-clause builder so list_leads and count_leads stay in lock-step (same
+        total as the page they paginate)."""
         if run_id:
             sql += " AND run_id = %s"
             params.append(run_id)
@@ -468,28 +499,11 @@ class Database:
         if outreach_ready is not None:
             sql += " AND outreach_ready = %s"
             params.append(int(outreach_ready))
-        sql += " ORDER BY total_score DESC"
-        if limit is not None:
-            sql += " LIMIT %s OFFSET %s"
-            params.extend([limit, offset])
-        rows = self._execute(sql, params).fetchall()
-        return [Lead.model_validate_json(r["data_json"]) for r in rows]
-
-    def count_leads(self, campaign_id: str, *, min_score: int | None = None,
-                    company_type: str | None = None,
-                    outreach_ready: bool | None = None) -> int:
-        sql = "SELECT COUNT(*) AS cnt FROM leads WHERE campaign_id = %s"
-        params: list = [campaign_id]
-        if min_score is not None:
-            sql += " AND total_score >= %s"
-            params.append(min_score)
-        if company_type:
-            sql += " AND company_type = %s"
-            params.append(company_type)
-        if outreach_ready is not None:
-            sql += " AND outreach_ready = %s"
-            params.append(int(outreach_ready))
-        return self._execute(sql, params).fetchone()["cnt"]
+        if q and q.strip():
+            # Free-text search over the serialized lead (name, domain, email, city, …).
+            sql += " AND data_json ILIKE %s"
+            params.append(f"%{q.strip()}%")
+        return sql, params
 
     def leads_by_status(self, campaign_id: str, statuses: list[str]) -> list[Lead]:
         placeholders = ",".join("%s" for _ in statuses)
