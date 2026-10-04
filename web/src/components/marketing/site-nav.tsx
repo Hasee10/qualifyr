@@ -36,15 +36,17 @@ export function SiteNav() {
         scrolled && "border-b bg-background/80 backdrop-blur-md"
       )}
     >
-      <nav className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
+      {/* 3-column grid with equal 1fr side columns keeps the middle nav centered on the page
+          regardless of how wide the logo or the action buttons are. */}
+      <nav className="mx-auto grid h-16 max-w-6xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6">
+        <Link href="/" className="flex items-center gap-2 font-semibold justify-self-start">
           <span className="flex size-8 items-center justify-center rounded-lg bg-brand">
             <QualifyrMark className="size-5 text-brand-foreground" />
           </span>
           Qualifyr
         </Link>
 
-        <div className="hidden flex-1 items-center justify-center gap-1 md:flex">
+        <div className="hidden items-center justify-center gap-1 md:flex">
           {sections.map((s) => (
             <a
               key={s.href}
@@ -56,7 +58,7 @@ export function SiteNav() {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-1 md:ml-0">
+        <div className="flex items-center justify-end gap-1">
           <ThemeToggle />
           {/* nativeButton={false} because these render as links: Base UI otherwise warns
               that it has lost native <button> semantics, which is the right complaint. */}

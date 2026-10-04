@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { api, PENDING_MONETIZATION_KEY, type Campaign } from "@/lib/api"
+import { api, PENDING_MONETIZATION_KEY, PENDING_MONETIZATION_COMMENT_KEY, type Campaign } from "@/lib/api"
 
 interface Ctx {
   campaigns: Campaign[]
@@ -63,10 +63,18 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let pending: string | null = null
     try { pending = localStorage.getItem(PENDING_MONETIZATION_KEY) } catch { /* ignore */ }
-    if (!pending) return
-    api.setPreference("monetization_preference", pending)
-      .then(() => { try { localStorage.removeItem(PENDING_MONETIZATION_KEY) } catch { /* ignore */ } })
-      .catch(() => { /* retried on next load */ })
+    if (pending) {
+      api.setPreference("monetization_preference", pending)
+        .then(() => { try { localStorage.removeItem(PENDING_MONETIZATION_KEY) } catch { /* ignore */ } })
+        .catch(() => { /* retried on next load */ })
+    }
+    let comment: string | null = null
+    try { comment = localStorage.getItem(PENDING_MONETIZATION_COMMENT_KEY) } catch { /* ignore */ }
+    if (comment) {
+      api.setPreference("monetization_comment", comment)
+        .then(() => { try { localStorage.removeItem(PENDING_MONETIZATION_COMMENT_KEY) } catch { /* ignore */ } })
+        .catch(() => { /* retried on next load */ })
+    }
   }, [])
 
   const setCampaignId = (id: string) => {

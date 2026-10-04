@@ -1,10 +1,14 @@
 /** CSS-only marquee: no JS needed for the scroll, pause-on-hover or the reduced-motion
- *  fallback, so this stays a server component. The track is duplicated once and the
- *  animation shifts exactly -50%, which is what makes the loop seamless. */
-// Each source's own domain, used only to fetch its logo for the marquee. Google's favicon
-// service needs no API key and returns a generic icon on a miss (never a 404), so no per-icon
-// error handling is needed and this stays a server component. Logo-only: the name lives in
-// alt/title for screen readers and hover, but is not drawn, so sz=128 keeps the mark crisp.
+ *  fallback, so this stays a server component.
+ *
+ *  Seamless loop: the set is rendered twice and the track animates to translateX(-50%). For
+ *  that to land exactly on the second copy (no jump), spacing must be uniform across the seam —
+ *  so each item carries its OWN horizontal margin instead of a flex `gap`. A flex gap is omitted
+ *  between the two copies, which left the old version short by half a gap every cycle. */
+// Each source's own domain, used only to fetch its logo. Google's favicon service needs no API
+// key and returns a generic icon on a miss (never a 404). Logo-only: the name lives in
+// alt/title for screen readers and hover. No tile behind the logo — the marks sit directly on
+// the section so there is no white box on the dark theme.
 const sources = [
   { name: "OpenStreetMap", domain: "openstreetmap.org" },
   { name: "Overture Maps", domain: "overturemaps.org" },
@@ -24,26 +28,23 @@ export function SourceMarquee() {
       <p className="mx-auto max-w-6xl px-4 text-center text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground sm:px-6">
         Built on free public sources
       </p>
-      <div className="group relative mt-8 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
-        <div className="flex w-max animate-marquee items-center gap-5 group-hover:[animation-play-state:paused] motion-reduce:animate-none sm:gap-7">
+      <div className="group relative mt-8 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_6%,black_94%,transparent)]">
+        <div className="flex w-max animate-marquee items-center group-hover:[animation-play-state:paused] motion-reduce:animate-none">
           {[...sources, ...sources].map((s, i) => (
             <span
               key={`${s.name}-${i}`}
               title={s.name}
               aria-label={s.name}
-              // A white tile keeps every logo legible: favicons are drawn for light backgrounds,
-              // so dark marks (OpenStreetMap, PPRA, KCCI) would vanish on a dark chip. This reads
-              // as a consistent "app-icon" wall in both themes.
-              className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
+              className="mx-4 flex shrink-0 items-center justify-center sm:mx-6"
             >
               {/* eslint-disable-next-line @next/next/no-img-element -- tiny external favicon, not a Next-optimised asset */}
               <img
                 src={favicon(s.domain)}
                 alt={s.name}
-                width={36}
-                height={36}
+                width={40}
+                height={40}
                 loading="lazy"
-                className="size-9 object-contain"
+                className="size-10 rounded-xl object-contain opacity-90 transition-all duration-200 hover:scale-110 hover:opacity-100"
               />
             </span>
           ))}

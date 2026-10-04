@@ -7,7 +7,8 @@ import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { api, PENDING_MONETIZATION_KEY } from "@/lib/api"
+import { Textarea } from "@/components/ui/textarea"
+import { api, PENDING_MONETIZATION_KEY, PENDING_MONETIZATION_COMMENT_KEY } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import { supabaseConfigured } from "@/lib/supabase/config"
 
@@ -24,6 +25,7 @@ export function SignUpForm() {
   const [error, setError] = React.useState<string | null>(null)
   const [sent, setSent] = React.useState(false)
   const [usage, setUsage] = React.useState("")
+  const [comment, setComment] = React.useState("")
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -44,9 +46,14 @@ export function SignUpForm() {
         setError(error.message)
         return
       }
-      // Stash the vote so it is saved even when the account needs e-mail confirmation first
-      // (no session/token yet). It is flushed to the backend on the first authenticated load.
-      try { localStorage.setItem(PENDING_MONETIZATION_KEY, usage) } catch { /* ignore */ }
+      // Stash the vote (and the optional free-text answer, so an admin can read what people
+      // wrote) so both are saved even when the account needs e-mail confirmation first (no
+      // session/token yet). They are flushed to the backend on the first authenticated load.
+      const trimmedComment = comment.trim()
+      try {
+        localStorage.setItem(PENDING_MONETIZATION_KEY, usage)
+        if (trimmedComment) localStorage.setItem(PENDING_MONETIZATION_COMMENT_KEY, trimmedComment)
+      } catch { /* ignore */ }
       // A session on the response means email confirmation is off and this account is
       // already active - otherwise Supabase is waiting on a confirmation link, and there
       // is nothing to sign in to yet.
@@ -54,6 +61,10 @@ export function SignUpForm() {
         try {
           await api.setPreference("monetization_preference", usage)
           localStorage.removeItem(PENDING_MONETIZATION_KEY)
+          if (trimmedComment) {
+            await api.setPreference("monetization_comment", trimmedComment)
+            localStorage.removeItem(PENDING_MONETIZATION_COMMENT_KEY)
+          }
         } catch { /* flushed later on first authenticated load */ }
         router.replace("/dashboard")
         router.refresh()
@@ -143,6 +154,15 @@ export function SignUpForm() {
             </label>
           ))}
         </div>
+        <Textarea
+          id="usage-comment"
+          name="usage-comment"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="Anything else you'd like us to know? (optional)"
+          rows={3}
+          className="mt-1"
+        />
       </div>
 
       {error && (
