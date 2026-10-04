@@ -14,13 +14,32 @@ import { useCampaign } from "@/components/campaign-context"
 import { ReplyLabelBadge, ReviewButtons, ScoreBadge, StatusBadge } from "@/components/lead-badges"
 import { cn } from "@/lib/utils"
 
-// How many queue rows to show per page in the "Due now" list, so the left column never grows
-// taller than the draft editor on the right.
+// Per-page sizes so none of the outreach lists grow unbounded. The "Due now" list is kept short
+// so it never exceeds the draft editor; the sequence/activity tables get larger pages.
 const QUEUE_PAGE_SIZE = 8
+const SEQ_PAGE_SIZE = 15
+const ACTIVITY_PAGE_SIZE = 20
 
 function DraftBadge({ status }: { status: Draft["status"] }) {
   const variant = status === "approved" ? "default" : status === "rejected" ? "destructive" : status === "sent" ? "secondary" : "outline"
   return <Badge variant={variant}>{status}</Badge>
+}
+
+/** Shared bottom pager for the sequence/activity tables. Renders nothing for a single page. */
+function Pager({ page, totalPages, from, to, total, onPage }: {
+  page: number; totalPages: number; from: number; to: number; total: number; onPage: (p: number) => void
+}) {
+  if (totalPages <= 1) return null
+  return (
+    <div className="mt-4 flex items-center justify-between gap-2 border-t pt-4 text-sm">
+      <span className="text-muted-foreground">Showing {from}–{to} of {total}</span>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</Button>
+        <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Next</Button>
+      </div>
+    </div>
+  )
 }
 
 function Editor({ item, onChange }: { item: QueueItem; onChange: (d: Draft) => void }) {
@@ -170,6 +189,8 @@ export default function OutreachPage() {
   const [queue, setQueue] = React.useState<Queue | null>(null)
   const [selected, setSelected] = React.useState<number>(0)
   const [queuePage, setQueuePage] = React.useState(1)
+  const [seqPage, setSeqPage] = React.useState(1)
+  const [activityPage, setActivityPage] = React.useState(1)
   const [tab, setTab] = React.useState("review")
   const [sequence, setSequence] = React.useState<Lead[]>([])
   const [activity, setActivity] = React.useState<OutreachEvent[]>([])
@@ -198,6 +219,16 @@ export default function OutreachPage() {
   const safeQueuePage = Math.min(queuePage, queueTotalPages)
   const queueOffset = (safeQueuePage - 1) * QUEUE_PAGE_SIZE
   const pagedItems = items.slice(queueOffset, queueOffset + QUEUE_PAGE_SIZE)
+
+  const seqTotalPages = Math.max(1, Math.ceil(sequence.length / SEQ_PAGE_SIZE))
+  const safeSeqPage = Math.min(seqPage, seqTotalPages)
+  const seqOffset = (safeSeqPage - 1) * SEQ_PAGE_SIZE
+  const pagedSequence = sequence.slice(seqOffset, seqOffset + SEQ_PAGE_SIZE)
+
+  const actTotalPages = Math.max(1, Math.ceil(activity.length / ACTIVITY_PAGE_SIZE))
+  const safeActPage = Math.min(activityPage, actTotalPages)
+  const actOffset = (safeActPage - 1) * ACTIVITY_PAGE_SIZE
+  const pagedActivity = activity.slice(actOffset, actOffset + ACTIVITY_PAGE_SIZE)
 
   return (
     <div className="grid gap-6">
@@ -275,7 +306,7 @@ export default function OutreachPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sequence.map((l) => (
+                {pagedSequence.map((l) => (
                   <TableRow key={l.lead_id}>
                     <TableCell className="font-medium">{l.company_name}</TableCell>
                     <TableCell className="text-xs">{l.contact_email}</TableCell>
@@ -299,6 +330,8 @@ export default function OutreachPage() {
                 {sequence.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No one in sequence yet.</TableCell></TableRow>}
               </TableBody>
             </Table>
+            <Pager page={safeSeqPage} totalPages={seqTotalPages} total={sequence.length}
+              from={seqOffset + 1} to={seqOffset + pagedSequence.length} onPage={setSeqPage} />
           </CardContent>
         </Card>
       )}
@@ -307,7 +340,7 @@ export default function OutreachPage() {
         <Card>
           <CardContent className="pt-6">
             {activity.length === 0 && <p className="text-center text-muted-foreground">No activity yet.</p>}
-            {activity.map((e) => (
+            {pagedActivity.map((e) => (
               <div key={e.event_id} className="flex flex-wrap gap-2 border-t py-2 text-sm first:border-t-0">
                 <span className="w-40 text-xs text-muted-foreground">{new Date(e.created_at).toLocaleString()}</span>
                 <Badge variant={e.event_type === "sent" ? "default" : e.event_type === "bounced" || e.event_type === "send_failed" ? "destructive" : "outline"}>{e.event_type}</Badge>
@@ -315,6 +348,8 @@ export default function OutreachPage() {
                 <span className="text-xs text-muted-foreground">{e.step ?? ""} {e.detail ?? ""}</span>
               </div>
             ))}
+            <Pager page={safeActPage} totalPages={actTotalPages} total={activity.length}
+              from={actOffset + 1} to={actOffset + pagedActivity.length} onPage={setActivityPage} />
           </CardContent>
         </Card>
       )}
