@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Trash2, Save, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff, Power } from "lucide-react"
+import { Ban, Trash2, Save, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff, Power, Loader2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -20,9 +20,34 @@ const KEY_INFO: Record<string, { label: string; description: string; url: string
   places: { label: "Google Places", description: "Rating, review count and opening hours enrichment. 1K free calls/month.", url: "https://console.cloud.google.com/apis/credentials" },
 }
 
+/** Shown while the server config is still being checked — so neither the "add" form nor the
+ *  "not configured" warning flashes before we actually know the state. */
+function CheckingConfig() {
+  return (
+    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" /> Checking server configuration…
+    </div>
+  )
+}
+
+/** Soft, informational notice when server-side encryption isn't set up. Replaces the old
+ *  bare red line — only rendered after the config check completes and only when it's missing. */
+function EncryptionNotice({ what }: { what: string }) {
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-400">
+      <p className="font-medium">Encryption isn’t set up yet</p>
+      <p className="mt-1 text-amber-700/90 dark:text-amber-400/90">
+        {what} needs a server-side encryption key so your secrets are stored safely. Set{" "}
+        <code className="font-mono text-xs">GTM_ENCRYPTION_KEY</code> in the server environment, then reload this page.
+      </p>
+    </div>
+  )
+}
+
 function ApiKeys() {
   const [keys, setKeys] = React.useState<{ key_name: string; created_at: string }[]>([])
   const [encryptionAvailable, setEncryptionAvailable] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
   const [inputs, setInputs] = React.useState<Record<string, string>>({})
   const [visible, setVisible] = React.useState<Record<string, boolean>>({})
   const [testing, setTesting] = React.useState<string | null>(null)
@@ -32,7 +57,8 @@ function ApiKeys() {
   const configured = React.useMemo(() => new Set(keys.map((k) => k.key_name)), [keys])
 
   const load = React.useCallback(() => {
-    api.listApiKeys().then((r) => { setKeys(r.keys); setEncryptionAvailable(r.encryption_available) }).catch(() => {})
+    api.listApiKeys().then((r) => { setKeys(r.keys); setEncryptionAvailable(r.encryption_available) })
+      .catch(() => {}).finally(() => setLoading(false))
   }, [])
   React.useEffect(() => { load() }, [load])
 
@@ -72,12 +98,10 @@ function ApiKeys() {
             Add your own API keys to unlock premium features. All keys are encrypted at rest.
             Without keys, the engine uses free fallbacks (DuckDuckGo, MX-only verification, no LLM refinement).
           </CardDescription>
-          {!encryptionAvailable && (
-            <p className="text-sm text-destructive">Encryption not configured on the server (GTM_ENCRYPTION_KEY). API key storage is disabled.</p>
-          )}
         </CardHeader>
         <CardContent className="grid gap-4">
-          {Object.entries(KEY_INFO).map(([name, info]) => (
+          {loading ? <CheckingConfig /> : !encryptionAvailable ? <EncryptionNotice what="Saving your own API keys" /> :
+          Object.entries(KEY_INFO).map(([name, info]) => (
             <div key={name} className="rounded-lg border p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
@@ -292,6 +316,7 @@ function Mailboxes({ campaignId }: { campaignId: string | null }) {
   const [liveRows, setLiveRows] = React.useState<MailboxState[]>([])
   const [userRows, setUserRows] = React.useState<{ address: string; smtp_host: string; smtp_port: number; sender_name: string | null; daily_limit: number | null; enabled: boolean; created_at: string }[]>([])
   const [encryptionAvailable, setEncryptionAvailable] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
   const [adding, setAdding] = React.useState(false)
   const [addr, setAddr] = React.useState("")
   const [pw, setPw] = React.useState("")
@@ -306,7 +331,8 @@ function Mailboxes({ campaignId }: { campaignId: string | null }) {
     api.mailboxes(campaignId ?? undefined).then(setLiveRows).catch(() => setLiveRows([]))
   }, [campaignId])
   const loadUser = React.useCallback(() => {
-    api.listUserMailboxes().then((r) => { setUserRows(r.mailboxes); setEncryptionAvailable(r.encryption_available) }).catch(() => {})
+    api.listUserMailboxes().then((r) => { setUserRows(r.mailboxes); setEncryptionAvailable(r.encryption_available) })
+      .catch(() => {}).finally(() => setLoading(false))
   }, [])
   React.useEffect(() => { loadLive(); loadUser() }, [loadLive, loadUser])
 
@@ -346,15 +372,14 @@ function Mailboxes({ campaignId }: { campaignId: string | null }) {
               <CardTitle>Your mailboxes</CardTitle>
               <CardDescription>Add your Gmail or SMTP account to send outreach emails. Credentials are encrypted at rest. For Gmail, use an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="underline">App Password</a> (not your regular password).</CardDescription>
             </div>
-            {encryptionAvailable && !adding && (
+            {!loading && encryptionAvailable && !adding && (
               <Button size="sm" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5 mr-1" /> Add mailbox</Button>
             )}
           </div>
-          {!encryptionAvailable && (
-            <p className="text-sm text-destructive mt-1">Encryption not configured on the server (GTM_ENCRYPTION_KEY). Mailbox storage is disabled.</p>
-          )}
         </CardHeader>
         <CardContent className="grid gap-4">
+          {loading ? <CheckingConfig /> : !encryptionAvailable ? <EncryptionNotice what="Storing a mailbox" /> : (
+          <>
           {adding && (
             <div className="rounded-lg border p-4 grid gap-3">
               <div className="grid gap-1.5">
@@ -426,6 +451,8 @@ function Mailboxes({ campaignId }: { campaignId: string | null }) {
             </Table>
           ) : !adding && (
             <p className="text-sm text-muted-foreground">No mailboxes added yet. Add one to start sending outreach emails.</p>
+          )}
+          </>
           )}
         </CardContent>
       </Card>
