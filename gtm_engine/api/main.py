@@ -210,13 +210,21 @@ def _campaign(campaign_id: str) -> CampaignConfig:
 
 # -- health / campaigns -------------------------------------------------------------
 
+# Free-tier product limits, applied per signed-in user (local/self-host operators with no
+# auth are unlimited). Overridable so a managed/paid tier or a self-hoster can raise them.
+FREE_MAX_CAMPAIGNS = int(os.environ.get("GTM_FREE_MAX_CAMPAIGNS", "3"))
+FREE_MAX_LEADS_PER_CAMPAIGN = int(os.environ.get("GTM_FREE_MAX_LEADS_PER_CAMPAIGN", "10"))
+
+
 @app.get("/health")
 def health() -> dict:
     o = load_outreach_settings()
     return {"status": "ok", "version": __version__, "smtp_configured": o.credentials_present,
             "auth_mode": o.auth_mode, "require_approval": o.require_approval,
             "warmup": {"enabled": o.warmup_enabled, "start": o.warmup_start_per_day,
-                       "step": o.warmup_step_per_day, "max": o.daily_limit}}
+                       "step": o.warmup_step_per_day, "max": o.daily_limit},
+            "limits": {"max_campaigns": FREE_MAX_CAMPAIGNS,
+                       "max_leads_per_campaign": FREE_MAX_LEADS_PER_CAMPAIGN}}
 
 
 def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict:
@@ -287,6 +295,20 @@ class CampaignCreate(BaseModel):
     max_companies: int = 60
 
 
+def _own_campaign_count(db: Database, user_id: str | None) -> int:
+    """How many campaigns this user owns (DB campaigns scoped to them)."""
+    if user_id is None:
+        return 0
+    return sum(1 for _ in db.list_campaigns(user_id))
+
+
+def _cap_leads(max_companies: int | None, user_id: str | None) -> int | None:
+    """On the free tier, never crawl more than FREE_MAX_LEADS_PER_CAMPAIGN per run."""
+    if user_id is None:
+        return max_companies
+    return min(max_companies or FREE_MAX_LEADS_PER_CAMPAIGN, FREE_MAX_LEADS_PER_CAMPAIGN)
+
+
 @app.post("/campaigns", status_code=201)
 def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_user_id)) -> dict:
     """Create a user-defined campaign, stored in the DB (not a file) so it works on the
@@ -295,6 +317,10 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
     if not body.name.strip() or not body.offer.strip():
         raise HTTPException(422, "name and offer are required")
     db = _db()
+    if user_id is not None and _own_campaign_count(db, user_id) >= FREE_MAX_CAMPAIGNS:
+        db.close()
+        raise HTTPException(403, f"Free tier is limited to {FREE_MAX_CAMPAIGNS} campaigns. "
+                                 "Delete one to create another.")
     # De-dupe the id against all campaigns (every owner + files), so ids stay globally unique
     # even though visibility is per-owner.
     existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
@@ -305,7 +331,7 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
             geography=GeographyConfig(countries=body.countries, provinces=body.provinces, cities=body.cities),
             target_industries=body.target_industries, buyer_keywords=body.buyer_keywords,
             osm_categories=body.osm_categories, overture_categories=body.overture_categories,
-            min_score=body.min_score, max_companies=body.max_companies,
+            min_score=body.min_score, max_companies=_cap_leads(body.max_companies, user_id),
         )
     except Exception as exc:  # noqa: BLE001 - surface pydantic's message
         db.close()
@@ -333,6 +359,10 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
     from gtm_engine.llm.client import build_llm
 
     db = _db()
+    if user_id is not None and _own_campaign_count(db, user_id) >= FREE_MAX_CAMPAIGNS:
+        db.close()
+        raise HTTPException(403, f"Free tier is limited to {FREE_MAX_CAMPAIGNS} campaigns. "
+                                 "Delete one to create another.")
     existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
 
     llm = build_llm(_settings) if _settings.enable_llm else None
@@ -344,7 +374,9 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
 
     if body.max_companies is not None:
         cfg.max_companies = max(1, min(body.max_companies, 500))
-        explanation["max_companies"] = cfg.max_companies
+    # Free tier: never store a cap above the per-campaign lead limit.
+    cfg.max_companies = _cap_leads(cfg.max_companies, user_id) or cfg.max_companies
+    explanation["max_companies"] = cfg.max_companies
 
     db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
     db.close()
@@ -382,7 +414,8 @@ class RunRequest(BaseModel):
 
 
 @app.post("/campaigns/{campaign_id}/run", dependencies=[Depends(require_campaign_access)])
-def run_campaign(campaign_id: str, req: RunRequest) -> dict:
+def run_campaign(campaign_id: str, req: RunRequest,
+                 user_id: str | None = Depends(current_user_id)) -> dict:
     """Dispatches the crawl to GitHub Actions (gather-leads.yml) rather than running it
     in-request: a full campaign run is minutes-to-hours, far past any serverless timeout.
     Progress lands in the run_progress table, written by the Actions runner."""
@@ -395,11 +428,12 @@ def run_campaign(campaign_id: str, req: RunRequest) -> dict:
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
+    max_companies = _cap_leads(req.max_companies or campaign.max_companies, user_id)
     dispatch_workflow(
         "gather-leads.yml",
         {
             "campaign": campaign_input,
-            "max_companies": str(req.max_companies or campaign.max_companies),
+            "max_companies": str(max_companies),
         },
     )
     db = _db()

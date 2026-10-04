@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { api, type Campaign } from "@/lib/api"
+import { api, PENDING_MONETIZATION_KEY, type Campaign } from "@/lib/api"
 
 interface Ctx {
   campaigns: Campaign[]
@@ -44,6 +44,17 @@ export function CampaignProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   React.useEffect(() => { refresh(true) }, [refresh])
+
+  // Flush the sign-up monetization vote once there is an authenticated session (it may have
+  // been stashed before e-mail confirmation, when no token existed yet).
+  React.useEffect(() => {
+    let pending: string | null = null
+    try { pending = localStorage.getItem(PENDING_MONETIZATION_KEY) } catch { /* ignore */ }
+    if (!pending) return
+    api.setPreference("monetization_preference", pending)
+      .then(() => { try { localStorage.removeItem(PENDING_MONETIZATION_KEY) } catch { /* ignore */ } })
+      .catch(() => { /* retried on next load */ })
+  }, [])
 
   const setCampaignId = (id: string) => {
     setCampaignIdState(id)

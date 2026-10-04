@@ -7,8 +7,15 @@ import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { api, PENDING_MONETIZATION_KEY } from "@/lib/api"
 import { createClient } from "@/lib/supabase/client"
 import { supabaseConfigured } from "@/lib/supabase/config"
+
+const USE_OPTIONS = [
+  { value: "own_keys", label: "I'll bring my own API keys (free tier)" },
+  { value: "managed_paid", label: "I'd pay for a managed version (no keys needed)" },
+  { value: "undecided", label: "Not sure yet" },
+]
 
 export function SignUpForm() {
   const router = useRouter()
@@ -16,10 +23,15 @@ export function SignUpForm() {
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [sent, setSent] = React.useState(false)
+  const [usage, setUsage] = React.useState("")
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
+    if (!usage) {
+      setError("Please tell us how you'd like to use Qualifyr.")
+      return
+    }
     setPending(true)
 
     const form = new FormData(event.currentTarget)
@@ -32,10 +44,17 @@ export function SignUpForm() {
         setError(error.message)
         return
       }
+      // Stash the vote so it is saved even when the account needs e-mail confirmation first
+      // (no session/token yet). It is flushed to the backend on the first authenticated load.
+      try { localStorage.setItem(PENDING_MONETIZATION_KEY, usage) } catch { /* ignore */ }
       // A session on the response means email confirmation is off and this account is
       // already active - otherwise Supabase is waiting on a confirmation link, and there
       // is nothing to sign in to yet.
       if (data.session) {
+        try {
+          await api.setPreference("monetization_preference", usage)
+          localStorage.removeItem(PENDING_MONETIZATION_KEY)
+        } catch { /* flushed later on first authenticated load */ }
         router.replace("/dashboard")
         router.refresh()
       } else {
@@ -104,6 +123,25 @@ export function SignUpForm() {
             {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             <span className="sr-only">{showPassword ? "Hide" : "Show"} password</span>
           </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>How would you like to use Qualifyr?</Label>
+        <div className="grid gap-1.5">
+          {USE_OPTIONS.map((opt) => (
+            <label key={opt.value} className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="usage"
+                value={opt.value}
+                checked={usage === opt.value}
+                onChange={() => setUsage(opt.value)}
+                className="accent-brand"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
         </div>
       </div>
 

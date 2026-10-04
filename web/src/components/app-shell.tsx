@@ -82,6 +82,18 @@ function BackendStatus() {
   )
 }
 
+function HeaderCampaign() {
+  const pathname = usePathname()
+  // The Campaigns page lists every campaign as a card, so the header picker is redundant there.
+  if (pathname.startsWith("/campaigns")) return null
+  return (
+    <>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">Campaign</span>
+      <CampaignPicker />
+    </>
+  )
+}
+
 function CampaignPicker() {
   const { campaigns, campaignId, setCampaignId } = useCampaign()
   if (campaigns.length <= 1) {
@@ -122,8 +134,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             </SheetContent>
           </Sheet>
           <div className="flex flex-1 items-center gap-4">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground">Campaign</span>
-            <CampaignPicker />
+            <HeaderCampaign />
           </div>
           <ThemeToggle />
           <SignOutButton />

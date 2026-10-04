@@ -5,6 +5,10 @@ import { supabaseConfigured } from "@/lib/supabase/config"
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
+// The monetization choice made at sign-up is stashed here until there is an authenticated
+// session to save it against (accounts that need e-mail confirmation have no token yet).
+export const PENDING_MONETIZATION_KEY = "qualifyr.pending_monetization"
+
 export type CompanyType = "BUYER" | "VENDOR" | "UNKNOWN"
 export type SequenceStatus =
   | "not_queued" | "queued" | "email_1_sent" | "followup_1_sent" | "followup_2_sent"
@@ -226,7 +230,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; version: string; smtp_configured: boolean; require_approval: boolean; auth_mode: string; warmup: { enabled: boolean; start: number; step: number; max: number } }>("/health"),
+  health: () => request<{ status: string; version: string; smtp_configured: boolean; require_approval: boolean; auth_mode: string; warmup: { enabled: boolean; start: number; step: number; max: number }; limits?: { max_campaigns: number; max_leads_per_campaign: number } }>("/health"),
   campaigns: () => request<Campaign[]>("/campaigns"),
   createCampaign: (body: CampaignCreate) =>
     request<{ campaign_id: string; name: string }>("/campaigns", { method: "POST", body: JSON.stringify(body) }),

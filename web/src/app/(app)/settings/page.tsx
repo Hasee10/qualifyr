@@ -7,7 +7,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api, type MailboxState, type Suppression } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
@@ -29,17 +28,11 @@ function ApiKeys() {
   const [testing, setTesting] = React.useState<string | null>(null)
   const [testResult, setTestResult] = React.useState<Record<string, { ok: boolean; message: string }>>({})
   const [saving, setSaving] = React.useState<string | null>(null)
-  const [pref, setPref] = React.useState("")
-  const [comment, setComment] = React.useState("")
 
   const configured = React.useMemo(() => new Set(keys.map((k) => k.key_name)), [keys])
 
   const load = React.useCallback(() => {
     api.listApiKeys().then((r) => { setKeys(r.keys); setEncryptionAvailable(r.encryption_available) }).catch(() => {})
-    api.getPreferences().then((r) => {
-      setPref(r.preferences["monetization_preference"] ?? "")
-      setComment(r.preferences["monetization_comment"] ?? "")
-    }).catch(() => {})
   }, [])
   React.useEffect(() => { load() }, [load])
 
@@ -68,10 +61,6 @@ function ApiKeys() {
     } catch (e) {
       setTestResult((p) => ({ ...p, [name]: { ok: false, message: (e as Error).message } }))
     } finally { setTesting(null) }
-  }
-
-  const savePref = async (key: string, value: string) => {
-    try { await api.setPreference(key, value) } catch { /* */ }
   }
 
   return (
@@ -142,40 +131,6 @@ function ApiKeys() {
               )}
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>How would you like to use Qualifyr?</CardTitle>
-          <CardDescription>Help us understand what works best for you. This is anonymous feedback — it shapes what we build next.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-2">
-            {[
-              { value: "own_keys", label: "I'll bring my own API keys (free tier)" },
-              { value: "managed_paid", label: "I'd pay for a managed version (no keys needed)" },
-              { value: "undecided", label: "Not sure yet" },
-            ].map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio" name="monetization" value={opt.value}
-                  checked={pref === opt.value}
-                  onChange={() => { setPref(opt.value); savePref("monetization_preference", opt.value) }}
-                  className="accent-primary"
-                />
-                <span className="text-sm">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          <Textarea
-            placeholder="What would make the paid version worth it for you? (optional)"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            onBlur={() => { if (comment.trim()) savePref("monetization_comment", comment.trim()) }}
-            rows={3}
-            className="text-sm"
-          />
         </CardContent>
       </Card>
     </div>

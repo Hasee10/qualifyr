@@ -32,6 +32,8 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   // Key availability
   const [hasGroq, setHasGroq] = React.useState<boolean | null>(null)
   const [hasBrave, setHasBrave] = React.useState<boolean | null>(null)
+  // Free-tier per-campaign lead cap, read from the backend (not hardcoded).
+  const [maxLeads, setMaxLeads] = React.useState<number | null>(null)
 
   React.useEffect(() => {
     if (!open) return
@@ -40,6 +42,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       setHasGroq(names.has("groq"))
       setHasBrave(names.has("brave"))
     }).catch(() => { setHasGroq(false); setHasBrave(false) })
+    api.health().then((h) => setMaxLeads(h.limits?.max_leads_per_campaign ?? null)).catch(() => {})
   }, [open])
 
   const nlMode = hasGroq === true
@@ -198,12 +201,15 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
               id="max-co"
               type="number"
               min={1}
-              max={500}
+              max={maxLeads ?? 500}
               value={maxCo}
               onChange={(e) => setMaxCo(e.target.value)}
-              placeholder="30"
+              placeholder={String(maxLeads ?? 30)}
               className="w-20 rounded-md border bg-transparent px-2 py-1 text-sm"
             />
+            {maxLeads != null && (
+              <span className="text-xs text-muted-foreground">Free tier: up to {maxLeads} per campaign</span>
+            )}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           {result && (
@@ -577,16 +583,17 @@ export default function CampaignsPage() {
         const showOffer = offer !== c.name
 
         return (
-          <Card key={c.campaign_id} className="overflow-hidden">
+          <Card
+            key={c.campaign_id}
+            className="overflow-hidden cursor-pointer select-none transition-colors hover:border-primary/40"
+            onClick={() => openLeads(c.campaign_id)}
+            title="View leads for this campaign"
+          >
             <CardContent className="p-4 grid gap-3">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
-                <div
-                  className="min-w-0 flex-1 overflow-hidden cursor-pointer"
-                  onClick={() => openLeads(c.campaign_id)}
-                  title="View leads for this campaign"
-                >
-                  <h3 className="font-medium truncate hover:underline">{c.name}</h3>
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <h3 className="font-medium truncate">{c.name}</h3>
                   {showOffer && <p className="text-sm text-muted-foreground line-clamp-1">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -602,28 +609,24 @@ export default function CampaignsPage() {
                       </div>
                     )
                   })()}
-                  <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-primary" onClick={() => setEditing(c)}>
-                    <Pencil className="size-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-primary" onClick={() => setEditing(c)}>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive" onClick={() => remove(c)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </div>
 
               {/* Stats row */}
               <div className="flex items-center gap-6">
-                <div
-                  className="flex items-center gap-6 cursor-pointer"
-                  onClick={() => openLeads(c.campaign_id)}
-                  title="View leads for this campaign"
-                >
-                  <Stat label="Companies" value={c.leads} />
-                  <Stat label="Buyers" value={c.buyers} />
-                  <Stat label="Qualified" value={c.qualified} />
-                  <Stat label="Outreach" value={c.outreach_ready} />
-                </div>
-                <div className="ml-auto">
+                <Stat label="Companies" value={c.leads} />
+                <Stat label="Buyers" value={c.buyers} />
+                <Stat label="Qualified" value={c.qualified} />
+                <Stat label="Outreach" value={c.outreach_ready} />
+                <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
                   <RunPanel campaign={c} onFinished={onFinished} />
                 </div>
               </div>
