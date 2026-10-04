@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Play, Download, Plus, Trash2, Pencil } from "lucide-react"
+import { Play, Download, Plus, Trash2, Pencil, Maximize2, Minimize2 } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +14,20 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
 import { cn } from "@/lib/utils"
+
+function ExpandButton({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="absolute top-3 right-11 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+      title={expanded ? "Collapse" : "Expand"}
+    >
+      {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+      <span className="sr-only">{expanded ? "Collapse" : "Expand"} panel</span>
+    </button>
+  )
+}
 
 function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (campaignId: string) => void }) {
   // NL mode state
@@ -35,6 +50,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const [hasBrave, setHasBrave] = React.useState<boolean | null>(null)
   // Free-tier per-campaign lead cap, read from the backend (not hardcoded).
   const [maxLeads, setMaxLeads] = React.useState<number | null>(null)
+  const [expanded, setExpanded] = React.useState(false)
 
   React.useEffect(() => {
     if (!open) return
@@ -119,7 +135,8 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && close()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "sm:max-w-3xl" : "sm:max-w-lg")}>
+        <ExpandButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
         <SheetHeader><SheetTitle>New campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
           {loading ? (
@@ -261,6 +278,7 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [raw, setRaw] = React.useState<Record<string, unknown>>({})
+  const [expanded, setExpanded] = React.useState(false)
 
   React.useEffect(() => {
     if (!open) return
@@ -313,7 +331,8 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "sm:max-w-3xl" : "sm:max-w-lg")}>
+        <ExpandButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
         <SheetHeader><SheetTitle>Edit campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
           {loading ? <p className="text-sm text-muted-foreground">Loading config…</p> : (
