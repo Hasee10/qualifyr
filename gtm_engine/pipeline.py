@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
@@ -185,11 +186,13 @@ def _discovery_relevance_filter(
     return kept, dropped
 
 
-# Islamabad/Rawalpindi sectors are ~2 km across, so a center+radius test alone leaks into
-# neighbouring sectors (a 3 km radius from G-11 reaches F-11, G-12, H-11). The radius is only
-# the fallback for addresses with no sector label; the sector-code text match below is the
-# precise discriminator when a sector is written in the address.
-AREA_RADIUS_KM = 2.0
+# The area's tolerance is NOT a fixed radius — it is derived at run time from the geocoder's
+# bounding box for each requested area, so a dense Lahore block stays tight and a wide Islamabad
+# sector stays wide without any per-city tuning. These bounds only clamp pathological geocodes:
+# a point-geocode that would be impossibly tight, and a vague match that would be city-wide.
+AREA_MIN_HALF_KM = 0.7    # tightest half-extent (packed localities where addresses change fast)
+AREA_MAX_HALF_KM = 10.0   # widest half-extent (large neighbourhoods); beyond this it's area-wide
+AREA_MARGIN_KM = 0.2      # edge tolerance for a business geocoded just outside the boundary
 
 # A Pakistani sector code: a letter, a hyphen, 1-2 digits, optional sub-sector ("G-11", "F-11",
 # "I-10/4"). The hyphen is required so plain phrases ("a 5 star hotel") don't false-match.
@@ -202,6 +205,34 @@ def _sector_codes(text: str | None) -> set[str]:
     return {f"{m.group(1).upper()}-{m.group(2)}" for m in _SECTOR_RE.finditer(text or "")}
 
 
+@dataclass(frozen=True)
+class _Geofence:
+    """An axis-aligned lat/lon box, sized from an area's geocoded extent (not a fixed radius)."""
+    south: float
+    west: float
+    north: float
+    east: float
+    clat: float
+    clon: float
+
+    def contains(self, lat: float, lon: float) -> bool:
+        return self.south <= lat <= self.north and self.west <= lon <= self.east
+
+
+def _fence_from_bbox(box) -> "_Geofence":
+    """Turn a geocoded bounding box into a geofence whose size reflects the area itself,
+    clamped so a point-geocode is never impossibly tight nor a vague match city-wide."""
+    clat = (box.south + box.north) / 2
+    clon = (box.west + box.east) / 2
+    half_h = haversine_km(box.south, clon, box.north, clon) / 2      # km, N-S
+    half_w = haversine_km(clat, box.west, clat, box.east) / 2        # km, E-W
+    half_h = min(max(half_h, AREA_MIN_HALF_KM), AREA_MAX_HALF_KM) + AREA_MARGIN_KM
+    half_w = min(max(half_w, AREA_MIN_HALF_KM), AREA_MAX_HALF_KM) + AREA_MARGIN_KM
+    dlat = half_h / 111.0
+    dlon = half_w / (111.0 * max(0.1, math.cos(math.radians(clat))))
+    return _Geofence(clat - dlat, clon - dlon, clat + dlat, clon + dlon, clat, clon)
+
+
 async def _area_proximity_filter(
     companies: list[DiscoveredCompany],
     areas: list[str],
@@ -209,19 +240,18 @@ async def _area_proximity_filter(
     fetcher: Fetcher,
     settings: EngineSettings,
 ) -> tuple[list[DiscoveredCompany], int]:
-    """Drop companies that are not in the requested area(s).
+    """Drop companies that are not in the requested area(s), with the tolerance decided per run.
 
     Precedence, per company:
     1. Sector-code match (when the requested area is a sector like 'G-11'): if the company's
        name/address names a sector, keep it only when that sector is one of the requested ones.
-       This is exact — it drops 'F-11 Markaz' and 'G-12' even though they sit within a loose
-       radius of G-11's centre.
-    2. Coordinate distance: companies with lat/lon are kept only within AREA_RADIUS_KM of a
-       requested area centre.
+       Exact — drops 'F-11 Markaz'/'G-12' even if their coordinates sit next to G-11.
+    2. Geofence containment: companies with lat/lon are kept only inside a requested area's
+       geofence — a box sized from that area's own geocoded bounding box (tight for a packed
+       Lahore block, wide for a large sector), so no fixed radius has to be hand-tuned per city.
     3. Geocode fallback: coordinate-less companies are geocoded (name+address+city) and tested
        the same way; only a total geocode failure passes through.
-    Also sets settings.anchor_lat/lon to the area centroid so downstream proximity scoring uses
-    the correct anchor.
+    Also sets settings.anchor_lat/lon to the fences' centroid for downstream proximity scoring.
     """
     if not areas:
         return companies, 0
@@ -233,25 +263,22 @@ async def _area_proximity_filter(
     for area in areas:
         requested_sectors |= _sector_codes(area)
 
-    centers: list[tuple[float, float]] = []
+    fences: list[_Geofence] = []
     city_hint = cities[0] if cities else ""
     for area in areas:
-        query = f"{area} {city_hint}".strip()
-        bbox = await geocoder.bbox(query, None)
-        if bbox:
-            lat = (bbox.south + bbox.north) / 2
-            lon = (bbox.west + bbox.east) / 2
-            centers.append((lat, lon))
+        box = await geocoder.bbox(f"{area} {city_hint}".strip(), None)
+        if box:
+            fences.append(_fence_from_bbox(box))
 
-    if not centers and not requested_sectors:
+    if not fences and not requested_sectors:
         return companies, 0
 
-    if settings.anchor_lat is None and centers:
-        settings.anchor_lat = sum(c[0] for c in centers) / len(centers)
-        settings.anchor_lon = sum(c[1] for c in centers) / len(centers)
+    if settings.anchor_lat is None and fences:
+        settings.anchor_lat = sum(f.clat for f in fences) / len(fences)
+        settings.anchor_lon = sum(f.clon for f in fences) / len(fences)
 
-    def _within_radius(lat: float, lon: float) -> bool:
-        return any(haversine_km(lat, lon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers)
+    def _in_any(lat: float, lon: float) -> bool:
+        return any(f.contains(lat, lon) for f in fences)
 
     kept: list[DiscoveredCompany] = []
     dropped = 0
@@ -266,7 +293,7 @@ async def _area_proximity_filter(
                     dropped += 1
                 continue
 
-        # 2. Coordinate distance.
+        # 2. Geofence containment for companies that carry coordinates.
         clat = c.extra.get("lat") if c.extra else None
         clon = c.extra.get("lon") if c.extra else None
         if clat is not None and clon is not None:
@@ -275,22 +302,22 @@ async def _area_proximity_filter(
             except (TypeError, ValueError):
                 kept.append(c)
                 continue
-            if centers and _within_radius(clat, clon):
+            if not fences:
+                kept.append(c)            # sector-only request, no geofence to compare against
+            elif _in_any(clat, clon):
                 kept.append(c)
-            elif not centers:
-                kept.append(c)  # sector-only request, no coords to compare against
             else:
                 dropped += 1
             continue
 
         # 3. Geocode the coordinate-less company and test it the same way.
         geocode_query = f"{c.name}, {c.address or ''}, {c.city or city_hint}".strip(", ")
-        if centers and geocode_query:
-            bbox = await geocoder.bbox(geocode_query, None)
-            if bbox:
-                glat = (bbox.south + bbox.north) / 2
-                glon = (bbox.west + bbox.east) / 2
-                if _within_radius(glat, glon):
+        if fences and geocode_query:
+            box = await geocoder.bbox(geocode_query, None)
+            if box:
+                glat = (box.south + box.north) / 2
+                glon = (box.west + box.east) / 2
+                if _in_any(glat, glon):
                     if c.extra is None:
                         c.extra = {}
                     c.extra["lat"] = glat
@@ -303,8 +330,8 @@ async def _area_proximity_filter(
         kept.append(c)
 
     if dropped:
-        log.info("area proximity filter: kept %d, dropped %d (sector %s / >%.1fkm)",
-                 len(kept), dropped, ",".join(sorted(requested_sectors)) or "n/a", AREA_RADIUS_KM)
+        log.info("area proximity filter: kept %d, dropped %d (areas=%s, sectors=%s)",
+                 len(kept), dropped, ", ".join(areas), ",".join(sorted(requested_sectors)) or "none")
     return kept, dropped
 
 

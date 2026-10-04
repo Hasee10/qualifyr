@@ -543,7 +543,7 @@ def test_discovery_relevance_filter_passes_no_category():
 
 @pytest.mark.asyncio
 async def test_area_proximity_filter_drops_distant_companies():
-    from gtm_engine.pipeline import _area_proximity_filter, AREA_RADIUS_KM
+    from gtm_engine.pipeline import _area_proximity_filter
     from gtm_engine.models import DiscoveredCompany
     from unittest.mock import AsyncMock, patch
     from gtm_engine.discovery.geocode import BBox
@@ -624,6 +624,25 @@ async def test_area_proximity_filter_drops_wrong_sector_even_when_near():
     assert "G-13 Clinic" in names
     assert "F-11 Clinic" not in names
     assert dropped == 1
+
+
+def test_geofence_adapts_to_area_size():
+    """The geofence is derived from each area's geocoded extent at run time: a point/dense
+    block stays tight (floored, never city-wide); a wide neighbourhood scales up — no per-city
+    radius tuning."""
+    from gtm_engine.pipeline import _fence_from_bbox
+    from gtm_engine.discovery.geocode import BBox
+    from gtm_engine.scoring.proximity import haversine_km
+
+    def dims(f):
+        return (haversine_km(f.south, f.clon, f.north, f.clon),
+                haversine_km(f.clat, f.west, f.clat, f.east))
+
+    tight_h, tight_w = dims(_fence_from_bbox(BBox(south=31.5200, west=74.3400, north=31.5205, east=74.3405)))
+    wide_h, wide_w = dims(_fence_from_bbox(BBox(south=31.46, west=74.26, north=31.505, east=74.31)))
+    assert tight_h < 2.5 and tight_w < 2.5     # a dense block stays tight, not city-wide
+    assert wide_h > 4 and wide_w > 4           # a wide neighbourhood scales up
+    assert wide_h > tight_h and wide_w > tight_w
 
 
 def test_areas_wired_into_geography():
