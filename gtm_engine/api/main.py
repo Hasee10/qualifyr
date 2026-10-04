@@ -307,7 +307,7 @@ def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
 
 
 # Bounds on user-supplied campaign input: unbounded text/lists are a cost and DoS vector
-# (stored, crawled, and fed to the LLM). These are generous — far above any real campaign — so
+# (stored, crawled, and fed to the LLM). These are generous – far above any real campaign – so
 # they never bite a legitimate user, only a payload meant to abuse.
 class CampaignCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -461,7 +461,7 @@ def run_campaign(campaign_id: str, req: RunRequest,
     # accounts are unlimited; everyone else is backstopped against spamming workflow dispatches.
     if user_id is not None and not _is_unlimited(email) and not check_usage(db, user_id, "runs"):
         db.close()
-        raise HTTPException(429, "Daily run limit reached — try again tomorrow.")
+        raise HTTPException(429, "Daily run limit reached – try again tomorrow.")
     db.close()
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
@@ -1007,7 +1007,7 @@ def save_api_key(key_name: str, body: ApiKeyBody, user_id: str | None = Depends(
     if key_name not in ALLOWED_KEYS:
         raise HTTPException(422, f"unknown key: {key_name}; allowed: {', '.join(sorted(ALLOWED_KEYS))}")
     if not encryption_available():
-        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured — cannot store API keys")
+        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured – cannot store API keys")
     encrypted = encrypt_key(body.value.strip())
     db = _db()
     db.set_user_key(user_id, key_name, encrypted)
@@ -1161,7 +1161,7 @@ def save_user_mailbox(body: MailboxBody, user_id: str | None = Depends(current_u
     if not user_id:
         raise HTTPException(401, "sign in to manage mailboxes")
     if not encryption_available():
-        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured — cannot store mailbox credentials")
+        raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured – cannot store mailbox credentials")
     addr = body.address.strip().lower()
     if "@" not in addr:
         raise HTTPException(422, "invalid email address")
@@ -1217,6 +1217,6 @@ def test_user_mailbox(body: MailboxBody) -> dict:
         conn.quit()
         return {"ok": True, "message": f"Connected to {body.smtp_host}:{body.smtp_port} as {addr}"}
     except smtplib.SMTPAuthenticationError:
-        return {"ok": False, "message": "Authentication failed — check email and app password"}
+        return {"ok": False, "message": "Authentication failed – check email and app password"}
     except (smtplib.SMTPException, OSError) as exc:
         return {"ok": False, "message": f"Connection failed: {exc}"}

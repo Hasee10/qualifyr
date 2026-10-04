@@ -2,12 +2,12 @@
  *  fallback, so this stays a server component.
  *
  *  Seamless loop: the set is rendered twice and the track animates to translateX(-50%). For
- *  that to land exactly on the second copy (no jump), spacing must be uniform across the seam —
+ *  that to land exactly on the second copy (no jump), spacing must be uniform across the seam –
  *  so each item carries its OWN horizontal margin instead of a flex `gap`. A flex gap is omitted
  *  between the two copies, which left the old version short by half a gap every cycle. */
 // Each source's own domain, used only to fetch its logo. Google's favicon service needs no API
 // key and returns a generic icon on a miss (never a 404). Logo-only: the name lives in
-// alt/title for screen readers and hover. No tile behind the logo — the marks sit directly on
+// alt/title for screen readers and hover. No tile behind the logo – the marks sit directly on
 // the section so there is no white box on the dark theme.
 const sources = [
   { name: "OpenStreetMap", domain: "openstreetmap.org" },

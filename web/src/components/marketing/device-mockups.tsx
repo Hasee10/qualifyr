@@ -51,7 +51,7 @@ const panels = [
     frame: (
       <div className="flex flex-col gap-2 px-2">
         <div className="rounded-lg bg-muted px-2.5 py-2 text-[9px] leading-relaxed text-muted-foreground">
-          Hi Sana, saw Ittefaq just opened a second Lahore branch — congrats…
+          Hi Sana, saw Ittefaq just opened a second Lahore branch – congrats…
         </div>
         <button className="flex items-center justify-center rounded-lg bg-brand px-2.5 py-2 text-[9px] font-medium text-brand-foreground">
           Approve &amp; send

@@ -42,7 +42,7 @@ export function SiteFooter() {
             Qualifyr
           </Link>
           <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-            Describe what you sell and Qualifyr finds the companies that actually need it —
+            Describe what you sell and Qualifyr finds the companies that actually need it –
             from free public sources, with the reasoning behind every match.
           </p>
           <div className="mt-5 flex flex-wrap gap-2">

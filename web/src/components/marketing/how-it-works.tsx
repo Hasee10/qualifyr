@@ -14,7 +14,7 @@ const steps = [
   {
     n: "03",
     title: "Approve and send",
-    description: "Review the queue, approve what looks right, and outreach goes out from your own mailbox — never automatically.",
+    description: "Review the queue, approve what looks right, and outreach goes out from your own mailbox – never automatically.",
   },
 ]
 
