@@ -193,11 +193,14 @@ async def _area_proximity_filter(
     fetcher: Fetcher,
     settings: EngineSettings,
 ) -> tuple[list[DiscoveredCompany], int]:
-    """Drop companies whose lat/lon is too far from the requested areas.
+    """Drop companies whose location is too far from the requested areas.
 
-    Geocodes each area (+ first city as context) to a center point, then keeps
-    only companies within AREA_RADIUS_KM of at least one area center.  Companies
-    without coordinates pass through (benefit of the doubt).
+    1. Geocodes each area (+ first city as context) to a center point.
+    2. Companies WITH coordinates: keep if within AREA_RADIUS_KM of any center.
+    3. Companies WITHOUT coordinates: geocode via name + address + city,
+       then apply the same distance check. Only passes through if geocoding fails entirely.
+    4. Sets settings.anchor_lat/lon to the centroid of the area centers so downstream
+       proximity scoring also uses the correct anchor.
     """
     if not areas:
         return companies, 0
@@ -218,23 +221,46 @@ async def _area_proximity_filter(
     if not centers:
         return companies, 0
 
+    if settings.anchor_lat is None and centers:
+        settings.anchor_lat = sum(c[0] for c in centers) / len(centers)
+        settings.anchor_lon = sum(c[1] for c in centers) / len(centers)
+
     kept: list[DiscoveredCompany] = []
     dropped = 0
     for c in companies:
         clat = c.extra.get("lat") if c.extra else None
         clon = c.extra.get("lon") if c.extra else None
-        if clat is None or clon is None:
-            kept.append(c)
+
+        if clat is not None and clon is not None:
+            try:
+                clat, clon = float(clat), float(clon)
+            except (TypeError, ValueError):
+                kept.append(c)
+                continue
+            if any(haversine_km(clat, clon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
+                kept.append(c)
+            else:
+                dropped += 1
             continue
-        try:
-            clat, clon = float(clat), float(clon)
-        except (TypeError, ValueError):
-            kept.append(c)
-            continue
-        if any(haversine_km(clat, clon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
-            kept.append(c)
-        else:
-            dropped += 1
+
+        geocode_query = f"{c.name}, {c.address or ''}, {c.city or city_hint}".strip(", ")
+        if geocode_query:
+            bbox = await geocoder.bbox(geocode_query, None)
+            if bbox:
+                glat = (bbox.south + bbox.north) / 2
+                glon = (bbox.west + bbox.east) / 2
+                if any(haversine_km(glat, glon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
+                    if c.extra is None:
+                        c.extra = {}
+                    c.extra["lat"] = glat
+                    c.extra["lon"] = glon
+                    kept.append(c)
+                else:
+                    dropped += 1
+                continue
+
+        kept.append(c)
+
     if dropped:
         log.info("area proximity filter: kept %d, dropped %d (>%.0fkm from %s)",
                  len(kept), dropped, AREA_RADIUS_KM, ", ".join(areas))
