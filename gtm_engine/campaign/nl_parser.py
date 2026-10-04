@@ -172,8 +172,32 @@ def _extract_offer(text: str) -> str | None:
     return None
 
 
+_GENERIC_SUBJECT_WORDS = {
+    "companies", "company", "businesses", "business", "individuals", "individual",
+    "people", "clients", "customers", "firms", "firm", "organizations",
+    "organisations", "organization", "organisation", "ones", "those", "places",
+    "vendors", "entities", "players", "owners", "someone", "anyone", "who",
+}
+# A fragment that STARTS with one of these is a verb/clause ("might need …",
+# "looking for …"), not a noun phrase naming an industry — drop it entirely.
+_VERB_LEAD_WORDS = {
+    "might", "need", "needing", "want", "wanting", "require", "requiring",
+    "looking", "seeking", "may", "would", "could", "should", "will", "can",
+    "are", "is", "operating", "running", "that", "which", "whose",
+}
+# Trailing participles that dangle off a noun phrase ("NGOs operating") add noise.
+_TRAILING_NOISE_WORDS = {"operating", "running", "based", "located", "situated"}
+_LEADING_NOISE_WORDS = {"and", "or", "the", "a", "an"}
+
+
 def _extract_subject(text: str) -> list[str]:
-    """Extract the business type the user is looking for (e.g. "newspaper and media offices")."""
+    """Extract the business types the user is looking for (e.g. "travel agencies, hotels").
+
+    Verbose queries describe buyers in full sentences ("companies and individuals
+    who might need vehicle rentals — corporate offices, ..."). Keep only concise
+    noun-phrase fragments (<=4 words), dropping generic head-nouns and verb clauses,
+    so the result is usable as both discovery terms and a campaign title.
+    """
     for pat in _SUBJECT_PATTERNS:
         m = pat.search(text)
         if m:
@@ -182,8 +206,25 @@ def _extract_subject(text: str) -> list[str]:
             raw = _STRIP_QUANTIFIER.sub("", raw).strip()
             if len(raw) < 2:
                 continue
-            parts = re.split(r"\s+and\s+|\s*,\s*", raw)
-            return [p.strip() for p in parts if len(p.strip()) >= 2]
+            parts = re.split(r"\s+and\s+|\s*,\s*|\s*[—–-]\s+|\s+who\s+|\s+that\s+", raw)
+            cleaned: list[str] = []
+            for p in parts:
+                words = p.strip().rstrip(".").split()
+                while words and words[0].lower() in _LEADING_NOISE_WORDS:
+                    words.pop(0)
+                while words and words[-1].lower() in _TRAILING_NOISE_WORDS:
+                    words.pop()
+                if not words or words[0].lower() in _VERB_LEAD_WORDS:
+                    continue
+                term = " ".join(words)
+                if not (2 <= len(term) and 1 <= len(words) <= 4):
+                    continue
+                if term.lower() in _GENERIC_SUBJECT_WORDS:
+                    continue
+                if term.lower() not in [c.lower() for c in cleaned]:
+                    cleaned.append(term)
+            if cleaned:
+                return cleaned
     return []
 
 
@@ -264,23 +305,49 @@ def parse_intent(text: str) -> CampaignDraft:
 # ---------------------------------------------------------------------------
 
 def _name_from_draft(draft: CampaignDraft) -> str:
+    """A short, human-readable campaign title: '<subject> — <area/city>'.
+
+    Never echoes the raw query sentence. Priority for the subject: an LLM-supplied
+    name, then concise industry terms, then matched sectors, then the offer; the
+    location suffix comes from areas (preferred) or cities.
+    """
     if draft.name:
-        words = draft.name.strip().split()
-        return " ".join(words[:8])
-    parts: list[str] = []
-    if draft.target_industries:
-        parts.append(", ".join(draft.target_industries[:2]).title())
+        return " ".join(draft.name.strip().split()[:8])[:60]
+
+    subject = ""
+    short_industries = [i for i in draft.target_industries if len(i.split()) <= 4]
+    if short_industries:
+        subject = ", ".join(s.title() for s in short_industries[:2])
     elif draft.sectors:
-        parts.append(", ".join(s.replace("_", " ").title() for s in draft.sectors[:2]))
+        subject = ", ".join(s.replace("_", " ").title() for s in draft.sectors[:2])
+    elif draft.offer:
+        off = _STRIP_GEOGRAPHY.sub("", draft.offer).strip()
+        subject = " ".join(off.split()[:5]).title()
+
+    def _fmt_area(a: str) -> str:
+        # Sector codes (g-6, f-11, i-10) read best fully uppercased.
+        return a.upper() if re.match(r"^[a-z]-?\d", a, re.I) else a
+
+    loc = ""
     if draft.areas:
-        parts.append("near " + ", ".join(draft.areas[:3]))
-    if draft.cities:
-        parts.append("in " + ", ".join(draft.cities[:2]))
-    if parts:
-        return " ".join(parts)[:80]
-    if draft.offer:
-        words = draft.offer.strip().split()
-        return " ".join(words[:6])
+        loc = ", ".join(_fmt_area(a) for a in draft.areas[:2])
+        if draft.cities:
+            loc += f" {draft.cities[0]}"
+    elif draft.cities:
+        loc = ", ".join(draft.cities[:2])
+
+    if subject and loc:
+        name = f"{subject} - {loc}"
+    elif subject:
+        name = subject
+    elif loc:
+        name = f"Businesses in {loc}"
+    else:
+        name = ""
+    name = name.strip(" -,")
+    if name:
+        return name[:60]
+
     raw = draft.raw_text.strip()
     if len(raw) <= 60:
         return raw

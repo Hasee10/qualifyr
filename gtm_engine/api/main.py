@@ -699,13 +699,20 @@ def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True,
     # VENDOR) is preferred when given; `buyers_only` is the older default for callers that
     # don't pass one. None means "every type at or above min_score".
     ct = company_type or (CompanyType.BUYER.value if buyers_only else None)
+    campaign = _campaign(campaign_id)
     db = _db()
     rows = db.list_leads(campaign_id, min_score=min_score, company_type=ct)
     db.close()
     # Scratch on serverless: the CSV only has to survive long enough to be streamed back.
     export_dir = runtime_dir() / "exports" if is_serverless() else _settings.export_dir
     path = write_csv(rows, export_path(export_dir, campaign_id, "ui", buyers_only))
-    return FileResponse(path, media_type="text/csv", filename=path.name)
+    # The browser download name comes from the campaign's human name (short + sanitized),
+    # not the long internal campaign_id slug, so saved files stay readable.
+    import re
+    label = re.sub(r"[^a-z0-9]+", "-", (campaign.name or campaign_id).lower()).strip("-")[:48] or "leads"
+    suffix = "buyers" if ct == CompanyType.BUYER.value else "leads"
+    download_name = f"{label}-{suffix}.csv"
+    return FileResponse(path, media_type="text/csv", filename=download_name)
 
 
 # -- outreach: approval queue ------------------------------------------------------------
