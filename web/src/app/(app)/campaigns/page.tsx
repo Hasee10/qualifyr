@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { api, type Campaign, type Progress as RunProgress } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
+import { cn } from "@/lib/utils"
 
 function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (campaignId: string) => void }) {
   // NL mode state
@@ -545,13 +546,21 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function StatCell({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
-    <div className="text-center">
-      <div className="text-lg font-semibold leading-none">{value}</div>
-      <div className="text-[11px] text-muted-foreground mt-0.5">{label}</div>
+    <div className={cn("px-4 py-2.5 text-center", highlight && "bg-brand-muted/40")}>
+      <div className="text-lg font-semibold leading-none tabular-nums">{value}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground">{label}</div>
     </div>
   )
+}
+
+function statusDotClass(status?: string): string {
+  const s = (status ?? "").toLowerCase()
+  if (["completed", "done", "success", "succeeded"].includes(s)) return "bg-green-500"
+  if (["running", "dispatched", "pending", "queued"].includes(s)) return "bg-amber-500"
+  if (["failed", "error"].includes(s)) return "bg-red-500"
+  return "bg-muted-foreground/40"
 }
 
 export default function CampaignsPage() {
@@ -582,11 +591,11 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="mx-auto grid max-w-7xl gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-sm text-muted-foreground">Create a search, run discovery, and results land in Leads.</p>
+          <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Create a search, run discovery, and results land in Leads.</p>
         </div>
         <Button onClick={() => setCreating(true)}><Plus data-icon="inline-start" /> New campaign</Button>
       </div>
@@ -595,7 +604,16 @@ export default function CampaignsPage() {
       {error && <p className="text-sm text-destructive">API error: {error}</p>}
       {loading && <p className="text-muted-foreground">Loading…</p>}
       {!loading && campaigns.length === 0 && (
-        <Card><CardContent className="py-10 text-center text-muted-foreground">No campaigns yet. Create one to start a search.</CardContent></Card>
+        <Card>
+          <CardContent className="flex flex-col items-center py-14 text-center">
+            <div className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <Plus className="size-6" />
+            </div>
+            <h2 className="mt-5 text-lg font-semibold">No campaigns yet</h2>
+            <p className="mt-2 max-w-sm text-sm text-muted-foreground">Describe what you sell and Qualifyr finds the companies that need it.</p>
+            <Button className="mt-6" onClick={() => setCreating(true)}><Plus data-icon="inline-start" /> New campaign</Button>
+          </CardContent>
+        </Card>
       )}
       {campaigns.map((c) => {
         const offer = typeof c.offer === "string" ? c.offer : JSON.stringify(c.offer)
@@ -604,16 +622,16 @@ export default function CampaignsPage() {
         return (
           <Card
             key={c.campaign_id}
-            className="overflow-hidden cursor-pointer select-none transition-colors hover:border-primary/40"
+            className="overflow-hidden cursor-pointer select-none transition-all hover:border-primary/30 hover:shadow-md"
             onClick={() => openLeads(c.campaign_id)}
             title="View leads for this campaign"
           >
-            <CardContent className="p-4 grid gap-3">
+            <CardContent className="flex flex-col gap-4 p-5">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 overflow-hidden">
-                  <h3 className="font-medium truncate">{c.name}</h3>
-                  {showOffer && <p className="text-sm text-muted-foreground line-clamp-1">{offer}</p>}
+                  <h3 className="truncate font-semibold tracking-tight">{c.name}</h3>
+                  {showOffer && <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {(() => {
@@ -622,9 +640,9 @@ export default function CampaignsPage() {
                     const shown = pills.slice(0, MAX_PILLS)
                     const extra = pills.length - MAX_PILLS
                     return (
-                      <div className="flex flex-wrap items-center gap-1">
-                        {shown.map((p) => <Badge key={p} variant="outline" className="text-[11px] px-1.5 py-0">{p}</Badge>)}
-                        {extra > 0 && <Badge variant="outline" className="text-[11px] px-1.5 py-0">+{extra}</Badge>}
+                      <div className="hidden flex-wrap items-center gap-1 sm:flex">
+                        {shown.map((p) => <Badge key={p} variant="outline" className="px-1.5 py-0 text-[11px]">{p}</Badge>)}
+                        {extra > 0 && <Badge variant="outline" className="px-1.5 py-0 text-[11px]">+{extra}</Badge>}
                       </div>
                     )
                   })()}
@@ -639,23 +657,26 @@ export default function CampaignsPage() {
                 </div>
               </div>
 
-              {/* Stats row */}
-              <div className="flex items-center gap-6">
-                <Stat label="Companies" value={c.leads} />
-                <Stat label="Buyers" value={c.buyers} />
-                <Stat label="Qualified" value={c.qualified} />
-                <Stat label="Outreach" value={c.outreach_ready} />
-                <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
+              {/* Body: stat strip + run controls */}
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="grid grid-cols-4 divide-x divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-muted/20">
+                  <StatCell label="Companies" value={c.leads} />
+                  <StatCell label="Buyers" value={c.buyers} />
+                  <StatCell label="Qualified" value={c.qualified} highlight />
+                  <StatCell label="Outreach" value={c.outreach_ready} />
+                </div>
+                <div onClick={(e) => e.stopPropagation()}>
                   <RunPanel campaign={c} onFinished={onFinished} />
                 </div>
               </div>
 
-              {/* Last run — compact */}
-              {c.last_run && (
-                <p className="text-[11px] text-muted-foreground">
-                  Last run: {c.last_run.status} · {new Date(c.last_run.started_at).toLocaleDateString()}
-                </p>
-              )}
+              {/* Last run — compact meta with a status dot */}
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className={cn("size-1.5 rounded-full", statusDotClass(c.last_run?.status))} />
+                {c.last_run
+                  ? `Last run ${c.last_run.status} · ${new Date(c.last_run.started_at).toLocaleDateString()}`
+                  : "Not run yet"}
+              </div>
             </CardContent>
           </Card>
         )
