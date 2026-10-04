@@ -11,6 +11,20 @@ starting engine work.
 
 Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, clean CSV, UI)
 
+**2026-10-04 leads UX + landing polish:**
+- **Leads list is newest-first**: `list_leads(order=...)` — `"recent"` (updated_at DESC, the
+  Leads page) vs `"score"` (default, dashboard top-buyers). `/leads` takes `order` + `q`.
+- **Server-side lead search**: `/leads?q=` → `data_json ILIKE %q%` (spans all matching leads,
+  not just the loaded page); frontend debounces 300ms. Pagination counts derive from the server
+  `total` (was using current-page length). `count_leads`/`list_leads` share `_apply_lead_filters`.
+  Composite indexes `(campaign_id, updated_at)` + `(campaign_id, total_score)` for speed.
+- **Sign-up**: optional short-answer textbox restored → saved as `monetization_comment`
+  preference (stashed in `localStorage[PENDING_MONETIZATION_COMMENT_KEY]`, flushed on first auth
+  load like the vote). Admins read it from `user_preferences`.
+- **Landing**: source marquee has no tiles (logos on the dark section; per-item margins make the
+  `-50%` loop seamless); marketing nav links centered via a 3-col grid; app sidebar + favicon use
+  the real `QualifyrMark` (app/icon.svg is a solid theme-adaptive tile, legible at 16px).
+
 **2026-10-04 quality overhaul (shareable output):**
 - `gtm_engine/enrichment/fieldclean.py` (NEW, 17 unit tests in `tests/test_fieldclean.py`):
   `clean_email` (fixes `%20contact@`, `03009502334info@` — wired into `extract_emails`),
