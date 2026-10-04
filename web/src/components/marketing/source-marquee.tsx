@@ -30,16 +30,20 @@ export function SourceMarquee() {
             <span
               key={`${s.name}-${i}`}
               title={s.name}
-              className="flex size-16 shrink-0 items-center justify-center rounded-2xl border border-border/60 bg-background/70 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:bg-background hover:shadow-md"
+              aria-label={s.name}
+              // A white tile keeps every logo legible: favicons are drawn for light backgrounds,
+              // so dark marks (OpenStreetMap, PPRA, KCCI) would vanish on a dark chip. This reads
+              // as a consistent "app-icon" wall in both themes.
+              className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md"
             >
               {/* eslint-disable-next-line @next/next/no-img-element -- tiny external favicon, not a Next-optimised asset */}
               <img
                 src={favicon(s.domain)}
                 alt={s.name}
-                width={40}
-                height={40}
+                width={36}
+                height={36}
                 loading="lazy"
-                className="size-10 rounded-lg object-contain"
+                className="size-9 object-contain"
               />
             </span>
           ))}
