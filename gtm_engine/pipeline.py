@@ -18,6 +18,7 @@ from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.discovery.targeting import derive_discovery_targets
 from gtm_engine.discovery.web_search import WebSearchDiscovery
 from gtm_engine.enrichment.contacts import choose_contact
+from gtm_engine.enrichment.fieldclean import clean_address, clean_description, prefer_latin_name
 from gtm_engine.enrichment.email_patterns import discover, infer_pattern
 from gtm_engine.enrichment.external_signals import NewsChecker, domain_age
 from gtm_engine.enrichment.github_signals import github_activity
@@ -711,15 +712,23 @@ class Pipeline:
             pain_signals=list(signals.pain.keys()) if signals.pain else [],
             buying_signals=list(signals.buying.keys()) if signals.buying else [],
         )
-        description = bundle.description or (about.text[:300] if about else None) or (home.text[:300] if home else None)
+        # Clean, human-shareable fields: a Latin-script name, a single-line address, and a
+        # description that is real prose (meta or the grounded brief) — never a nav-menu scrape.
+        display_name = prefer_latin_name(company.name, bundle.title)
+        clean_addr = clean_address(company.address)
+        clean_meta = clean_description(bundle.description, None)
+        research = build_research_brief(company, cls, contact, signals, city=company.city,
+                                        industry=company.category, description=clean_meta,
+                                        quality=quality, online_presence=online_presence)
+        description = clean_description(bundle.description, research)
         lead = Lead(
             campaign_id=campaign.campaign_id,
-            company_name=company.name,
+            company_name=display_name,
             domain=domain,
             website=snapshot.final_url or website,
             country=company.country,
             city=company.city,
-            address=company.address,
+            address=clean_addr,
             industry=company.category,
             company_description=description,
             company_type=cls.company_type,
@@ -752,9 +761,7 @@ class Pipeline:
             intent_confidence=cls.intent_confidence,
             intent_reason=cls.intent_reason,
             online_presence=online_presence.model_dump(mode="json"),
-            research_brief=build_research_brief(company, cls, contact, signals, city=company.city,
-                                                industry=company.category, description=description,
-                                                quality=quality, online_presence=online_presence),
+            research_brief=research,
             source=company.source,
             source_url=company.source_url,
             outreach_ready=ready,
@@ -893,14 +900,15 @@ class Pipeline:
                 if map_sourced:
                     batch_dicts = [{"name": c.name, "category": c.category, "address": c.address} for c in map_sourced]
                     verdicts = await check_discovery_relevance(self.llm, target_desc, batch_dicts)
-                    demoted_set = {id(map_sourced[i]) for i, v in enumerate(verdicts) if not v}
-                    if demoted_set:
-                        stats.llm_relevance_demoted = len(demoted_set)
-                        kept = [c for c in discovered if id(c) not in demoted_set]
-                        demoted = [c for c in discovered if id(c) in demoted_set]
-                        discovered = kept + demoted
-                        log.info("llm relevance check: demoted %d/%d map-sourced companies",
-                                 len(demoted_set), len(map_sourced))
+                    rejected = {id(map_sourced[i]) for i, v in enumerate(verdicts) if not v}
+                    if rejected:
+                        # Quality over quantity: a company the LLM judges is NOT the requested
+                        # business type is dropped outright, not just demoted. This is what keeps
+                        # a "dentists" search from returning pharmacies and hospitals.
+                        stats.llm_relevance_demoted = len(rejected)
+                        discovered = [c for c in discovered if id(c) not in rejected]
+                        log.info("llm relevance check: dropped %d/%d off-type map-sourced companies",
+                                 len(rejected), len(map_sourced))
             companies = dedupe_companies(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
             companies.sort(key=lambda c: 0 if c.website else 1)

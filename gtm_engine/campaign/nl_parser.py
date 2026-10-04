@@ -118,7 +118,14 @@ _MAX_COMPANIES_RE = re.compile(r"(?:top|find|get|show|give)\s+(\d+)\b", re.I)
 _REVIEW_INTEREST = re.compile(
     r"(?:review|rating|star|rated|popular|busy|high.?traffic|well.?known|lots?\s+of\s+(?:reviews|customers))", re.I)
 _ONLINE_GAP_INTEREST = re.compile(
-    r"(?:no\s+(?:website|app|online|digital|ecommerce|e-commerce)|don'?t\s+have\s+(?:a\s+)?(?:website|app|online)|not\s+(?:digital|online)|without\s+(?:a\s+)?(?:website|app))", re.I)
+    r"(?:no\s+(?:website|app|online|digital|ecommerce|e-commerce)"
+    r"|don'?t\s+have\s+(?:a\s+)?(?:website|app|online)"
+    r"|not\s+(?:digital|online)"
+    r"|without\s+(?:a\s+)?(?:website|app|online|complete\s+online)"
+    r"|lack(?:s|ing)?\s+(?:a\s+)?(?:complete\s+|proper\s+|strong\s+)?online"
+    r"|lack(?:s|ing)?\s+(?:a\s+)?(?:website|digital|ecommerce|e-commerce|online\s+presence|online\s+store)"
+    r"|(?:weak|poor|limited|incomplete|missing)\s+online"
+    r"|not\s+(?:fully\s+)?online)", re.I)
 _NO_APP = re.compile(r"no\s+(?:mobile\s+)?app|without\s+(?:an?\s+)?app", re.I)
 _CHAIN_RE = re.compile(r"(?:no|ignore|exclude|skip|drop)\s+(?:big\s+)?chains?\b", re.I)
 _TIER_RE = re.compile(r"tier\s*([123])\s*only", re.I)

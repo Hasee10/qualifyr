@@ -26,7 +26,7 @@ from gtm_engine.api.usage import DEFAULT_LIMITS, MAX_LIMITS, get_all_usage
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
-from gtm_engine.export.csv_export import export_path, write_csv
+from gtm_engine.export.csv_export import export_path, write_clean_csv, write_csv
 from gtm_engine.export import sheets as sheets_export
 from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
 from gtm_engine.outreach.cli import ledger_path
@@ -694,10 +694,11 @@ def act_on_referral(lead_id: str, req: ReferralAction) -> dict:
 
 @app.get("/campaigns/{campaign_id}/export", dependencies=[Depends(require_campaign_access)])
 def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True,
-           company_type: str | None = None) -> FileResponse:
+           company_type: str | None = None, full: bool = False) -> FileResponse:
     # The CSV honours the same filters the Leads table shows. `company_type` (BUYER/UNKNOWN/
     # VENDOR) is preferred when given; `buyers_only` is the older default for callers that
     # don't pass one. None means "every type at or above min_score".
+    # Default export is the clean, client-ready sheet; `?full=1` gives every raw column.
     ct = company_type or (CompanyType.BUYER.value if buyers_only else None)
     campaign = _campaign(campaign_id)
     db = _db()
@@ -705,13 +706,14 @@ def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True,
     db.close()
     # Scratch on serverless: the CSV only has to survive long enough to be streamed back.
     export_dir = runtime_dir() / "exports" if is_serverless() else _settings.export_dir
-    path = write_csv(rows, export_path(export_dir, campaign_id, "ui", buyers_only))
+    out_path = export_path(export_dir, campaign_id, "ui", buyers_only)
+    path = write_csv(rows, out_path) if full else write_clean_csv(rows, out_path)
     # The browser download name comes from the campaign's human name (short + sanitized),
     # not the long internal campaign_id slug, so saved files stay readable.
     import re
     label = re.sub(r"[^a-z0-9]+", "-", (campaign.name or campaign_id).lower()).strip("-")[:48] or "leads"
     suffix = "buyers" if ct == CompanyType.BUYER.value else "leads"
-    download_name = f"{label}-{suffix}.csv"
+    download_name = f"{label}-{suffix}{'-full' if full else ''}.csv"
     return FileResponse(path, media_type="text/csv", filename=download_name)
 
 

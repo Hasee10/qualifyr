@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import { Play, Download, Plus, Trash2, Pencil } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -535,9 +536,15 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 export default function CampaignsPage() {
   const { campaigns, setCampaignId, refresh, loading, error } = useCampaign()
+  const router = useRouter()
   const [creating, setCreating] = React.useState(false)
   const [editing, setEditing] = React.useState<Campaign | null>(null)
   const onFinished = React.useCallback(() => { refresh(true) }, [refresh])
+
+  const openLeads = React.useCallback((id: string) => {
+    setCampaignId(id)
+    router.push("/leads")
+  }, [setCampaignId, router])
 
   const onCreated = React.useCallback(async (campaignId: string) => {
     await refresh(true)
@@ -574,8 +581,12 @@ export default function CampaignsPage() {
             <CardContent className="p-4 grid gap-3">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <h3 className="font-medium truncate">{c.name}</h3>
+                <div
+                  className="min-w-0 flex-1 overflow-hidden cursor-pointer"
+                  onClick={() => openLeads(c.campaign_id)}
+                  title="View leads for this campaign"
+                >
+                  <h3 className="font-medium truncate hover:underline">{c.name}</h3>
                   {showOffer && <p className="text-sm text-muted-foreground line-clamp-1">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -602,10 +613,16 @@ export default function CampaignsPage() {
 
               {/* Stats row */}
               <div className="flex items-center gap-6">
-                <Stat label="Companies" value={c.leads} />
-                <Stat label="Buyers" value={c.buyers} />
-                <Stat label="Qualified" value={c.qualified} />
-                <Stat label="Outreach" value={c.outreach_ready} />
+                <div
+                  className="flex items-center gap-6 cursor-pointer"
+                  onClick={() => openLeads(c.campaign_id)}
+                  title="View leads for this campaign"
+                >
+                  <Stat label="Companies" value={c.leads} />
+                  <Stat label="Buyers" value={c.buyers} />
+                  <Stat label="Qualified" value={c.qualified} />
+                  <Stat label="Outreach" value={c.outreach_ready} />
+                </div>
                 <div className="ml-auto">
                   <RunPanel campaign={c} onFinished={onFinished} />
                 </div>

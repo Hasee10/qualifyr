@@ -56,20 +56,22 @@ def test_campaign_summary_counts_match_the_data(client):
 
 def _rows(resp):
     assert resp.status_code == 200, resp.text
-    return list(csv.DictReader(io.StringIO(resp.text)))
+    # The CSV is UTF-8 with a BOM (so Excel opens Urdu names correctly); strip it so the
+    # first column header isn't prefixed with the BOM char when read back.
+    return list(csv.DictReader(io.StringIO(resp.text.lstrip("﻿"))))
 
 
 def test_export_defaults_to_qualified_buyers(client):
     rows = _rows(client.get("/campaigns/test-retail/export"))  # min_score 70, buyers_only default
-    names = {r["company_name"] for r in rows}
+    names = {r["Company"] for r in rows}
     assert names == {"BuyerA", "BuyerB"}
 
 
 def test_export_honours_company_type_filter(client):
     vendors = _rows(client.get("/campaigns/test-retail/export?min_score=0&company_type=VENDOR"))
-    assert {r["company_name"] for r in vendors} == {"VendorX"}
+    assert {r["Company"] for r in vendors} == {"VendorX"}
     unknown = _rows(client.get("/campaigns/test-retail/export?min_score=0&company_type=UNKNOWN"))
-    assert {r["company_name"] for r in unknown} == {"UnknownY"}
+    assert {r["Company"] for r in unknown} == {"UnknownY"}
 
 
 def test_export_all_types_when_no_type_and_not_buyers_only(client):
@@ -79,4 +81,22 @@ def test_export_all_types_when_no_type_and_not_buyers_only(client):
 
 def test_export_min_score_filters_rows(client):
     rows = _rows(client.get("/campaigns/test-retail/export?min_score=85&buyers_only=false"))
-    assert {r["company_name"] for r in rows} == {"BuyerB", "VendorX"}  # only score >= 85
+    assert {r["Company"] for r in rows} == {"BuyerB", "VendorX"}  # only score >= 85
+
+
+def test_export_default_uses_clean_client_ready_columns(client):
+    rows = _rows(client.get("/campaigns/test-retail/export"))
+    assert rows, "expected at least one row"
+    cols = set(rows[0].keys())
+    # Clean sheet: human headers, no internal plumbing.
+    assert "Company" in cols and "Why it qualified" in cols
+    assert "lead_id" not in cols and "campaign_id" not in cols and "buyer_fit_score" not in cols
+
+
+def test_full_export_keeps_raw_columns(client):
+    rows = _rows(client.get("/campaigns/test-retail/export?full=1"))
+    assert rows, "expected at least one row"
+    cols = set(rows[0].keys())
+    assert "company_name" in cols and "lead_id" in cols
+    # Enums render as clean values, never Python reprs.
+    assert all(r["company_type"] in {"BUYER", "VENDOR", "UNKNOWN"} for r in rows)

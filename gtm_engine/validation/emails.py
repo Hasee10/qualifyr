@@ -37,6 +37,8 @@ def _mangled(email: str, source: str) -> bool:
 
 
 def extract_emails(text: str) -> list[str]:
+    from gtm_engine.enrichment.fieldclean import clean_email
+
     seen: list[str] = []
     source = text or ""
     for match in EMAIL_RE.findall(source):
@@ -45,6 +47,11 @@ def extract_emails(text: str) -> list[str]:
             continue
         if email.endswith(_JUNK_SUFFIXES):
             continue
+        # Repair URL-encoding leaks and phone-numbers fused to the local part.
+        cleaned = clean_email(email)
+        if not cleaned or cleaned.endswith(_JUNK_SUFFIXES):
+            continue
+        email = cleaned
         domain = email.split("@", 1)[1]
         if domain in _JUNK_DOMAINS or canonical_domain(domain) is None:
             continue

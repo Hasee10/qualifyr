@@ -322,14 +322,18 @@ async def check_discovery_relevance(llm: LLM | None, target_description: str,
             parts.append(f"at {c['address']}")
         lines.append(f"{i+1}. {' '.join(parts)}")
     system = (
-        "You check whether discovered businesses match the target business type. "
-        "For each company, answer true if it is plausibly the target type, false otherwise. "
+        "You check whether each discovered business IS SPECIFICALLY the target business type. "
+        "Be strict: the same broad sector is NOT enough. For target 'dentists', a pharmacy, "
+        "hospital, medical college, or diagnostic lab is false — only an actual dental "
+        "clinic/dentist is true. For target 'grocery marts', an electronics or book shop is "
+        "false. Answer true only if the company clearly offers the target product or service; "
+        "when genuinely unsure, answer false. "
         "Output ONLY a JSON array of booleans, one per company."
     )
     user = (
         f"Target business type: {target_description}\n\n"
         f"Companies:\n" + "\n".join(lines) + "\n\n"
-        "JSON array of booleans (true = matches target type, false = does not)."
+        "JSON array of booleans (true = IS specifically the target type, false = is not)."
     )
     try:
         raw = await llm.complete(system, user, max_tokens=200)

@@ -63,21 +63,18 @@ function SidebarContent() {
 }
 
 function BackendStatus() {
-  const [health, setHealth] = React.useState<{ smtp_configured: boolean; require_approval: boolean; auth_mode?: string; warmup?: { enabled: boolean } } | null | "down">(null)
+  const [health, setHealth] = React.useState<"up" | "down" | null>(null)
   React.useEffect(() => {
-    api.health().then(setHealth).catch(() => setHealth("down"))
+    api.health().then(() => setHealth("up")).catch(() => setHealth("down"))
   }, [])
   return (
-    <div className="flex flex-col gap-1 p-4 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
       {health === "down" ? (
         <Badge variant="destructive">API offline</Badge>
-      ) : health ? (
-        <>
-          <span>API connected</span>
-          <span>Sending: {health.smtp_configured ? `Gmail (${health.auth_mode ?? "configured"})` : "dry-run (no credentials)"}</span>
-          {health.warmup?.enabled && <span>Warm-up ramp: on</span>}
-          <span>Approval: {health.require_approval ? "required" : "off"}</span>
-        </>
+      ) : health === "up" ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-1.5 rounded-full bg-green-500" /> API connected
+        </span>
       ) : (
         <span>Connecting…</span>
       )}
