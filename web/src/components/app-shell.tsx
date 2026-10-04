@@ -12,6 +12,7 @@ import { api } from "@/lib/api"
 import { CampaignProvider, useCampaign } from "@/components/campaign-context"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SignOutButton } from "@/components/sign-out-button"
+import { QualifyrMark } from "@/components/qualifyr-mark"
 
 const nav = [
   // "/" is the public landing page now; the dashboard lives at /dashboard.
@@ -26,17 +27,14 @@ function SidebarContent() {
   const pathname = usePathname()
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-4 py-6">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-primary">
-          <Radar className="size-5 text-primary-foreground" />
-        </div>
-        <div className="flex flex-col">
-          <span className="text-lg font-semibold leading-tight">Qualifyr</span>
-          <span className="text-xs text-muted-foreground">buyer-only lead engine</span>
-        </div>
-      </div>
+      <Link href="/dashboard" className="flex items-center gap-2.5 px-5 py-6">
+        <span className="flex size-9 items-center justify-center rounded-xl bg-brand shadow-sm">
+          <QualifyrMark className="size-5 text-brand-foreground" />
+        </span>
+        <span className="text-lg font-semibold tracking-tight">Qualifyr</span>
+      </Link>
       <Separator />
-      <nav className="flex-1 overflow-y-auto px-4 py-4">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
         <div className="flex flex-col gap-1">
           {nav.map((item) => {
             const active = pathname.startsWith(item.href)
@@ -45,11 +43,13 @@ function SidebarContent() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "inline-flex shrink-0 items-center justify-start gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
-                  active && "bg-muted text-foreground"
+                  "group inline-flex shrink-0 items-center justify-start gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
               >
-                <item.icon className="size-4" />
+                <item.icon className={cn("size-4 transition-colors", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
                 {item.label}
               </Link>
             )
