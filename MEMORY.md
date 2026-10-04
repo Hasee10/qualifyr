@@ -31,6 +31,24 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
 - **UI**: settings drops Campaigns + Google Sheets tabs; sidebar status = connectivity only;
   campaign card title/stats click → Leads with that campaign selected.
 
+**2026-10-04 free-tier limits + signup vote + UX:**
+- **Free tier** (`api/main.py`, per signed-in user; local/self-host with `user_id=None`
+  unlimited): `FREE_MAX_CAMPAIGNS=3`, `FREE_MAX_LEADS_PER_CAMPAIGN=10`, overridable via
+  `GTM_FREE_MAX_CAMPAIGNS` / `GTM_FREE_MAX_LEADS_PER_CAMPAIGN`. Enforced in `create_campaign`
+  + `create_campaign_nl` (403 at cap) and clamped (`_cap_leads`) at create and in
+  `run_campaign`. Limits echoed on `/health` → New-campaign form reads the cap (not hardcoded).
+  Tests: `tests/test_free_tier_limits.py` (3).
+- **Monetization vote** now mandatory on the sign-up form (required radio); saved after
+  signup, stashed in `localStorage[PENDING_MONETIZATION_KEY]` and flushed on first
+  authenticated load (campaign-context) for the e-mail-confirm flow. Removed from settings.
+- **UI**: header campaign dropdown hidden on `/campaigns`; whole campaign card clickable →
+  Leads (edit/delete/run stopPropagation).
+- **CI fix**: `tests/test_load_concurrency.py` — lift `FREE_MAX_*` in its fixture (concurrency
+  tests, not quota), and `test_bulk_lead_listing_scales` reads `["items"]`/`["total"]` (the
+  `/leads` endpoint returns `{items,total}` since the pagination change, not a bare list).
+  NOTE: running two load-suites at once exhausts the shared Supabase pooler (pool_size 15) —
+  run them once, not concurrently.
+
 ---
 
 ## 1. WHAT QUALIFYR IS (the reframe, now built)

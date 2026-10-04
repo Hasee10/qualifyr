@@ -27,6 +27,10 @@ def app(settings, tmp_path, monkeypatch):
     from gtm_engine.api.auth import verify_request
     monkeypatch.setattr(m, "_settings", settings)
     monkeypatch.setattr(m, "dispatch_workflow", lambda *a, **k: None)
+    # These tests probe concurrency and scale, not the free-tier quota (which has its own
+    # tests). Lift the caps so a 50-campaign dedup race and an 800-lead listing can run.
+    monkeypatch.setattr(m, "FREE_MAX_CAMPAIGNS", 10_000)
+    monkeypatch.setattr(m, "FREE_MAX_LEADS_PER_CAMPAIGN", 10_000)
     camp_dir = tmp_path / "campaigns"
     camp_dir.mkdir()
     monkeypatch.setattr(m, "CAMPAIGN_DIR", camp_dir)
@@ -131,10 +135,11 @@ def test_bulk_lead_listing_scales(app, settings):
             t0 = time.perf_counter()
             r = await c.get(f"/campaigns/{cid}/leads?limit=1000", headers={"x-test-user": "user-a"})
             elapsed = time.perf_counter() - t0
-            return r.status_code, len(r.json()), elapsed
+            body = r.json()
+            return r.status_code, len(body["items"]), body["total"], elapsed
 
-    status, count, elapsed = asyncio.run(run())
-    assert status == 200 and count == 800
+    status, count, total, elapsed = asyncio.run(run())
+    assert status == 200 and count == 800 and total == 800
     assert elapsed < 15.0, f"listing 800 leads took {elapsed:.1f}s"
 
 
