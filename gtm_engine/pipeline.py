@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
@@ -184,7 +185,21 @@ def _discovery_relevance_filter(
     return kept, dropped
 
 
-AREA_RADIUS_KM = 3.0
+# Islamabad/Rawalpindi sectors are ~2 km across, so a center+radius test alone leaks into
+# neighbouring sectors (a 3 km radius from G-11 reaches F-11, G-12, H-11). The radius is only
+# the fallback for addresses with no sector label; the sector-code text match below is the
+# precise discriminator when a sector is written in the address.
+AREA_RADIUS_KM = 2.0
+
+# A Pakistani sector code: a letter, a hyphen, 1-2 digits, optional sub-sector ("G-11", "F-11",
+# "I-10/4"). The hyphen is required so plain phrases ("a 5 star hotel") don't false-match.
+_SECTOR_RE = re.compile(r"\b([A-Za-z])-(\d{1,2})(?:/\d)?\b")
+
+
+def _sector_codes(text: str | None) -> set[str]:
+    """Normalised sector codes found in text, e.g. {'G-11'} from 'Sachal Sarmast Road (G-11)'.
+    A sub-sector like 'G-11/4' normalises to its parent 'G-11'."""
+    return {f"{m.group(1).upper()}-{m.group(2)}" for m in _SECTOR_RE.finditer(text or "")}
 
 
 async def _area_proximity_filter(
@@ -194,20 +209,29 @@ async def _area_proximity_filter(
     fetcher: Fetcher,
     settings: EngineSettings,
 ) -> tuple[list[DiscoveredCompany], int]:
-    """Drop companies whose location is too far from the requested areas.
+    """Drop companies that are not in the requested area(s).
 
-    1. Geocodes each area (+ first city as context) to a center point.
-    2. Companies WITH coordinates: keep if within AREA_RADIUS_KM of any center.
-    3. Companies WITHOUT coordinates: geocode via name + address + city,
-       then apply the same distance check. Only passes through if geocoding fails entirely.
-    4. Sets settings.anchor_lat/lon to the centroid of the area centers so downstream
-       proximity scoring also uses the correct anchor.
+    Precedence, per company:
+    1. Sector-code match (when the requested area is a sector like 'G-11'): if the company's
+       name/address names a sector, keep it only when that sector is one of the requested ones.
+       This is exact — it drops 'F-11 Markaz' and 'G-12' even though they sit within a loose
+       radius of G-11's centre.
+    2. Coordinate distance: companies with lat/lon are kept only within AREA_RADIUS_KM of a
+       requested area centre.
+    3. Geocode fallback: coordinate-less companies are geocoded (name+address+city) and tested
+       the same way; only a total geocode failure passes through.
+    Also sets settings.anchor_lat/lon to the area centroid so downstream proximity scoring uses
+    the correct anchor.
     """
     if not areas:
         return companies, 0
 
     from gtm_engine.discovery.geocode import Geocoder
     geocoder = Geocoder(fetcher, settings.db_path.parent / "geocode_cache.json")
+
+    requested_sectors: set[str] = set()
+    for area in areas:
+        requested_sectors |= _sector_codes(area)
 
     centers: list[tuple[float, float]] = []
     city_hint = cities[0] if cities else ""
@@ -219,38 +243,54 @@ async def _area_proximity_filter(
             lon = (bbox.west + bbox.east) / 2
             centers.append((lat, lon))
 
-    if not centers:
+    if not centers and not requested_sectors:
         return companies, 0
 
     if settings.anchor_lat is None and centers:
         settings.anchor_lat = sum(c[0] for c in centers) / len(centers)
         settings.anchor_lon = sum(c[1] for c in centers) / len(centers)
 
+    def _within_radius(lat: float, lon: float) -> bool:
+        return any(haversine_km(lat, lon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers)
+
     kept: list[DiscoveredCompany] = []
     dropped = 0
     for c in companies:
+        # 1. Exact sector match wins when the company's text names a sector.
+        if requested_sectors:
+            found = _sector_codes(c.address) | _sector_codes(c.name)
+            if found:
+                if found & requested_sectors:
+                    kept.append(c)
+                else:
+                    dropped += 1
+                continue
+
+        # 2. Coordinate distance.
         clat = c.extra.get("lat") if c.extra else None
         clon = c.extra.get("lon") if c.extra else None
-
         if clat is not None and clon is not None:
             try:
                 clat, clon = float(clat), float(clon)
             except (TypeError, ValueError):
                 kept.append(c)
                 continue
-            if any(haversine_km(clat, clon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
+            if centers and _within_radius(clat, clon):
                 kept.append(c)
+            elif not centers:
+                kept.append(c)  # sector-only request, no coords to compare against
             else:
                 dropped += 1
             continue
 
+        # 3. Geocode the coordinate-less company and test it the same way.
         geocode_query = f"{c.name}, {c.address or ''}, {c.city or city_hint}".strip(", ")
-        if geocode_query:
+        if centers and geocode_query:
             bbox = await geocoder.bbox(geocode_query, None)
             if bbox:
                 glat = (bbox.south + bbox.north) / 2
                 glon = (bbox.west + bbox.east) / 2
-                if any(haversine_km(glat, glon, alat, alon) <= AREA_RADIUS_KM for alat, alon in centers):
+                if _within_radius(glat, glon):
                     if c.extra is None:
                         c.extra = {}
                     c.extra["lat"] = glat
@@ -263,8 +303,8 @@ async def _area_proximity_filter(
         kept.append(c)
 
     if dropped:
-        log.info("area proximity filter: kept %d, dropped %d (>%.0fkm from %s)",
-                 len(kept), dropped, AREA_RADIUS_KM, ", ".join(areas))
+        log.info("area proximity filter: kept %d, dropped %d (sector %s / >%.1fkm)",
+                 len(kept), dropped, ",".join(sorted(requested_sectors)) or "n/a", AREA_RADIUS_KM)
     return kept, dropped
 
 

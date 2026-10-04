@@ -586,6 +586,46 @@ async def test_area_proximity_filter_noop_without_areas():
     assert len(kept) == 1
 
 
+def test_sector_codes_extraction():
+    from gtm_engine.pipeline import _sector_codes
+    assert _sector_codes("Sachal Sarmast Road (G-11), Islamabad") == {"G-11"}
+    assert _sector_codes("Savoy Arcade, 25 Hillal Rd, F-11 Markaz") == {"F-11"}
+    assert _sector_codes("House 3, G-11/4 Islamabad") == {"G-11"}   # sub-sector -> parent
+    assert _sector_codes("a 5 star hotel on Road 11") == set()       # no false positive
+    assert _sector_codes(None) == set()
+
+
+@pytest.mark.asyncio
+async def test_area_proximity_filter_drops_wrong_sector_even_when_near():
+    """A company whose ADDRESS names a different sector is dropped, even if its coordinates
+    fall within the radius of the requested sector's centre (adjacent sectors overlap)."""
+    from gtm_engine.pipeline import _area_proximity_filter
+    from gtm_engine.models import DiscoveredCompany
+    from unittest.mock import AsyncMock, patch
+    from gtm_engine.discovery.geocode import BBox
+
+    g13_bbox = BBox(south=33.625, west=73.015, north=33.640, east=73.030)
+    companies = [
+        DiscoveredCompany(name="G-13 Clinic", source="osm", address="Markaz G-13, Islamabad",
+                          extra={"lat": 33.633, "lon": 73.023}),
+        DiscoveredCompany(name="F-11 Clinic", source="overture", address="F-11 Markaz, Islamabad",
+                          extra={"lat": 33.634, "lon": 73.024}),  # coords near G-13 but sector F-11
+    ]
+    with patch("gtm_engine.discovery.geocode.Geocoder") as MockGeocoder:
+        instance = MockGeocoder.return_value
+        instance.bbox = AsyncMock(return_value=g13_bbox)
+        settings = AsyncMock()
+        settings.anchor_lat = None
+        settings.db_path.parent = AsyncMock()
+        kept, dropped = await _area_proximity_filter(
+            companies, ["G-13"], ["Islamabad"], AsyncMock(), settings)
+
+    names = [c.name for c in kept]
+    assert "G-13 Clinic" in names
+    assert "F-11 Clinic" not in names
+    assert dropped == 1
+
+
 def test_areas_wired_into_geography():
     draft = parse_intent("find newspaper offices near G-7 Islamabad")
     cfg = build_campaign_config(draft)

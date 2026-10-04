@@ -23,6 +23,13 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
 - **Area proximity** (`pipeline._area_proximity_filter`): geocodes companies with no
   lat/lon too (web/chambers), sets `settings.anchor_lat/lon` from area centroid so
   proximity scoring is no longer "Tier 1 no anchor".
+- **Area hardening (2026-10-04b)**: sector-code text match is now the primary discriminator
+  (`_sector_codes`, regex `[A-Za-z]-\d{1,2}`): if a company's address/name names a sector,
+  keep only when it's a requested sector — so "F-11 Markaz"/"G-12" drop from a G-11 search even
+  though they sit within the radius. Radius tightened 3→2 km (sectors are ~2 km) as the
+  fallback for addresses with no sector label. NOTE: this fixes GEOGRAPHY only; relevance (e.g.
+  pharmacies / NUST AI labs mis-filed as `medical_research_institute` showing up for "doctors")
+  is a separate issue — broad derived Overture categories + LLM relevance leniency.
 - **CSV**: default UI export is the **clean client-ready sheet** (`write_clean_csv`,
   human headers, no plumbing); `?full=1` = raw `CSV_COLUMNS`. Enums serialize as values.
   Download filename derives from campaign name, not the long id slug.
