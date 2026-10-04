@@ -17,12 +17,12 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from gtm_engine import __version__
 from gtm_engine.api.auth import auth_disabled, current_user_email, current_user_id, verify_request
 from gtm_engine.api.keys import ALLOWED_KEYS, decrypt_key, encrypt_key, encryption_available
-from gtm_engine.api.usage import DEFAULT_LIMITS, MAX_LIMITS, get_all_usage
+from gtm_engine.api.usage import DEFAULT_LIMITS, MAX_LIMITS, check_usage, get_all_usage
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
@@ -306,18 +306,21 @@ def campaigns(user_id: str | None = Depends(current_user_id)) -> list[dict]:
     return out
 
 
+# Bounds on user-supplied campaign input: unbounded text/lists are a cost and DoS vector
+# (stored, crawled, and fed to the LLM). These are generous — far above any real campaign — so
+# they never bite a legitimate user, only a payload meant to abuse.
 class CampaignCreate(BaseModel):
-    name: str
-    offer: str
-    countries: list[str] = []
-    provinces: list[str] = []
-    cities: list[str] = []
-    target_industries: list[str] = []
-    buyer_keywords: list[str] = []
-    osm_categories: list[str] = []
-    overture_categories: list[str] = []
-    min_score: int = 70
-    max_companies: int = 60
+    name: str = Field(min_length=1, max_length=200)
+    offer: str = Field(min_length=1, max_length=4000)
+    countries: list[str] = Field(default=[], max_length=20)
+    provinces: list[str] = Field(default=[], max_length=50)
+    cities: list[str] = Field(default=[], max_length=50)
+    target_industries: list[str] = Field(default=[], max_length=50)
+    buyer_keywords: list[str] = Field(default=[], max_length=200)
+    osm_categories: list[str] = Field(default=[], max_length=200)
+    overture_categories: list[str] = Field(default=[], max_length=200)
+    min_score: int = Field(default=70, ge=0, le=100)
+    max_companies: int = Field(default=60, ge=1, le=1000)
 
 
 def _own_campaign_count(db: Database, user_id: str | None) -> int:
@@ -369,8 +372,8 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
 
 
 class CampaignNLRequest(BaseModel):
-    text: str
-    max_companies: int | None = None
+    text: str = Field(min_length=1, max_length=2000)
+    max_companies: int | None = Field(default=None, ge=1, le=1000)
 
 
 @app.post("/campaigns/nl", status_code=201)
@@ -438,7 +441,7 @@ def campaign_detail(campaign_id: str) -> dict:
 
 
 class RunRequest(BaseModel):
-    max_companies: int | None = None
+    max_companies: int | None = Field(default=None, ge=1, le=1000)
 
 
 @app.post("/campaigns/{campaign_id}/run", dependencies=[Depends(require_campaign_access)])
@@ -451,9 +454,15 @@ def run_campaign(campaign_id: str, req: RunRequest,
     campaign = _campaign(campaign_id)
     db = _db()
     live = db.get_run_progress(campaign_id)
-    db.close()
     if _run_is_active(live):
+        db.close()
         raise HTTPException(409, "a run is already in progress for this campaign")
+    # Per-user daily cap on run dispatches (atomic). Local operators (user_id None) and master
+    # accounts are unlimited; everyone else is backstopped against spamming workflow dispatches.
+    if user_id is not None and not _is_unlimited(email) and not check_usage(db, user_id, "runs"):
+        db.close()
+        raise HTTPException(429, "Daily run limit reached — try again tomorrow.")
+    db.close()
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id

@@ -5,6 +5,7 @@ interface for JS-heavy sites later."""
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
 import time
@@ -20,6 +21,19 @@ from gtm_engine.config.schema import EngineSettings
 log = logging.getLogger(__name__)
 
 _RETRYABLE = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _is_blocked_ip_literal(hostname: str) -> bool:
+    """True when the host is an IP literal in a non-public range (loopback, private, link-local,
+    reserved, multicast, unspecified). Domain names return False — we deliberately do not resolve
+    here, to keep the crawl path hermetic and fast. This blocks the direct-IP SSRF vectors
+    (notably cloud metadata at 169.254.169.254, and 127.0.0.1 / 10.x / 192.168.x)."""
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return (ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 _META_CHARSET_RE = re.compile(rb"<meta[^>]+charset=[\"']?\s*([a-zA-Z0-9_-]+)", re.I)
 _XML_DECL_RE = re.compile(rb"<\?xml[^>]+encoding=[\"']([a-zA-Z0-9_-]+)", re.I)
 
@@ -164,6 +178,9 @@ class HttpFetcher:
         """`api=True` marks a programmatic endpoint (Overpass, search): robots.txt governs
         crawlers on websites, not API clients, so the check is skipped there."""
         host = urlparse(url).netloc.lower()
+        if self.settings.block_private_hosts and _is_blocked_ip_literal(urlparse(url).hostname or ""):
+            log.warning("blocked request to non-public IP host: %s", url)
+            return FetchResult(url, url, 0, "", "", error="blocked_private_host")
         if self._host_failures.get(host, 0) >= self.settings.host_failure_limit:
             return FetchResult(url, url, 0, "", "", error="host_unavailable")
         if not api and not await self._allowed(url):

@@ -103,6 +103,12 @@ def verify_request(request: Request) -> dict | None:
             audience="authenticated",
             issuer=f"{_project_url()}/auth/v1",
         )
+        # A verified token must carry a subject: `current_user_id` returns None to mean "no
+        # scoping" (local operator / tests), so an authenticated request that produced None
+        # would silently see every tenant's data. Reject rather than fall through to that.
+        if not payload.get("sub"):
+            log.info("rejected token on %s: no sub claim", request.url.path)
+            raise HTTPException(401, "invalid token", headers={"WWW-Authenticate": "Bearer"})
         # Stash the verified user so route handlers can scope data to it without re-decoding.
         request.state.user = payload
         return payload

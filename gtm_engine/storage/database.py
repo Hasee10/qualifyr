@@ -793,30 +793,30 @@ class Database:
     # -- usage counts (daily per-user) ----------------------------------------
 
     def check_and_increment_usage(self, user_id: str, resource: str, limit: int) -> bool:
+        """Atomically bump today's usage and report whether this request is within `limit`.
+
+        One statement (INSERT ... ON CONFLICT DO UPDATE ... WHERE ... RETURNING), so two
+        concurrent requests can't both read an under-limit count and both proceed — the old
+        SELECT-then-UPDATE let a user slip past a daily cap under concurrency. The conditional
+        UPDATE is skipped once the cap is reached for the day, so RETURNING yields no row and we
+        deny. A new day (different last_reset_date) resets the count to 1 in the same statement."""
+        if limit <= 0:
+            return False
         today = utcnow().strftime("%Y-%m-%d")
         row = self._execute(
-            "SELECT daily_count, last_reset_date FROM usage_counts "
-            "WHERE user_id = %s AND resource = %s",
-            (user_id, resource),
+            "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date) "
+            "VALUES (%s, %s, 1, %s) "
+            "ON CONFLICT (user_id, resource) DO UPDATE SET "
+            "  daily_count = CASE WHEN usage_counts.last_reset_date <> EXCLUDED.last_reset_date THEN 1 "
+            "                     ELSE usage_counts.daily_count + 1 END, "
+            "  last_reset_date = EXCLUDED.last_reset_date "
+            "WHERE usage_counts.last_reset_date <> EXCLUDED.last_reset_date "
+            "   OR usage_counts.daily_count < %s "
+            "RETURNING daily_count",
+            (user_id, resource, today, limit),
         ).fetchone()
-        if row is None:
-            self._execute(
-                "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date) "
-                "VALUES (%s, %s, 1, %s)",
-                (user_id, resource, today),
-            )
-            self._commit()
-            return True
-        count = row["daily_count"] if row["last_reset_date"] == today else 0
-        if count >= limit:
-            return False
-        self._execute(
-            "UPDATE usage_counts SET daily_count = %s, last_reset_date = %s "
-            "WHERE user_id = %s AND resource = %s",
-            (count + 1, today, user_id, resource),
-        )
         self._commit()
-        return True
+        return row is not None
 
     def get_usage(self, user_id: str) -> list[dict]:
         today = utcnow().strftime("%Y-%m-%d")
