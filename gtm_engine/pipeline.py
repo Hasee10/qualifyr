@@ -17,7 +17,7 @@ from gtm_engine.discovery.csv_seed import CSVSeedDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
-from gtm_engine.discovery.targeting import derive_discovery_targets
+from gtm_engine.discovery.targeting import derive_discovery_targets, load_taxonomy
 from gtm_engine.discovery.web_search import WebSearchDiscovery
 from gtm_engine.enrichment.contacts import choose_contact
 from gtm_engine.enrichment.fieldclean import clean_address, clean_description, prefer_latin_name
@@ -184,6 +184,25 @@ def _discovery_relevance_filter(
     if dropped:
         log.info("discovery relevance filter: kept %d, dropped %d (no offer keyword match)", len(kept), dropped)
     return kept, dropped
+
+
+def _relevance_target_desc(target_industries: list[str], sectors: list[str]) -> str | None:
+    """The business type the LLM relevance check should hold results to. Prefer the user's
+    explicit target industries; otherwise fall back to the human term of each derived sector so
+    an offer-only campaign (no industries given) still gets the strict type gate instead of
+    skipping it. Returns None only when neither is available."""
+    industries = [t.strip() for t in (target_industries or []) if t and t.strip()]
+    if industries:
+        return ", ".join(industries[:3])
+    taxonomy = load_taxonomy()
+    terms: list[str] = []
+    for s in sectors or []:
+        if s in ("_niche", "general_retail"):
+            continue  # too broad to discriminate on — no useful target type
+        match = (taxonomy.get(s) or {}).get("match", [])
+        if match:
+            terms.append(match[0])
+    return ", ".join(terms[:3]) or None
 
 
 # The area's tolerance is NOT a fixed radius — it is derived at run time from the geocoder's
@@ -961,8 +980,8 @@ class Pipeline:
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
                 discovered, self._relevance_keywords, campaign_cats,
                 user_configured_categories=user_configured_categories)
-            if self.llm and campaign.target_industries and discovered:
-                target_desc = ", ".join(campaign.target_industries[:3])
+            target_desc = _relevance_target_desc(campaign.target_industries, stats.discovery_sectors)
+            if self.llm and target_desc and discovered:
                 map_sourced = [c for c in discovered if c.source not in ("web_search", "ppra", "kcci", "seed_csv")]
                 if map_sourced:
                     batch_dicts = [{"name": c.name, "category": c.category, "address": c.address} for c in map_sourced]

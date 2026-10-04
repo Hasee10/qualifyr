@@ -105,6 +105,22 @@ async def test_derive_targets_niche_uses_fallback_not_general_retail():
     assert "general_retail" not in t.sectors
 
 
+def test_pharmacy_health_overture_is_specific_not_broad():
+    """`medical`/`health` LIKE-matched research institutes and generic health orgs into
+    doctor/pharmacy searches. The sector must use specific substrings only."""
+    tax = load_taxonomy()
+    overture = tax["pharmacy_health"]["overture"]
+    assert "medical" not in overture and "health" not in overture
+    assert "pharmacy" in overture and "clinic" in overture and "doctor" in overture
+
+
+async def test_derive_targets_pharmacy_offer_has_no_broad_medical_substring():
+    t = await derive_discovery_targets("point-of-sale software for pharmacies and clinics",
+                                       industries=["pharmacies", "clinics"])
+    assert "pharmacy_health" in t.sectors
+    assert "medical" not in t.overture_categories and "health" not in t.overture_categories
+
+
 async def test_derive_targets_grocery_still_matches_taxonomy():
     t = await derive_discovery_targets("Find grocery stores in Islamabad",
                                        industries=["grocery stores"])

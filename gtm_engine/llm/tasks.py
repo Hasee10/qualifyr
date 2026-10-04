@@ -303,16 +303,16 @@ async def extract_review_pain(llm: LLM | None, company: str,
     return pains if pains else deterministic
 
 
-async def check_discovery_relevance(llm: LLM | None, target_description: str,
-                                     companies: list[dict]) -> list[bool]:
-    """Post-discovery LLM relevance check: for each company, is it actually a {target}?
+# Relevance is judged in chunks so a run with many map-sourced companies is fully checked, not
+# just the first chunk. Beyond MAX_JUDGED we stop spending tokens and keep the rest (they already
+# cleared the deterministic keyword filter upstream) — 6 calls is plenty for a quality-first run.
+_RELEVANCE_BATCH = 20
+_RELEVANCE_MAX_JUDGED = 120
 
-    Input companies are dicts with at least 'name' and optionally 'category', 'address'.
-    Returns a list of booleans parallel to input. Fallback: all True (no filtering without LLM).
-    Batches up to 20 companies per call."""
-    if llm is None or not target_description or not companies:
-        return [True] * len(companies)
-    batch = companies[:20]
+
+async def _relevance_batch(llm: LLM, target_description: str, batch: list[dict]) -> list[bool]:
+    """Judge one chunk of companies. On LLM/parse failure, keep the chunk (return all True) so a
+    transient error never silently drops real matches — dropping is reserved for a clear 'false'."""
     lines = []
     for i, c in enumerate(batch):
         parts = [c.get("name", "Unknown")]
@@ -339,12 +339,31 @@ async def check_discovery_relevance(llm: LLM | None, target_description: str,
         raw = await llm.complete(system, user, max_tokens=200)
     except Exception as exc:  # noqa: BLE001
         log.debug("llm discovery relevance check failed: %s", exc)
-        return [True] * len(companies)
+        return [True] * len(batch)
     parsed = _parse_keyword_list(raw)
+    results = [str(item).strip().lower() in ("true", "1", "yes") for item in parsed]
+    # A short/garbled reply must not drop the companies it didn't cover — pad the remainder True.
+    while len(results) < len(batch):
+        results.append(True)
+    return results[:len(batch)]
+
+
+async def check_discovery_relevance(llm: LLM | None, target_description: str,
+                                     companies: list[dict]) -> list[bool]:
+    """Post-discovery LLM relevance check: for each company, is it actually a {target}?
+
+    Input companies are dicts with at least 'name' and optionally 'category', 'address'.
+    Returns a list of booleans parallel to input. Fallback: all True (no filtering without LLM).
+    Judges in chunks of 20 so EVERY company is checked (up to MAX_JUDGED), not just the first
+    chunk — the previous single-batch version silently passed everything past the first 20."""
+    if llm is None or not target_description or not companies:
+        return [True] * len(companies)
     results: list[bool] = []
-    for item in parsed:
-        item_str = str(item).strip().lower()
-        results.append(item_str in ("true", "1", "yes"))
+    judged = companies[:_RELEVANCE_MAX_JUDGED]
+    for start in range(0, len(judged), _RELEVANCE_BATCH):
+        results.extend(await _relevance_batch(llm, target_description,
+                                              judged[start:start + _RELEVANCE_BATCH]))
+    # Anything beyond the judged cap keeps its upstream (keyword-filter) pass.
     while len(results) < len(companies):
         results.append(True)
     return results[:len(companies)]

@@ -31,7 +31,10 @@ sectors:
   pharmacy_health:
     match: [pharmacy, chemist, medicine, medical store, healthcare, clinic, wellness]
     osm: [shop=chemist, amenity=pharmacy, amenity=clinic, amenity=doctors]
-    overture: [pharmacy, drugstore, health, medical]
+    # Specific substrings only: the bare `health`/`medical` LIKE-matched research institutes
+    # (e.g. `medical_research_institute`) and generic health orgs, flooding doctor/pharmacy
+    # searches. These match pharmacies, clinics, doctors and dentists without the noise.
+    overture: [pharmacy, drugstore, clinic, doctor, dentist]
   beauty_cosmetics:
     match: [cosmetic, beauty, salon, skincare, makeup, perfume]
     osm: [shop=cosmetics, shop=beauty, shop=perfumery, shop=hairdresser]

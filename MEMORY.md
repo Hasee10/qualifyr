@@ -31,9 +31,21 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
     tolerance is derived from its own Nominatim bbox — tight for a dense Lahore block, wide for
     a large sector. Clamped by `AREA_MIN_HALF_KM=0.7` / `AREA_MAX_HALF_KM=10` / `AREA_MARGIN_KM=0.2`
     so a point-geocode isn't impossibly tight nor a vague match city-wide. `AREA_RADIUS_KM` is gone.
-  - NOTE: fixes GEOGRAPHY only. Relevance (pharmacies / NUST AI labs mis-filed as
-    `medical_research_institute` for "doctors") is still open — broad derived Overture categories
-    + LLM relevance leniency.
+  - NOTE: fixes GEOGRAPHY only. Type-relevance is hardened separately (below).
+- **Type-relevance hardening (2026-10-04c)** — the pharmacies / NUST-AI-labs-for-"doctors" leak:
+  - **LLM gate batching bug fixed** (`llm/tasks.check_discovery_relevance`): it judged only the
+    first 20 map-sourced companies and silently passed the rest (`True`-padded). Now judges ALL in
+    chunks of 20 up to `_RELEVANCE_MAX_JUDGED=120` (token-bucket paced); beyond the cap the
+    upstream keyword-filter pass is kept. This was the single biggest leak on any >20-company run.
+  - **Gate now runs for offer-only campaigns** (`pipeline._relevance_target_desc`): target type =
+    `target_industries` → else derived sector human-terms → else skip (so a campaign with an offer
+    but no explicit industries still gets the strict type check; `general_retail`/`_niche` are too
+    broad to discriminate on, so they skip).
+  - **Taxonomy over-casting fixed at source** (`discovery_taxonomy.yaml`): `pharmacy_health.overture`
+    was `[pharmacy, drugstore, health, medical]` — `medical` LIKE-matched `medical_research_institute`
+    (NUST) and `health` matched anything. Now `[pharmacy, drugstore, clinic, doctor, dentist]`.
+  - Tests: chunking judges past #20 + token cap; target-desc fallback; taxonomy specificity.
+  - ⚠️ Not yet live-verified on real Groq + real discovery — do a capped "doctors" run to confirm.
 - **CSV**: default UI export is the **clean client-ready sheet** (`write_clean_csv`,
   human headers, no plumbing); `?full=1` = raw `CSV_COLUMNS`. Enums serialize as values.
   Download filename derives from campaign name, not the long id slug.

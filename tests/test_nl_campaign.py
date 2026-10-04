@@ -679,3 +679,56 @@ async def test_check_discovery_relevance_with_llm():
     ]
     result = await check_discovery_relevance(FakeLLM(), "newspaper offices", companies)
     assert result == [True, False]
+
+
+async def test_check_discovery_relevance_judges_beyond_first_batch():
+    """Regression: the old single-batch version judged only the first 20 and silently passed
+    the rest. Every company past #20 must still be judged, not auto-kept."""
+    from gtm_engine.llm.tasks import check_discovery_relevance
+
+    class AllFalseLLM:
+        name = "fake"
+        def __init__(self):
+            self.calls = 0
+        async def complete(self, system, user, *, max_tokens=400):
+            self.calls += 1
+            return "[" + ", ".join(["false"] * 20) + "]"
+
+    llm = AllFalseLLM()
+    companies = [{"name": f"Pharmacy {i}", "category": "overture=pharmacy"} for i in range(25)]
+    result = await check_discovery_relevance(llm, "doctors", companies)
+    assert result == [False] * 25      # none leak through — all 25 judged, not just the first 20
+    assert llm.calls == 2              # 20 + 5, chunked
+
+
+async def test_check_discovery_relevance_caps_token_spend():
+    """Beyond MAX_JUDGED we stop calling the LLM; the remainder keeps its upstream pass (True)."""
+    from gtm_engine.llm.tasks import check_discovery_relevance, _RELEVANCE_MAX_JUDGED
+
+    class AllFalseLLM:
+        name = "fake"
+        def __init__(self):
+            self.calls = 0
+        async def complete(self, system, user, *, max_tokens=400):
+            self.calls += 1
+            return "[" + ", ".join(["false"] * 20) + "]"
+
+    llm = AllFalseLLM()
+    n = _RELEVANCE_MAX_JUDGED + 15
+    companies = [{"name": f"X {i}", "category": "overture=pharmacy"} for i in range(n)]
+    result = await check_discovery_relevance(llm, "doctors", companies)
+    assert result[:_RELEVANCE_MAX_JUDGED] == [False] * _RELEVANCE_MAX_JUDGED
+    assert result[_RELEVANCE_MAX_JUDGED:] == [True] * 15   # beyond the cap: upstream pass kept
+    assert llm.calls == _RELEVANCE_MAX_JUDGED // 20
+
+
+def test_relevance_target_desc_prefers_industries_then_sectors():
+    from gtm_engine.pipeline import _relevance_target_desc
+
+    # Explicit industries win.
+    assert _relevance_target_desc(["dental clinics"], ["pharmacy_health"]) == "dental clinics"
+    # No industries → fall back to the sector's human term, so offer-only runs still gate.
+    assert _relevance_target_desc([], ["pharmacy_health"]) == "pharmacy"
+    # Too-broad sectors give no useful target type.
+    assert _relevance_target_desc([], ["general_retail", "_niche"]) is None
+    assert _relevance_target_desc([], []) is None
