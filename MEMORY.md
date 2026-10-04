@@ -9,7 +9,27 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-03 (Phase 8: LLM-driven discovery, niche fallback, areas passthrough)
+Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, clean CSV, UI)
+
+**2026-10-04 quality overhaul (shareable output):**
+- `gtm_engine/enrichment/fieldclean.py` (NEW, 17 unit tests in `tests/test_fieldclean.py`):
+  `clean_email` (fixes `%20contact@`, `03009502334info@` — wired into `extract_emails`),
+  `clean_address` (first of concatenated, no newlines), `clean_description`
+  (never nav-menu scrape; meta prose → research brief), `prefer_latin_name`
+  (Urdu/Arabic → Latin page title), `humanize_industry`, `clean_reason`. Wired into
+  `pipeline.process_company` (company_name/address/description).
+- **Relevance**: LLM `check_discovery_relevance` now DROPS off-type map-sourced
+  companies (was reorder-only) — the dentists→pharmacies fix; stricter prompt in `llm/tasks.py`.
+- **Area proximity** (`pipeline._area_proximity_filter`): geocodes companies with no
+  lat/lon too (web/chambers), sets `settings.anchor_lat/lon` from area centroid so
+  proximity scoring is no longer "Tier 1 no anchor".
+- **CSV**: default UI export is the **clean client-ready sheet** (`write_clean_csv`,
+  human headers, no plumbing); `?full=1` = raw `CSV_COLUMNS`. Enums serialize as values.
+  Download filename derives from campaign name, not the long id slug.
+- **NL names**: `_name_from_draft` → short "<subject> - <area/city>"; `_extract_subject`
+  drops verb clauses/generic nouns. Hard-filter parser recognizes "lack/without online presence".
+- **UI**: settings drops Campaigns + Google Sheets tabs; sidebar status = connectivity only;
+  campaign card title/stats click → Leads with that campaign selected.
 
 ---
 
