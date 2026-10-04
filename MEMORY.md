@@ -37,7 +37,11 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
   `GTM_FREE_MAX_CAMPAIGNS` / `GTM_FREE_MAX_LEADS_PER_CAMPAIGN`. Enforced in `create_campaign`
   + `create_campaign_nl` (403 at cap) and clamped (`_cap_leads`) at create and in
   `run_campaign`. Limits echoed on `/health` → New-campaign form reads the cap (not hardcoded).
-  Tests: `tests/test_free_tier_limits.py` (3).
+  **Master accounts** (`UNLIMITED_EMAILS`, defaults to `ihaseebarshad10@gmail.com`,
+  override via `GTM_UNLIMITED_EMAILS`) are exempt from all quotas — matched on the token's
+  `email` claim (`current_user_email`). `GET /settings/limits` returns the caller's effective
+  caps (null = unlimited); the New-campaign form reads it instead of `/health`.
+  Tests: `tests/test_free_tier_limits.py` (5, incl. master exemption).
 - **Monetization vote** now mandatory on the sign-up form (required radio); saved after
   signup, stashed in `localStorage[PENDING_MONETIZATION_KEY]` and flushed on first
   authenticated load (campaign-context) for the e-mail-confirm flow. Removed from settings.

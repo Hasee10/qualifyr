@@ -344,6 +344,7 @@ export const api = {
     request<{ ok: boolean; resource: string; limit: number }>(`/settings/usage/${resource}`, { method: "PUT", body: JSON.stringify({ limit }) }),
 
   // Settings: preferences
+  myLimits: () => request<{ unlimited: boolean; max_campaigns: number | null; max_leads_per_campaign: number | null }>("/settings/limits"),
   getPreferences: () => request<{ preferences: Record<string, string> }>("/settings/preferences"),
   setPreference: (key: string, value: string) =>
     request<{ ok: boolean }>(`/settings/preferences/${key}`, { method: "PUT", body: JSON.stringify({ value }) }),

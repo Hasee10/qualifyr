@@ -42,7 +42,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       setHasGroq(names.has("groq"))
       setHasBrave(names.has("brave"))
     }).catch(() => { setHasGroq(false); setHasBrave(false) })
-    api.health().then((h) => setMaxLeads(h.limits?.max_leads_per_campaign ?? null)).catch(() => {})
+    api.myLimits().then((l) => setMaxLeads(l.max_leads_per_campaign)).catch(() => {})
   }, [open])
 
   const nlMode = hasGroq === true

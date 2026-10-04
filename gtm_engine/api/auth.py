@@ -121,3 +121,10 @@ def current_user_id(request: Request) -> str | None:
     single-operator and test behaviour exactly as before multi-tenancy."""
     user = getattr(request.state, "user", None)
     return user.get("sub") if isinstance(user, dict) else None
+
+
+def current_user_email(request: Request) -> str | None:
+    """The signed-in user's email (the token's `email` claim), or None. Used to grant specific
+    accounts (e.g. the project owner) an exemption from free-tier quotas."""
+    user = getattr(request.state, "user", None)
+    return user.get("email") if isinstance(user, dict) else None
