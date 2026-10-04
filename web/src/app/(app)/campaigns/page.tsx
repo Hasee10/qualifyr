@@ -574,9 +574,9 @@ export default function CampaignsPage() {
             <CardContent className="p-4 grid gap-3">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 overflow-hidden">
-                  <h3 className="font-medium truncate max-w-full">{c.name}</h3>
-                  {showOffer && <p className="text-sm text-muted-foreground line-clamp-2">{offer}</p>}
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <h3 className="font-medium truncate">{c.name}</h3>
+                  {showOffer && <p className="text-sm text-muted-foreground line-clamp-1">{offer}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {(() => {
