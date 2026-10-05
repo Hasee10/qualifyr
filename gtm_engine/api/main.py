@@ -249,7 +249,8 @@ def health() -> dict:
             "limits": {"max_campaigns": FREE_MAX_CAMPAIGNS,
                        "max_leads_per_campaign": FREE_MAX_LEADS_PER_CAMPAIGN},
             "auth": {"supabase_url_set": auth_ok, "jwks_reachable": jwks_ok,
-                     "jwks_error": jwks_error, "auth_disabled": auth_disabled()}}
+                     "jwks_error": jwks_error, "auth_disabled": auth_disabled()},
+            "encryption_available": encryption_available()}
 
 
 @app.get("/settings/limits")
@@ -1038,10 +1039,16 @@ def save_api_key(key_name: str, body: ApiKeyBody, user_id: str | None = Depends(
         raise HTTPException(422, f"unknown key: {key_name}; allowed: {', '.join(sorted(ALLOWED_KEYS))}")
     if not encryption_available():
         raise HTTPException(503, "GTM_ENCRYPTION_KEY not configured — cannot store API keys")
-    encrypted = encrypt_key(body.value.strip())
-    db = _db()
-    db.set_user_key(user_id, key_name, encrypted)
-    db.close()
+    try:
+        encrypted = encrypt_key(body.value.strip())
+    except Exception as exc:
+        raise HTTPException(500, f"encryption failed: {exc}")
+    try:
+        db = _db()
+        db.set_user_key(user_id, key_name, encrypted)
+        db.close()
+    except Exception as exc:
+        raise HTTPException(500, f"database write failed: {exc}")
     return {"ok": True, "key_name": key_name}
 
 
