@@ -374,6 +374,12 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
 class CampaignNLRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     max_companies: int | None = Field(default=None, ge=1, le=1000)
+    # Optional discovery hints from the NL form (shown when there is no Brave key). When given,
+    # they pin discovery to exactly what the user asked for — the pipeline treats user-set map
+    # categories as authoritative and never broadens past them (e.g. no pharmacies in a doctors
+    # search). Bounded like every other user-supplied list.
+    osm_categories: list[str] = Field(default=[], max_length=200)
+    search_queries: list[str] = Field(default=[], max_length=200)
 
 
 @app.post("/campaigns/nl", status_code=201)
@@ -408,6 +414,17 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
     # Free tier: never store a cap above the per-campaign lead limit.
     cfg.max_companies = _cap_leads(cfg.max_companies, user_id, email) or cfg.max_companies
     explanation["max_companies"] = cfg.max_companies
+
+    # Honour the user's explicit discovery hints: they pin the search scope so the pipeline
+    # keeps it tight (user map categories win over derived ones) instead of re-broadening.
+    osm = [c.strip() for c in body.osm_categories if c.strip()]
+    queries = [q.strip() for q in body.search_queries if q.strip()]
+    if osm:
+        cfg.osm_categories = osm
+        explanation["osm_categories"] = osm
+    if queries:
+        cfg.search_queries = queries
+        explanation["search_queries"] = queries
 
     db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
     db.close()

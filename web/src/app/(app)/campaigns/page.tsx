@@ -69,7 +69,12 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
     setBusy(true)
     try {
       const mc = maxCo.trim() ? parseInt(maxCo, 10) : undefined
-      const res = await api.createCampaignNL(text.trim(), mc ? { max_companies: mc } : undefined)
+      const split = (s: string) => s.split(",").map((t) => t.trim()).filter(Boolean)
+      const res = await api.createCampaignNL(text.trim(), {
+        ...(mc ? { max_companies: mc } : {}),
+        ...(categories.trim() ? { osm_categories: split(categories) } : {}),
+        ...(searchQueries.trim() ? { search_queries: split(searchQueries) } : {}),
+      })
       setResult({ campaignId: res.campaign_id, config: res.config, explanation: res.explanation })
       const returned = typeof res.explanation === "object" && res.explanation?.max_companies
       if (returned) setMaxCo(String(returned))

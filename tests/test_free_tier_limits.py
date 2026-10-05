@@ -91,3 +91,17 @@ def test_master_account_is_unlimited(master_client):
     # Lead cap is not clamped for a master account.
     cid = _create(master_client, "Big", max_companies=200).json()["campaign_id"]
     assert master_client.get(f"/campaigns/{cid}").json()["max_companies"] == 200
+
+
+def test_nl_honours_discovery_hints(client):
+    """OSM/search hints from the NL form pin discovery scope — the pipeline treats user map
+    categories as authoritative, so e.g. a doctors search never re-broadens to pharmacies."""
+    r = client.post("/campaigns/nl", json={
+        "text": "find doctors in G-11 Islamabad",
+        "osm_categories": ["amenity=doctors", "amenity=clinic"],
+        "search_queries": ["doctors G-11 Islamabad"],
+    })
+    assert r.status_code == 201, r.text
+    cfg = client.get(f"/campaigns/{r.json()['campaign_id']}").json()
+    assert cfg["osm_categories"] == ["amenity=doctors", "amenity=clinic"]
+    assert "doctors G-11 Islamabad" in cfg["search_queries"]

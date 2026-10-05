@@ -59,6 +59,14 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
     was `[pharmacy, drugstore, health, medical]` — `medical` LIKE-matched `medical_research_institute`
     (NUST) and `health` matched anything. Now `[pharmacy, drugstore, clinic, doctor, dentist]`.
   - Tests: chunking judges past #20 + token cap; target-desc fallback; taxonomy specificity.
+- **NL discovery hints now honoured (2026-10-05)** — the last relevance leak for the no-Brave
+  workflow: the NL form shows "OSM categories" + "Search queries" hint fields, but `submitNL`
+  only sent text+max_companies, so the backend re-derived broad categories (incl. pharmacy) and
+  the user's tight doctor-only tags were discarded. Now `/campaigns/nl` (`CampaignNLRequest`)
+  accepts `osm_categories` + `search_queries`; `create_campaign_nl` sets them on the cfg so the
+  pipeline treats them as authoritative (`user_configured_categories` → derivation never
+  broadens past them). Frontend `submitNL` + `api.createCampaignNL` send them. Test:
+  `test_nl_honours_discovery_hints`.
   - ⚠️ Not yet live-verified on real Groq + real discovery — do a capped "doctors" run to confirm.
 - **CSV**: default UI export is the **clean client-ready sheet** (`write_clean_csv`,
   human headers, no plumbing); `?full=1` = raw `CSV_COLUMNS`. Enums serialize as values.

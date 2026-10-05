@@ -236,7 +236,7 @@ export const api = {
   campaigns: () => request<Campaign[]>("/campaigns"),
   createCampaign: (body: CampaignCreate) =>
     request<{ campaign_id: string; name: string }>("/campaigns", { method: "POST", body: JSON.stringify(body) }),
-  createCampaignNL: (text: string, opts?: { max_companies?: number }) =>
+  createCampaignNL: (text: string, opts?: { max_companies?: number; osm_categories?: string[]; search_queries?: string[] }) =>
     request<{ campaign_id: string; config: Record<string, unknown>; explanation: Record<string, unknown>; status: string }>("/campaigns/nl", { method: "POST", body: JSON.stringify({ text, ...opts }) }),
   deleteCampaign: (id: string) =>
     request<void>(`/campaigns/${id}`, { method: "DELETE" }),
