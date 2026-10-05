@@ -82,11 +82,19 @@ Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, cle
   `GTM_FREE_MAX_CAMPAIGNS` / `GTM_FREE_MAX_LEADS_PER_CAMPAIGN`. Enforced in `create_campaign`
   + `create_campaign_nl` (403 at cap) and clamped (`_cap_leads`) at create and in
   `run_campaign`. Limits echoed on `/health` → New-campaign form reads the cap (not hardcoded).
-  **Master accounts** (`UNLIMITED_EMAILS`, defaults to `ihaseebarshad10@gmail.com`,
+  **Master accounts** (`UNLIMITED_EMAILS`, defaults to `ihaseebarshad10@gmail.com,hello@grydin.co`,
   override via `GTM_UNLIMITED_EMAILS`) are exempt from all quotas — matched on the token's
   `email` claim (`current_user_email`). `GET /settings/limits` returns the caller's effective
   caps (null = unlimited); the New-campaign form reads it instead of `/health`.
-  Tests: `tests/test_free_tier_limits.py` (5, incl. master exemption).
+  Tests: `tests/test_free_tier_limits.py` (incl. master exemption + soft delete).
+- **Soft delete (2026-10-05)**: deleting a campaign never hard-DELETEs — `campaigns.deleted_at`
+  is stamped so the row (and its leads) stay in the DB permanently, for every account.
+  `delete_campaign` → UPDATE deleted_at; `list_campaigns` filters `deleted_at IS NULL`;
+  `all_campaign_ids()` (incl. deleted) de-dupes new ids so a recreate gets a fresh id and never
+  resurrects a kept row. Soft-deleted campaigns free a free-tier slot (list excludes them).
+- **CI fix (2026-10-05)**: `test_multitenancy_adversarial` expected extreme input → 201 (old
+  "clamp" contract), but the security input bounds now reject with 422. Updated the test to
+  expect 422 (graceful, never 500) + an in-bounds 201 case. This was the sole CI blocker.
 - **Monetization vote** now mandatory on the sign-up form (required radio); saved after
   signup, stashed in `localStorage[PENDING_MONETIZATION_KEY]` and flushed on first
   authenticated load (campaign-context) for the e-mail-confirm flow. Removed from settings.

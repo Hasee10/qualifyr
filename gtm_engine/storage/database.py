@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
 -- Added by migration so databases created before multi-tenancy pick the column up too;
 -- NULL owner means a shared/legacy campaign, visible to everyone.
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id TEXT;
+-- Soft delete: deleting a campaign stamps deleted_at and hides it from the UI, but the row
+-- (and its leads) stay in the database permanently and for every account. Never a hard DELETE.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS deleted_at TEXT;
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
@@ -300,24 +303,34 @@ class Database:
         self._commit()
 
     def list_campaigns(self, owner_id: str | None = None) -> list[dict]:
-        """User-created campaigns, newest first. With owner_id, only that owner's campaigns
-        plus legacy shared (NULL-owner) ones; without it (local operator), all of them."""
-        sql = "SELECT campaign_id, name, config_json, created_at, owner_id FROM campaigns"
+        """Live (not soft-deleted) user-created campaigns, newest first. With owner_id, only that
+        owner's campaigns plus legacy shared (NULL-owner) ones; without it (local operator), all."""
+        sql = "SELECT campaign_id, name, config_json, created_at, owner_id FROM campaigns WHERE deleted_at IS NULL"
         params: list = []
         if owner_id is not None:
-            sql += " WHERE owner_id = %s OR owner_id IS NULL"
+            sql += " AND (owner_id = %s OR owner_id IS NULL)"
             params.append(owner_id)
         sql += " ORDER BY created_at DESC"
         rows = self._execute(sql, params).fetchall()
         return [{"campaign_id": r["campaign_id"], "name": r["name"], "created_at": r["created_at"],
                  "owner_id": r["owner_id"], "config": json.loads(r["config_json"])} for r in rows]
 
+    def all_campaign_ids(self) -> set[str]:
+        """Every campaign id ever created, INCLUDING soft-deleted ones. Used to de-dupe a new
+        campaign's id so a recreate never reuses (and thus overwrites/resurrects) a kept row."""
+        return {r["campaign_id"] for r in self._execute("SELECT campaign_id FROM campaigns").fetchall()}
+
     def campaign_owner(self, campaign_id: str) -> str | None:
         row = self._execute("SELECT owner_id FROM campaigns WHERE campaign_id = %s", (campaign_id,)).fetchone()
         return row["owner_id"] if row else None
 
     def delete_campaign(self, campaign_id: str) -> None:
-        self._execute("DELETE FROM campaigns WHERE campaign_id = %s", (campaign_id,))
+        """Soft delete: stamp deleted_at so it drops out of the UI, but keep the row and its
+        leads in the database permanently (for every account). Never a hard DELETE."""
+        self._execute(
+            "UPDATE campaigns SET deleted_at = %s WHERE campaign_id = %s AND deleted_at IS NULL",
+            (utcnow().isoformat(), campaign_id),
+        )
         self._commit()
 
     def hide_campaign(self, campaign_id: str) -> None:

@@ -220,7 +220,7 @@ FREE_MAX_LEADS_PER_CAMPAIGN = int(os.environ.get("GTM_FREE_MAX_LEADS_PER_CAMPAIG
 # (comma-separated).
 UNLIMITED_EMAILS = {
     e.strip().lower()
-    for e in os.environ.get("GTM_UNLIMITED_EMAILS", "ihaseebarshad10@gmail.com").split(",")
+    for e in os.environ.get("GTM_UNLIMITED_EMAILS", "ihaseebarshad10@gmail.com,hello@grydin.co").split(",")
     if e.strip()
 }
 
@@ -353,7 +353,7 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
                                  "Delete one to create another.")
     # De-dupe the id against all campaigns (every owner + files), so ids stay globally unique
     # even though visibility is per-owner.
-    existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
+    existing = db.all_campaign_ids() | set(_campaign_files().keys())
     cid = slugify_campaign_id(body.name, existing)
     try:
         cfg = CampaignConfig(
@@ -400,7 +400,7 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
         db.close()
         raise HTTPException(403, f"Free tier is limited to {FREE_MAX_CAMPAIGNS} campaigns. "
                                  "Delete one to create another.")
-    existing = {r["campaign_id"] for r in db.list_campaigns()} | set(_campaign_files().keys())
+    existing = db.all_campaign_ids() | set(_campaign_files().keys())
 
     llm = build_llm(_settings) if _settings.enable_llm else None
     try:
