@@ -131,8 +131,11 @@ _CHAIN_RE = re.compile(r"(?:no|ignore|exclude|skip|drop)\s+(?:big\s+)?chains?\b"
 _TIER_RE = re.compile(r"tier\s*([123])\s*only", re.I)
 _MIN_REVIEWS_RE = re.compile(r"(?:more\s+than|at\s+least|minimum|min)\s+(\d+)\s+reviews?", re.I)
 _NEAR_RE = re.compile(r"(?:near|close\s+to|around|in\s+the\s+area\s+of)\s+(.+?)(?:\.|,|$)", re.I)
+# Residential sector codes use letters A-J (Islamabad/Rawalpindi). The letter is deliberately
+# NOT [A-Z]: that matched motorways (M-1, M-2, M-9), national highways (N-5, N-25) and things
+# like "T-20" / "G-20" — all read as bogus areas that then geofenced a run down to nothing.
 _AREA_RE = re.compile(
-    r"\b([A-Z]-\d{1,2}(?:/\d)?|[EFGHI]-\d{1,2}|DHA(?:\s+Phase\s*\d+)?|Gulberg|Saddar|Blue\s*Area|Bahria\s*Town"
+    r"\b([A-J]-\d{1,2}(?:/\d)?|[EFGHI]-\d{1,2}|DHA(?:\s+Phase\s*\d+)?|Gulberg|Saddar|Blue\s*Area|Bahria\s*Town"
     r"|Model\s*Town|Garden\s*Town|Johar\s*Town|Cantt|Clifton|Defence|PECHS|Gulshan"
     r"|Askari\s*\d+|Wapda\s*Town|Valencia|Lake\s*City|EME\s*Society|Cavalry\s*Ground"
     r"|Satellite\s*Town|PWD|CDA\s*Sector\s*\w+)\b", re.I)
@@ -152,7 +155,9 @@ def _extract_cities(text: str) -> list[str]:
     found: list[str] = []
     text_lower = text.lower()
     for city in _CITIES:
-        if city.lower() in text_lower:
+        # Whole-word match, not bare substring: "Hub" (a real city) must not fire on "hubs" /
+        # "innovation hub"-type phrasing, and short names must not match inside longer words.
+        if re.search(rf"\b{re.escape(city.lower())}\b", text_lower):
             if city not in found:
                 found.append(city)
     return found

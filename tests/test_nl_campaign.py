@@ -645,6 +645,46 @@ def test_geofence_adapts_to_area_size():
     assert wide_h > tight_h and wide_w > tight_w
 
 
+def test_area_regex_excludes_motorways_and_highways():
+    """Letter-digit tokens that are NOT residential sectors must not be read as areas, or they
+    geofence a run down to nothing: motorways (M-2), highways (N-5), cricket/summit (T-20/G-20)."""
+    assert parse_intent("auto workshops near M-2 motorway Lahore").areas == []
+    assert parse_intent("sports shops for T-20 cricket in Karachi").areas == []
+    assert parse_intent("logistics firms on N-5 highway").areas == []
+    # Real sectors still parse.
+    assert "G-13" in parse_intent("dentists near G-13 Islamabad").areas
+    assert "F-11" in parse_intent("clinics near F-11 Islamabad").areas
+
+
+def test_city_matched_whole_word_not_substring():
+    """A city name must match as a whole word: 'Hub' (a real city) must not fire on 'hubs'."""
+    assert "Hub" not in parse_intent("tech startups in innovation hubs in Lahore").cities
+    assert "Hub" in parse_intent("find shops in Hub Balochistan").cities
+
+
+@pytest.mark.asyncio
+async def test_area_filter_fails_open_when_it_would_drop_everything():
+    """Systemic guard: if the area filter would drop EVERY company (a mis-parsed/mis-geocoded
+    area), keep them unfiltered rather than return a silent empty run."""
+    from gtm_engine.pipeline import _area_proximity_filter
+    from gtm_engine.models import DiscoveredCompany
+    from unittest.mock import AsyncMock, patch
+    from gtm_engine.discovery.geocode import BBox
+
+    g13 = BBox(south=33.625, west=73.015, north=33.640, east=73.030)
+    companies = [  # both far from G-13 (Karachi, Lahore) — would all be dropped without the guard
+        DiscoveredCompany(name="Far A", source="osm", extra={"lat": 24.86, "lon": 67.0}),
+        DiscoveredCompany(name="Far B", source="overture", extra={"lat": 31.52, "lon": 74.35}),
+    ]
+    with patch("gtm_engine.discovery.geocode.Geocoder") as MockGeocoder:
+        MockGeocoder.return_value.bbox = AsyncMock(return_value=g13)
+        settings = AsyncMock()
+        settings.anchor_lat = None
+        settings.db_path.parent = AsyncMock()
+        kept, dropped = await _area_proximity_filter(companies, ["G-13"], ["Islamabad"], AsyncMock(), settings)
+    assert len(kept) == 2 and dropped == 0
+
+
 def test_city_token_not_extracted_as_area():
     """A word inside a recognised city name is not a separate area: 'Wah Cantt' is a city, so
     'Cantt' must not become an area (that bogus geofence dropped every result -> empty run)."""

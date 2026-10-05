@@ -348,6 +348,16 @@ async def _area_proximity_filter(
 
         kept.append(c)
 
+    # Fail-safe: dropping EVERY discovered company is almost always a mis-parsed or mis-geocoded
+    # area (e.g. "Wah Cantt" read as area "Cantt", or a motorway "M-2" read as a sector), not a
+    # genuine "nothing here". Returning an empty run hides that completely. Keep the results
+    # unfiltered and log loudly instead, so a geo glitch never silently zeroes a run.
+    if companies and not kept:
+        log.warning("area filter would drop ALL %d companies for areas=%s sectors=%s — treating "
+                    "as a parse/geocode miss and keeping them unfiltered rather than returning an "
+                    "empty run", len(companies), ", ".join(areas), ",".join(sorted(requested_sectors)) or "none")
+        return companies, 0
+
     if dropped:
         log.info("area proximity filter: kept %d, dropped %d (areas=%s, sectors=%s)",
                  len(kept), dropped, ", ".join(areas), ",".join(sorted(requested_sectors)) or "none")
