@@ -232,12 +232,24 @@ def _is_unlimited(email: str | None) -> bool:
 @app.get("/health")
 def health() -> dict:
     o = load_outreach_settings()
+    auth_ok = bool(os.environ.get("GTM_SUPABASE_URL", "").strip())
+    jwks_ok = False
+    jwks_error = None
+    if auth_ok:
+        try:
+            from gtm_engine.api.auth import jwk_client
+            jwk_client()
+            jwks_ok = True
+        except Exception as exc:
+            jwks_error = str(exc)
     return {"status": "ok", "version": __version__, "smtp_configured": o.credentials_present,
             "auth_mode": o.auth_mode, "require_approval": o.require_approval,
             "warmup": {"enabled": o.warmup_enabled, "start": o.warmup_start_per_day,
                        "step": o.warmup_step_per_day, "max": o.daily_limit},
             "limits": {"max_campaigns": FREE_MAX_CAMPAIGNS,
-                       "max_leads_per_campaign": FREE_MAX_LEADS_PER_CAMPAIGN}}
+                       "max_leads_per_campaign": FREE_MAX_LEADS_PER_CAMPAIGN},
+            "auth": {"supabase_url_set": auth_ok, "jwks_reachable": jwks_ok,
+                     "jwks_error": jwks_error, "auth_disabled": auth_disabled()}}
 
 
 @app.get("/settings/limits")
