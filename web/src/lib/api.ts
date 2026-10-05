@@ -218,13 +218,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   })
   if (!res.ok) {
-    // A 401 means the session lapsed while the tab was open. Send them to sign in rather
-    // than surfacing "missing bearer token" inside a table cell, and return them after.
-    // Only redirect when we actually had a token (expired session). Without a token the
-    // server 401s because auth is mandatory, but redirecting creates an infinite loop when
-    // the frontend's Supabase config is missing or the user simply isn't signed in yet.
-    if (res.status === 401 && typeof window !== "undefined" && token) {
-      window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname)}`)
+    if (res.status === 401 && typeof window !== "undefined") {
+      // Sign out the stale local session so the middleware stops thinking we're
+      // authenticated (which would bounce /sign-in back to /dashboard → loop).
+      try { const sb = (await import("@/lib/supabase/client")).createClient(); await sb.auth.signOut() } catch { /* best effort */ }
+      // Redirect once per page-load to avoid an infinite loop when the server
+      // keeps rejecting (e.g. JWKS mismatch, clock skew, misconfigured URL).
+      const key = "__qualifyr_401_redirect"
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1")
+        window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname)}`)
+      }
     }
     let detail = res.statusText
     try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
