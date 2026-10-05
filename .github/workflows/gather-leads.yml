@@ -102,7 +102,7 @@ jobs:
           retention-days: 90
 
       - name: Commit results into leads/
-        if: env.COMMIT_RESULTS == 'true'
+        if: env.COMMIT_RESULTS == 'true' && github.repository == 'Hasee10/qualifyr'
         run: |
           campaign_id=$(python -m gtm_engine.cli campaign-id "$CAMPAIGN")
           mkdir -p "leads/$campaign_id"
