@@ -220,7 +220,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     // A 401 means the session lapsed while the tab was open. Send them to sign in rather
     // than surfacing "missing bearer token" inside a table cell, and return them after.
-    if (res.status === 401 && typeof window !== "undefined") {
+    // Only redirect when we actually had a token (expired session). Without a token the
+    // server 401s because auth is mandatory, but redirecting creates an infinite loop when
+    // the frontend's Supabase config is missing or the user simply isn't signed in yet.
+    if (res.status === 401 && typeof window !== "undefined" && token) {
       window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname)}`)
     }
     let detail = res.statusText
