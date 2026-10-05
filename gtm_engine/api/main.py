@@ -242,6 +242,16 @@ def health() -> dict:
             jwks_ok = True
         except Exception as exc:
             jwks_error = str(exc)
+    db_ok = False
+    db_error = None
+    dsn = os.environ.get("GTM_DATABASE_URL", "")
+    if dsn:
+        try:
+            db = _db()
+            db.close()
+            db_ok = True
+        except Exception as exc:
+            db_error = str(exc)
     return {"status": "ok", "version": __version__, "smtp_configured": o.credentials_present,
             "auth_mode": o.auth_mode, "require_approval": o.require_approval,
             "warmup": {"enabled": o.warmup_enabled, "start": o.warmup_start_per_day,
@@ -250,7 +260,9 @@ def health() -> dict:
                        "max_leads_per_campaign": FREE_MAX_LEADS_PER_CAMPAIGN},
             "auth": {"supabase_url_set": auth_ok, "jwks_reachable": jwks_ok,
                      "jwks_error": jwks_error, "auth_disabled": auth_disabled()},
-            "encryption_available": encryption_available()}
+            "encryption_available": encryption_available(),
+            "database": {"connected": db_ok, "error": db_error,
+                         "dsn_set": bool(dsn.strip())}}
 
 
 @app.get("/settings/limits")
