@@ -489,6 +489,7 @@ def run_campaign(campaign_id: str, req: RunRequest,
         {
             "campaign": campaign_input,
             "max_companies": str(max_companies),
+            "user_id": user_id or "",
         },
     )
     db = _db()
