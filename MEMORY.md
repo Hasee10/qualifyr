@@ -9,7 +9,43 @@ starting engine work.
 - **`docs/DIRECTION.md`** — CEO direction; **`docs/ROADMAP.txt`** — historical phases A–G.
 - This file — the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-04 (Quality pass: field hygiene, niche-drop relevance, clean CSV, UI)
+Last updated: 2026-10-05 (Open-source repo + Vercel env var fixes)
+
+**2026-10-05 open-source collaboration repo (grydinteam/qualifyr):**
+- **Two remotes:** `origin` = `Hasee10/qualifyr` (private), `grydinteam` = `grydinteam/qualifyr` (public).
+  Push to both: `git push origin main && git push grydinteam main`.
+- **Apache 2.0 license** + `CONTRIBUTING.md` added. `leads/` directory removed + gitignored (had 69
+  CSVs with real business data).
+- **Per-user API key resolution in GitHub Actions:** `scripts/resolve_user_keys.py` reads encrypted
+  keys from Supabase, decrypts with Fernet, exports to `$GITHUB_ENV`. `gather-leads.yml` runs it
+  when `user_id` input is non-empty. Repo-level secrets are fallback (present on Hasee10, absent on
+  grydinteam — users bring their own).
+- **Commit results restricted to Hasee10 only:** `gather-leads.yml` commit step has
+  `github.repository == 'Hasee10/qualifyr'` guard. grydinteam runs produce artifacts only.
+- **Free-tier tightened for shared compute:** daily run limit = 3 (was 25). Existing limits:
+  3 campaigns, 10 leads each. `usage_counts` table is non-bypassable (deleting campaigns doesn't
+  reset the counter).
+- **GitHub Pages** enabled on grydinteam: Source = GitHub Actions, `pages.yml` deploys `site/`.
+
+**Vercel env vars (qualifyr-green.vercel.app = grydinteam deployment):**
+Both Hasee10 and grydinteam deployments share the SAME Supabase project for now.
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `GTM_DATABASE_URL` | secret | Postgres connection string (session pooler :5432 or transaction :6543) |
+| `GTM_ENCRYPTION_KEY` | secret | Fernet key for encrypting user API keys at rest |
+| `GTM_SUPABASE_URL` | secret | Supabase project URL (e.g. `https://xxx.supabase.co`) — auth JWT verification |
+| `GTM_GITHUB_TOKEN` | secret | PAT for dispatching GitHub Actions workflows |
+| `GTM_GITHUB_REPO` | secret | `owner/repo` for workflow dispatch target |
+| `NEXT_PUBLIC_SUPABASE_URL` | public | Same as GTM_SUPABASE_URL — used by frontend Supabase client (build-time) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | Supabase anon/publishable key (build-time) |
+
+**CRITICAL:** `NEXT_PUBLIC_*` vars are inlined at **build time**. Adding them after a build does
+nothing — you must redeploy. `GTM_*` vars are runtime (serverless function env).
+
+**401 redirect loop fix (2026-10-05):** `api.ts` `request()` only redirects to `/sign-in` on 401
+when a token was actually sent (expired session). Without this guard, a missing Supabase config on
+the frontend → no token sent → server 401 → redirect → loop.
 
 **2026-10-04 leads UX + landing polish:**
 - **Leads list is newest-first**: `list_leads(order=...)` — `"recent"` (updated_at DESC, the
@@ -417,8 +453,14 @@ is near-empty. 3.5% have a website *tag* (a floor, not the true rate — a missi
 - CEO sign-off on **multi-country scope** (P3) and on **E3 competitor analysis**.
 - Confirm **`GTM_GROQ_API_KEY` is a GitHub Actions secret** — without it the gather-leads job
   degrades to the keyword path (never breaks, but no intent/offer-derived discovery live).
-- `GTM_ENCRYPTION_KEY` — added to GitHub Secrets + Vercel env vars (2026-10-03). Needs
-  verification: refresh Settings page, confirm red warning is gone, try saving a test key.
+- **grydinteam Vercel (qualifyr-green):** check `NEXT_PUBLIC_SUPABASE_URL` is set. If missing,
+  add it (`https://tiqcqqwblmmxyttxqljm.supabase.co`) and redeploy — it's build-time, so setting
+  it alone won't fix an existing build. Without it, `supabaseConfigured` is false → no auth token
+  sent → API 401s on every request (the redirect loop fix prevents infinite reloads but the app
+  still can't authenticate).
+- **Encryption key alignment:** if grydinteam uses a DIFFERENT encryption key than Hasee10, keys
+  encrypted by one can't be decrypted by the other (same DB). Either use the same key on both, or
+  migrate to separate Supabase projects.
 - Missing keys: `GTM_SHEETS_CREDENTIALS_JSON`, `GTM_MAILBOX_2_*`, `GTM_GMAIL_REFRESH_TOKEN`
   (needs `gtm outreach gmail-auth`).
 - `docs/API_KEYS.md` quota text is stale (Hunter/Brave); no Brave monthly spend counter in code.
