@@ -3,7 +3,8 @@
 import { createClient } from "@/lib/supabase/client"
 import { supabaseConfigured } from "@/lib/supabase/config"
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+export const API_URL = process.env.NEXT_PUBLIC_API_URL
+  ?? (typeof window !== "undefined" && window.location.hostname !== "localhost" ? "/api" : "http://localhost:8000")
 
 // The monetization choice made at sign-up is stashed here until there is an authenticated
 // session to save it against (accounts that need e-mail confirmation have no token yet).
