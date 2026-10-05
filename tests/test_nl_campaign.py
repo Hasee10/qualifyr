@@ -645,6 +645,17 @@ def test_geofence_adapts_to_area_size():
     assert wide_h > tight_h and wide_w > tight_w
 
 
+def test_city_token_not_extracted_as_area():
+    """A word inside a recognised city name is not a separate area: 'Wah Cantt' is a city, so
+    'Cantt' must not become an area (that bogus geofence dropped every result -> empty run)."""
+    draft = parse_intent("find veterinary clinics in Wah Cantt")
+    assert draft.cities == ["Wah Cantt"]
+    assert "Cantt" not in draft.areas and draft.areas == []
+    # A genuine cantt area (not part of the city name) is still kept.
+    draft2 = parse_intent("find clinics in Lahore Cantt")
+    assert "Cantt" in draft2.areas
+
+
 def test_areas_wired_into_geography():
     draft = parse_intent("find newspaper offices near G-7 Islamabad")
     cfg = build_campaign_config(draft)

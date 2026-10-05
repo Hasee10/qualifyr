@@ -283,6 +283,11 @@ def parse_intent(text: str) -> CampaignDraft:
     draft.cities = _extract_cities(text)
     draft.provinces = _extract_provinces(text)
     draft.areas = _extract_areas(text)
+    # Don't treat a word that is part of a recognised city name as a separate area: "Wah Cantt"
+    # is a city, so its "Cantt" token is not an area — otherwise the area geofence drops every
+    # result (a bogus "Cantt" location) and the run returns nothing.
+    _city_words = {w.lower() for c in draft.cities for w in re.split(r"[\s\-]+", c)}
+    draft.areas = [a for a in draft.areas if a.lower() not in _city_words]
     draft.offer = _extract_offer(text)
     draft.target_industries = _extract_subject(text)
 
