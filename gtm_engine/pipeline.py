@@ -13,9 +13,15 @@ from typing import Awaitable, Callable
 
 from gtm_engine.config.schema import CampaignConfig, DefaultRules, EngineSettings
 from gtm_engine.discovery.chambers import KCCIDirectory
+from gtm_engine.discovery.companies_house import CompaniesHouseDiscovery
 from gtm_engine.discovery.csv_seed import CSVSeedDiscovery
+from gtm_engine.discovery.edgar import EDGARDiscovery
+from gtm_engine.discovery.gleif import GLEIFDiscovery
+from gtm_engine.discovery.gleif_golden_copy import GLEIFGoldenCopyDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
+from gtm_engine.discovery.foursquare import FoursquareDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
+from gtm_engine.discovery.wikidata import WikidataDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
 from gtm_engine.discovery.targeting import derive_discovery_targets, load_taxonomy
 from gtm_engine.discovery.web_search import WebSearchDiscovery
@@ -47,7 +53,7 @@ from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lea
 from gtm_engine.scraping.fetcher import Fetcher, HttpFetcher
 from gtm_engine.scraping.site_crawler import SiteCrawler, SiteSnapshot
 from gtm_engine.storage.database import Database
-from gtm_engine.validation.dedupe import dedupe_companies
+from gtm_engine.validation.entity_resolution import resolve_entities
 from gtm_engine.validation.domains import canonical_domain, company_key
 from gtm_engine.validation.emails import MXChecker, classify_email, is_generic_mailbox
 from gtm_engine.validation.liveness import HostResolver
@@ -84,6 +90,12 @@ class RunStats:
     hard_filtered: int = 0
     places_api_calls: int = 0
     errors: int = 0
+    # Guaranteed-floor expansion (min_outreach_ready): the target itself, whether it was met,
+    # and how many extra rounds beyond the first it took. min_target stays 0 when expansion
+    # is disabled for the run (today's single-pass behavior).
+    min_target: int = 0
+    target_met: bool = True
+    expansion_rounds: int = 0
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -522,6 +534,8 @@ class Pipeline:
         sources = []
         if campaign.overture_categories and campaign.geography.search_areas():
             sources.append(OvertureDiscovery(self.fetcher, self.settings))
+        if campaign.foursquare_categories and campaign.geography.search_areas():
+            sources.append(FoursquareDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.search_areas():
             sources.append(OSMDiscovery(self.fetcher, self.settings))
         if self.settings.enable_web_search_discovery and campaign.search_queries:
@@ -531,6 +545,17 @@ class Pipeline:
             sources.append(KCCIDirectory(self.fetcher, self.settings))
         if "ppra" in campaign.intent_sources:
             sources.append(self.ppra)
+        if self.settings.enable_gleif_discovery and campaign.gleif_lei_queries:
+            sources.append(GLEIFDiscovery(self.fetcher, self.settings))
+        if self.settings.enable_gleif_golden_copy and campaign.geography.country_codes:
+            sources.append(GLEIFGoldenCopyDiscovery(self.settings))
+        if self.settings.enable_wikidata_discovery and campaign.wikidata_industries:
+            sources.append(WikidataDiscovery(self.fetcher, self.settings))
+        if self.settings.enable_edgar_discovery and campaign.edgar_sic_codes:
+            sources.append(EDGARDiscovery(self.fetcher, self.settings))
+        if self.settings.enable_companies_house and campaign.companies_house_sic_codes:
+            ch_key = self._resolved_keys.get("companies_house") or self.settings.companies_house_api_key
+            sources.append(CompaniesHouseDiscovery(self.fetcher, self.settings, ch_key))
         if campaign.seed_csv:
             sources.append(CSVSeedDiscovery(campaign.seed_csv))
         if not sources:
@@ -579,7 +604,8 @@ class Pipeline:
             snapshot = SiteSnapshot(website="", final_url=None, reachable=False, https=False, error="no_website")
         else:
             crawler = SiteCrawler(self.fetcher, campaign.max_pages_per_site,
-                                  deadline_s=self.settings.per_company_timeout_s)
+                                  deadline_s=self.settings.per_company_timeout_s,
+                                  delay_s=self.settings.site_crawl_delay_s)
             snapshot = await crawler.crawl(website)
             if snapshot.redirected_to and snapshot.redirected_to != domain:
                 # The site moved: the lead belongs to the domain that actually answers.
@@ -892,7 +918,8 @@ class Pipeline:
         return lead
 
     async def _take_live(self, companies: list[DiscoveredCompany], limit: int | None,
-                         progress: ProgressFn | None) -> tuple[list[DiscoveredCompany], int]:
+                         progress: ProgressFn | None
+                         ) -> tuple[list[DiscoveredCompany], int, list[DiscoveredCompany]]:
         """Fill the run's company budget with domains that still resolve.
 
         The budget is spent before anything is fetched, so a dead domain costs a whole
@@ -906,9 +933,14 @@ class Pipeline:
 
         Companies with no website are kept as a tail - there is nothing to resolve yet,
         and WebsiteFinder may still turn one up during processing.
+
+        Also returns the leftover (unconsumed, unscreened) companies in their original
+        relative order, so a caller doing guaranteed-floor expansion (min_outreach_ready)
+        can hand them to a second call instead of re-screening candidates already resolved
+        or skipped in this one.
         """
         if not limit or limit <= 0:
-            return companies, 0
+            return companies, 0, []
 
         with_site = [c for c in companies if c.website]
         without_site = [c for c in companies if not c.website]
@@ -918,7 +950,7 @@ class Pipeline:
         # it just shrinks the run - and a resolver wrong about one host would cost a
         # company for nothing. Also keeps small and offline runs off the network.
         if len(with_site) <= limit:
-            return companies[:limit], 0
+            return companies[:limit], 0, companies[limit:]
         live: list[DiscoveredCompany] = []
         dead = 0
         cursor = 0
@@ -926,21 +958,27 @@ class Pipeline:
         while len(live) < limit and cursor < len(with_site):
             batch = with_site[cursor:cursor + max(limit, 50)]
             cursor += len(batch)
+            # The whole batch is resolved concurrently regardless of how many turn out to be
+            # needed, so there is no DNS cost saved by stopping early once `live` fills up -
+            # only correctness lost: an alive company found past the limit must still end up
+            # in `leftover` for a possible next round, not silently discarded.
             for company, alive in zip(batch, await asyncio.gather(
                     *(self.resolver.resolves(c.website) for c in batch))):
                 if alive:
                     live.append(company)
-                    if len(live) >= limit:
-                        break
                 else:
                     dead += 1
-            await _emit(progress, "liveness", len(live), limit,
+            await _emit(progress, "liveness", min(len(live), limit), limit,
                         f"{len(live)} live, {dead} dead domains skipped")
 
-        live.extend(without_site[: max(0, limit - len(live))])
+        overflow = live[limit:]
+        live = live[:limit]
+        without_site_taken = max(0, limit - len(live))
+        live.extend(without_site[:without_site_taken])
+        leftover = overflow + with_site[cursor:] + without_site[without_site_taken:]
         if dead:
             log.info("liveness: skipped %d dead domains to fill %d slots", dead, len(live))
-        return live, dead
+        return live, dead, leftover
 
     # -- full run --------------------------------------------------------------------
 
@@ -969,7 +1007,8 @@ class Pipeline:
         # Offer-driven discovery (E1 categories + E2 web-search queries). Derive from the offer
         # to fill map categories the user did not hand-pick and to produce web-search queries.
         # Explicit user map categories always win - deriving only fills the gap, never overrides.
-        user_configured_categories = bool(campaign.osm_categories or campaign.overture_categories)
+        user_configured_categories = bool(campaign.osm_categories or campaign.overture_categories
+                                          or campaign.foursquare_categories)
         needs_categories = not user_configured_categories
         if campaign.offer and (needs_categories or not campaign.search_queries):
             targets = await derive_discovery_targets(
@@ -999,7 +1038,9 @@ class Pipeline:
                 discovered, stats.area_proximity_dropped = await _area_proximity_filter(
                     discovered, campaign.geography.areas, campaign.geography.cities,
                     self.fetcher, self.settings)
-            campaign_cats = set(campaign.osm_categories) | {f"overture={c}" for c in campaign.overture_categories}
+            campaign_cats = (set(campaign.osm_categories)
+                            | {f"overture={c}" for c in campaign.overture_categories}
+                            | {f"foursquare={c}" for c in campaign.foursquare_categories})
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
                 discovered, self._relevance_keywords, campaign_cats,
                 user_configured_categories=user_configured_categories)
@@ -1018,16 +1059,27 @@ class Pipeline:
                         discovered = [c for c in discovered if id(c) not in rejected]
                         log.info("llm relevance check: dropped %d/%d off-type map-sourced companies",
                                  len(rejected), len(map_sourced))
-            companies = dedupe_companies(discovered)
+            all_companies = resolve_entities(discovered)
             # Companies that already carry a website are cheaper and better documented; process them first.
-            companies.sort(key=lambda c: 0 if c.website else 1)
-            companies, stats.dead_websites = await self._take_live(
-                companies, campaign.max_companies, progress)
-            stats.after_dedupe = len(companies)
-            dedupe_msg = f"{len(companies)} unique companies"
+            all_companies.sort(key=lambda c: 0 if c.website else 1)
+            batch, dead, pool = await self._take_live(all_companies, campaign.max_companies, progress)
+            stats.dead_websites = dead
+            stats.after_dedupe = len(all_companies)
+            dedupe_msg = f"{len(all_companies)} unique companies, {len(batch)} taken for this run"
             if stats.discovery_relevance_dropped:
                 dedupe_msg += f" ({stats.discovery_relevance_dropped} irrelevant dropped)"
-            await _emit(progress, "dedupe", len(companies), len(companies), dedupe_msg)
+            await _emit(progress, "dedupe", len(batch), len(batch), dedupe_msg)
+
+            # Guaranteed-floor expansion: a run should not just stop at max_companies if that
+            # batch under-delivers qualified+outreach-ready leads. min_outreach_ready unset
+            # defaults to a third of max_companies (the "30 in -> 10 out" promise); 0 means the
+            # caller explicitly wants today's single-pass behavior.
+            if campaign.min_outreach_ready is None:
+                stats.min_target = math.ceil(campaign.max_companies / 3)
+            else:
+                stats.min_target = campaign.min_outreach_ready
+            expansion_ceiling = max(campaign.max_companies,
+                                    int(campaign.max_companies * campaign.max_expansion_multiplier))
 
             classifier = BuyerClassifier(campaign, self.defaults)
             leads: list[Lead] = []
@@ -1037,7 +1089,7 @@ class Pipeline:
             # company that genuinely owns it.
             seen_keys: set[str] = set()
 
-            async def worker(c: DiscoveredCompany) -> None:
+            async def worker(c: DiscoveredCompany, round_total: int) -> None:
                 async with sem:
                     try:
                         lead = await self.process_company(c, campaign, classifier, run_id, stats, seen_keys)
@@ -1049,9 +1101,25 @@ class Pipeline:
                         stats.errors += 1
                         log.exception("failed processing %s", c.name)
                     stats.processed += 1
-                    await _emit(progress, "process", stats.processed, len(companies), c.name)
+                    await _emit(progress, "process", stats.processed, round_total, c.name)
 
-            await asyncio.gather(*(worker(c) for c in companies))
+            round_num = 0
+            while True:
+                round_num += 1
+                round_total = stats.processed + len(batch)
+                await asyncio.gather(*(worker(c, round_total) for c in batch))
+                if (stats.min_target <= 0 or stats.outreach_ready >= stats.min_target
+                        or stats.processed >= expansion_ceiling or not pool):
+                    break
+                next_limit = min(campaign.max_companies, expansion_ceiling - stats.processed)
+                if next_limit <= 0:
+                    break
+                batch, next_dead, pool = await self._take_live(pool, next_limit, progress)
+                stats.dead_websites += next_dead
+                if not batch:
+                    break
+            stats.expansion_rounds = round_num - 1
+            stats.target_met = stats.min_target <= 0 or stats.outreach_ready >= stats.min_target
             leads.sort(key=lambda l: l.total_score, reverse=True)
             if campaign.hard_filters:
                 before = len(leads)

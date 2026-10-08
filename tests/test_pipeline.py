@@ -166,3 +166,102 @@ async def test_exclude_chains_drops_branded_outlets(campaign, settings, defaults
         result = await pipeline.run(campaign)
     assert result.stats.chains_excluded == 1 and [l.company_name for l in result.leads] == ["Zara Fabrics"]
     db.close()
+
+
+class FakeAliveResolver:
+    """Always resolves live, so the guaranteed-floor tests exercise the expansion loop's
+    own logic without depending on real DNS."""
+
+    async def resolves(self, url):
+        return True
+
+
+@respx.mock
+async def test_expansion_disabled_when_min_outreach_ready_is_zero(campaign, settings, defaults):
+    """0 is the explicit opt-out: behaves exactly like today's single-pass run."""
+    _mock_world(settings)
+    campaign.geography.cities = ["Islamabad"]
+    campaign.max_companies = 1
+    campaign.min_outreach_ready = 0
+    db = Database(settings.database_url)
+    from gtm_engine.models import DiscoveredCompany
+
+    async def fake_discover(_c, _p=None):
+        return [
+            DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk/",
+                              city="Islamabad", country="Pakistan", source="osm"),
+            DiscoveredCompany(name="Pixel Digital", website="https://pixeldigital.pk",
+                              city="Islamabad", country="Pakistan", source="osm"),
+        ]
+
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX(), resolver=FakeAliveResolver())
+        pipeline.discover = fake_discover
+        result = await pipeline.run(campaign)
+    assert result.stats.processed == 1
+    assert result.stats.expansion_rounds == 0
+    assert result.stats.target_met is True
+    db.close()
+
+
+@respx.mock
+async def test_expansion_stops_once_floor_is_met(campaign, settings, defaults):
+    """Zara alone is outreach-ready; a floor of 1 is met in round one without touching
+    the rest of the pool."""
+    _mock_world(settings)
+    campaign.geography.cities = ["Islamabad"]
+    campaign.max_companies = 1
+    campaign.min_outreach_ready = 1
+    db = Database(settings.database_url)
+    from gtm_engine.models import DiscoveredCompany
+
+    async def fake_discover(_c, _p=None):
+        return [
+            DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk/",
+                              city="Islamabad", country="Pakistan", source="osm"),
+            DiscoveredCompany(name="Pixel Digital", website="https://pixeldigital.pk",
+                              city="Islamabad", country="Pakistan", source="osm"),
+        ]
+
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX(), resolver=FakeAliveResolver())
+        pipeline.discover = fake_discover
+        result = await pipeline.run(campaign)
+    assert result.stats.outreach_ready == 1
+    assert result.stats.expansion_rounds == 0
+    assert result.stats.target_met is True
+    assert result.stats.processed == 1  # Pixel Digital never touched - floor already met
+    db.close()
+
+
+@respx.mock
+async def test_expansion_pulls_more_when_floor_is_not_met(campaign, settings, defaults):
+    """Zara is the only outreach-ready company in this world; a floor of 2 can never be
+    met, so expansion should consume the rest of the pool and report the shortfall
+    honestly instead of silently returning fewer leads than promised."""
+    _mock_world(settings)
+    campaign.geography.cities = ["Islamabad"]
+    campaign.max_companies = 1
+    campaign.min_outreach_ready = 2
+    db = Database(settings.database_url)
+    from gtm_engine.models import DiscoveredCompany
+
+    async def fake_discover(_c, _p=None):
+        return [
+            DiscoveredCompany(name="Zara Fabrics", website="https://www.zarafabrics.pk/",
+                              city="Islamabad", country="Pakistan", source="osm"),
+            DiscoveredCompany(name="Pixel Digital", website="https://pixeldigital.pk",
+                              city="Islamabad", country="Pakistan", source="osm"),
+            DiscoveredCompany(name="Comingsoon Traders", website="https://comingsoon-traders.pk",
+                              city="Islamabad", country="Pakistan", source="osm"),
+        ]
+
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX(), resolver=FakeAliveResolver())
+        pipeline.discover = fake_discover
+        result = await pipeline.run(campaign)
+    assert result.stats.outreach_ready == 1  # only Zara ever qualifies+has a contact
+    assert result.stats.processed == 3       # the whole pool got consumed trying to reach 2
+    assert result.stats.expansion_rounds >= 1
+    assert result.stats.target_met is False   # honest shortfall, not silently under-delivered
+    db.close()

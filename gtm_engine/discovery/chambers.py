@@ -5,7 +5,9 @@ company and its registered representative – usually the owner or a director, i
 decision-maker we want. The page is ~3 MB and changes rarely, so it is cached on disk.
 
 LCCI (Lahore) and ICCI (Islamabad) do not expose a scrapeable list without a session; they
-are recorded as not-yet-supported rather than faked."""
+are recorded as not-yet-supported rather than faked. FPCCI's member list page
+(fpcci.org.pk/members) requires a login ("SIGN IN YOUR ACCOUNT TO HAVE ACCESS") and only
+offers static 2021-era PDFs otherwise - also not-yet-supported, for the same reason."""
 
 from __future__ import annotations
 

@@ -16,11 +16,20 @@ class GeographyConfig(BaseModel):
     cities: list[str] = Field(default_factory=list)
     # Specific localities/sectors/neighborhoods within a city (e.g. G-7, DHA, Saddar).
     areas: list[str] = Field(default_factory=list)
+    # ISO 3166-1 alpha-2 codes (e.g. "PK", "GB", "US"), for sources that need a precise
+    # country filter rather than free-text `countries` matching (GLEIF, EDGAR, Companies
+    # House, Wikidata, PDL). Independent of `countries`; set either or both.
+    country_codes: list[str] = Field(default_factory=list)
 
     @field_validator("countries", "provinces", "cities", "areas")
     @classmethod
     def _strip(cls, values: list[str]) -> list[str]:
         return [v.strip() for v in values if v and v.strip()]
+
+    @field_validator("country_codes")
+    @classmethod
+    def _upper(cls, values: list[str]) -> list[str]:
+        return [v.strip().upper() for v in values if v and v.strip()]
 
     def search_areas(self) -> list[str]:
         """Places to geocode into search bboxes: provinces first (broader), then cities.
@@ -83,6 +92,8 @@ class CampaignConfig(BaseModel):
     osm_categories: list[str] = Field(default_factory=list)
     # Overture category substrings, e.g. ["clothing", "shoe_store", "supermarket"].
     overture_categories: list[str] = Field(default_factory=list)
+    # Foursquare OS Places category-label substrings, e.g. ["clothing store", "pharmacy"].
+    foursquare_categories: list[str] = Field(default_factory=list)
     # Web-search discovery queries (E2). Normally derived from the offer at run time; the user
     # rarely sets these directly.
     search_queries: list[str] = Field(default_factory=list)
@@ -96,8 +107,25 @@ class CampaignConfig(BaseModel):
     intent_sources: list[str] = Field(default_factory=list)
     # Terms that describe what we sell, matched against tender text (in addition to industries).
     intent_keywords: list[str] = Field(default_factory=list)
+    # GLEIF LEI search queries (company name fragments).
+    gleif_lei_queries: list[str] = Field(default_factory=list)
+    # Wikidata SPARQL industry filters (matched against P452 industry labels).
+    wikidata_industries: list[str] = Field(default_factory=list)
+    # UK Companies House SIC codes, e.g. ["47910"] (retail sale via internet).
+    companies_house_sic_codes: list[str] = Field(default_factory=list)
+    # US SEC EDGAR SIC codes, e.g. ["5961"] (catalog/mail-order houses).
+    edgar_sic_codes: list[str] = Field(default_factory=list)
     min_score: int = 40
     max_companies: int = 150
+    # Guaranteed floor of qualified + outreach-ready leads the run should try to deliver,
+    # expanding into the already-discovered pool beyond max_companies if the first pass falls
+    # short. Unset (None) -> Pipeline.run() applies ceil(max_companies / 3) as the default
+    # target. Explicit 0 opts out of expansion entirely (today's single-pass behavior).
+    min_outreach_ready: int | None = None
+    # Hard ceiling on how many companies a single run may process while trying to hit
+    # min_outreach_ready, expressed as a multiple of max_companies. Bounds worst-case run
+    # time/cost regardless of how far short of the floor the first passes land.
+    max_expansion_multiplier: float = 4.0
     max_pages_per_site: int = 6
     allow_multiple_contacts_per_company: bool = False
     # Drop branches of national/international chains (OSM `brand` tag): decisions are not
@@ -119,7 +147,8 @@ class CampaignConfig(BaseModel):
 
     @field_validator(
         "target_industries", "target_roles", "buyer_keywords", "negative_keywords",
-        "allowed_vendor_keywords", "osm_categories", "overture_categories", "chamber_sources", "chamber_name_keywords", "intent_sources", "intent_keywords",
+        "allowed_vendor_keywords", "osm_categories", "overture_categories", "foursquare_categories", "chamber_sources", "chamber_name_keywords", "intent_sources", "intent_keywords",
+        "wikidata_industries",
     )
     @classmethod
     def _lower(cls, values: list[str]) -> list[str]:
@@ -163,14 +192,26 @@ class EngineSettings(BaseModel):
     # Hard cap on a single response body. A handful of 50 MB pages in one batch is enough
     # to exhaust memory; no company website needs more than a few MB of HTML.
     max_response_bytes: int = 4_000_000
+    # Courtesy delay between requests to the SAME host. Protects shared external services
+    # (Overpass, Nominatim, Hunter) that many runs/users hit in common - those need real
+    # rate-limit respect. Left deliberately conservative as the global default.
     per_host_delay_s: float = 2.0
+    # A company's own website is a different story: it is hit a handful of times (home,
+    # about, contact) in one run by nobody else, not a shared rate-limited resource, so it
+    # does not need the same 2s-per-request courtesy. This was the single biggest per-company
+    # latency driver - 2-6 page fetches per company at 2s apart added 4-12s to every company,
+    # regardless of concurrency, since they all hit the same host.
+    site_crawl_delay_s: float = 0.3
     max_retries: int = 2
     # After this many consecutive failures, stop calling a host for the rest of the run:
     # a dead or hostile host must not consume the batch's time in retries.
     host_failure_limit: int = 3
     # Hard ceiling on the time spent on one company's website.
     per_company_timeout_s: float = 90.0
-    concurrency: int = 4
+    # Companies are almost always on different hosts, so the per_host_delay_s throttle above
+    # does not limit cross-company parallelism - raised from 4 now that the real per-company
+    # bottleneck (site_crawl_delay_s above) is fixed.
+    concurrency: int = 6
     respect_robots: bool = True
     # SSRF guard: refuse to fetch URLs whose host is (or resolves to) a non-public address -
     # loopback, private, link-local, cloud-metadata - including IPv6-mapped IPv4 forms. Domains
@@ -234,4 +275,32 @@ class EngineSettings(BaseModel):
     # per run so a large max_companies cannot drain the month's budget in one go; companies
     # past the cap keep whatever website discovery already gave them.
     website_finder_max_per_run: int = 60
+
+    # -- additional free discovery sources (global) --------------------------------------
+    # Pakistan-specific registries investigated and NOT implemented (see docs/API_KEYS.md):
+    # SECP eServices (403s a plain HTTP client - WAF-protected), PSX listings (JS-rendered
+    # behind reCAPTCHA, no static data), LCCI/FPCCI member directories (session/login-gated,
+    # same precedent as the existing ICCI note in discovery/chambers.py). None are faked.
+    # GLEIF LEI API (keyless, global legal-entity registry).
+    enable_gleif_discovery: bool = True
+    gleif_max_queries_per_run: int = 50
+    # GLEIF Golden Copy: full LEI-CDF bulk dataset, downloaded once via
+    # scripts/fetch_bulk_datasets.py, queried locally via DuckDB.
+    enable_gleif_golden_copy: bool = False
+    gleif_golden_copy_path: Path = Path("data/gleif/golden_copy.parquet")
+    # Wikidata SPARQL (keyless; requires a descriptive User-Agent per Wikidata etiquette).
+    enable_wikidata_discovery: bool = True
+    wikidata_max_queries_per_run: int = 20
+    # UK Companies House (free self-serve key; required to enable).
+    enable_companies_house: bool = False
+    companies_house_api_key: str | None = None
+    companies_house_max_companies_per_run: int = 100
+    # US SEC EDGAR (keyless; SEC requires a descriptive User-Agent with a contact address).
+    enable_edgar_discovery: bool = True
+    edgar_max_companies_per_run: int = 100
+    edgar_user_agent: str = "GTMLeadEngine/0.1 (contact: set GTM_EDGAR_CONTACT_EMAIL)"
+    # People Data Labs Free Company Dataset: investigated and NOT implemented - the "free"
+    # dataset is now gated behind a sales-contact form with no transparent direct download
+    # (see docs/API_KEYS.md).
+
     log_level: str = "INFO"

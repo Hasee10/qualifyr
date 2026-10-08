@@ -30,6 +30,7 @@ the repo. **Status** is updated as keys are added.
 | `GTM_AUTH_DISABLED` | – | Local dev only: skips the token check. An opt-*out*, so a typo leaves auth on. Never set this on a deployment | n/a | optional | – |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase | Frontend sign-in. Belongs in `web/.env.local` and in Vercel, not in the root `.env` | free | **yes on Vercel** | ⏳ not set |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase | Publishable key, designed to sit in a browser bundle. Inlined at **build** time, so it needs a redeploy to take effect | free | **yes on Vercel** | ⏳ not set |
+| `GTM_COMPANIES_HOUSE_API_KEY` | UK Companies House | `gtm_engine/discovery/companies_house.py` – self-serve registry search (Basic Auth, key as username) | free, self-serve signup at developer.company-information.service.gov.uk | optional | ⏳ not set |
 
 Note: Supabase's **service-role/anon API keys are not used** by this engine – storage
 goes over plain SQL via `psycopg` against `GTM_DATABASE_URL`, not the Supabase REST/client
@@ -38,7 +39,54 @@ API. Keep them out of Vercel/Actions unless something starts calling that API di
 ## Keyless services in use
 
 Overture Maps (S3 parquet), OpenStreetMap Overpass + mirrors, Nominatim, GDELT news (rate-limited),
-RDAP domain age (not for .pk), KCCI member directory (scraped, cached weekly), Google Fonts (UI).
+RDAP domain age (not for .pk), KCCI member directory (scraped, cached weekly), Google Fonts (UI),
+GLEIF LEI-record API (`gtm_engine/discovery/gleif.py`), Wikidata SPARQL (`discovery/wikidata.py`
+– **requires a descriptive User-Agent**, uses `settings.user_agent`), US SEC EDGAR full-text search
+(`discovery/edgar.py` – **requires a descriptive User-Agent**; SEC actively blocks generic/missing
+UAs, set via `edgar_user_agent` / `GTM_EDGAR_CONTACT_EMAIL`).
+
+## Bulk datasets – one-time setup
+
+Some sources are too large to query live per campaign and are instead downloaded once into a
+local Parquet file read in place with DuckDB:
+
+```
+python scripts/fetch_bulk_datasets.py --dataset gleif
+```
+
+Downloads GLEIF's Golden Copy LEI-CDF file to `settings.gleif_golden_copy_path`
+(`data/gleif/golden_copy.parquet` by default), refusing to overwrite the existing file if the
+download looks truncated (fewer than `--min-rows` rows). Not run automatically by the pipeline –
+`gtm_engine/discovery/gleif_golden_copy.py` raises a clear `RuntimeError` naming this script if
+the file is missing when `enable_gleif_golden_copy` is on. Re-run periodically to refresh; GLEIF
+republishes the Golden Copy on its own schedule.
+
+## Pakistan registries investigated and not implemented
+
+SECP eServices (secp.gov.pk / eservices.secp.gov.pk) returns 403 to a plain HTTP client –
+WAF-protected, no safe sessionless path found. PSX listings (dps.psx.com.pk) are JS-rendered
+behind reCAPTCHA with zero static `<table>` data – unreachable without a headless browser
+(`enable_browser_fallback`, off by default). LCCI's investigated member-directory URL either
+404s or resolves to an unrelated generic business directory. FPCCI's member list
+(fpcci.org.pk/members) requires a login ("SIGN IN YOUR ACCOUNT TO HAVE ACCESS"), same precedent
+as the existing ICCI note in `discovery/chambers.py`. None of these are faked or scraped past
+their access gate – they stay documented-only until a legitimate access path exists.
+
+People Data Labs' "Free Company Dataset" was also investigated for the bulk-dataset pattern
+above: as of this check it is gated behind a sales-contact form with no transparent direct
+download, and the historical open-data mirror (`github.com/peopledatalabs/company-dataset`)
+now 404s. Not implemented for the same reason.
+
+## Future-pattern stretch sources (not implemented)
+
+Same live-API/keyless shape as GLEIF API / EDGAR – a company registry with an open HTTP
+endpoint, no key, requiring only a polite User-Agent. Noted here so a future contributor can
+follow the existing pattern (`discovery/gleif.py` or `discovery/edgar.py`) rather than start
+from scratch:
+
+- **France SIRENE** – `https://recherche-entreprises.api.gouv.fr` – SIREN/SIRET feeds entity
+  resolution's registration-number tier.
+- **Norway Brreg** – `https://data.brreg.no` – organisation number, same tier.
 
 ## Where they are read
 
