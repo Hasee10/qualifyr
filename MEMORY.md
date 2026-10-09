@@ -263,6 +263,21 @@ seed is small – grow it to 50+, esp. intent-judge cases, to trust the number.*
   Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
   "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
+- **Contact layer: confidence + catch-all + broader DM finder (2026-10-09):**
+  - Pattern-based email discovery no longer gates on `is_decision_maker=True` - any
+    `contact.name` triggers it (choose_contact already filters role_blacklist). PRICING_PHASES_2.md
+    flagged outreach-readiness at ~1/90 as the real bottleneck; this is the "turn up the finder"
+    lever that works without Reacher.
+  - Lead gained `email_pattern`, `email_catch_all`, `contact_confidence` (0-100). Confidence is
+    a pure function of signals already captured (`score_contact_confidence()` in `models.py`):
+    deliverable=100, mx_valid=65, generic=30, candidate=25, risky=10, dead=0; catch-all collapses
+    anything short of deliverable to a 15 floor; +5 if a phone is present (phones are hard to fake).
+  - CSV exports: internal `CSV_COLUMNS` adds the four new columns; the client-ready
+    `CLEAN_COLUMNS` adds "Confidence", "Candidate email", "Catch-all" - directly answers the
+    pricing-doc ask for "a single confidence column ... our contact-level answer to Vibe's
+    business_warnings". DB migration-free: `leads.data_json` holds the full Lead JSON.
+  - `email_patterns.Discovery` dataclass now reports `catch_all` back to the caller so the Lead
+    can surface it without a second verifier credit.
 - **Sparse-area discovery fallback (2026-10-09):** `Pipeline.discover()` now splits discovery
   sources into `geo_sources` (Overture/Foursquare/OSM) and the rest; after they run, if the geo
   total is below `settings.sparse_discovery_threshold` (default 10), it synthesizes

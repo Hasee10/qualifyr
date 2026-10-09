@@ -45,7 +45,7 @@ from gtm_engine.enrichment.phones import classify_phone
 from gtm_engine.enrichment.signals import assess_quality, detect_signals, summarize
 from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Lead,
-    OnlinePresence, SequenceStatus, Signals, new_id,
+    OnlinePresence, SequenceStatus, Signals, new_id, score_contact_confidence,
 )
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
 from gtm_engine.scoring.proximity import haversine_km
@@ -783,9 +783,14 @@ class Pipeline:
         if cls.company_type != CompanyType.VENDOR and contact.email:
             contact.email_status = await classify_email(contact.email, self.defaults.generic_email_prefixes, self.mx)
 
-        # Decision-maker email discovery: a named person but only a generic mailbox (or none).
+        # Pattern-based email discovery: any named person at the company whose only published
+        # mailbox is generic/missing. Was gated on is_decision_maker; broadened because
+        # choose_contact already drops role-blacklisted names, so any surviving contact.name is
+        # a legitimate target - and non-DM named contacts are still a shorter path to a human
+        # than info@. PRICING_PHASES_2.md flagged outreach-readiness (~1/90) as the real
+        # bottleneck - this is the "turn up the finder" lever that doesn't need Reacher.
         if (cls.company_type == CompanyType.BUYER and self.settings.discover_decision_maker_email
-                and contact.is_decision_maker and contact.name and domain
+                and contact.name and domain
                 and contact.email_status in (EmailStatus.GENERIC, EmailStatus.NONE, EmailStatus.INVALID)):
             verifier = await self._verifier()
             known = [e for e in snapshot.emails if e.endswith("@" + domain)
@@ -794,6 +799,8 @@ class Pipeline:
             found = await discover(contact.name, domain, verifier, known_pattern=known_pattern,
                                    generic_prefixes=self.defaults.generic_email_prefixes)
             provenance["email_discovery"] = f"{verifier.name}: {found.reason}; tried {found.tried}"
+            if found.catch_all:
+                contact.email_catch_all = True
             if found.status == VerifyStatus.DELIVERABLE and found.email:
                 contact.email, contact.email_status = found.email, EmailStatus.DELIVERABLE
                 contact.email_pattern = found.pattern
@@ -934,6 +941,13 @@ class Pipeline:
             phone=contact.phone or company.phone,
             phone_type=contact.phone_type,
             candidate_email=contact.candidate_email,
+            email_pattern=contact.email_pattern,
+            email_catch_all=contact.email_catch_all,
+            contact_confidence=score_contact_confidence(
+                contact.email_status, contact.email_catch_all,
+                has_candidate=bool(contact.candidate_email),
+                has_phone=bool(contact.phone or company.phone),
+            ),
             news_mentions=signals.news,
             domain_age_years=signals.domain_age_years,
             intent_signals=signals.intent,

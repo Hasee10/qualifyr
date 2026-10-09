@@ -36,6 +36,7 @@ class Discovery:
     pattern: str | None
     tried: list[tuple[str, str]] = field(default_factory=list)  # (candidate, status)
     reason: str = ""
+    catch_all: bool | None = None   # True when the verifier flagged the domain as catch-all
 
 
 def name_parts(full_name: str) -> NameParts | None:
@@ -100,7 +101,8 @@ async def discover(full_name: str, domain: str, verifier: EmailVerifier, *,
     if await verifier.is_catch_all(domain):
         email, pattern = cands[0]
         return Discovery(email, VerifyStatus.RISKY, pattern, [(email, "risky")],
-                         reason="catch-all domain: any address is accepted, cannot confirm")
+                         reason="catch-all domain: any address is accepted, cannot confirm",
+                         catch_all=True)
     tried: list[tuple[str, str]] = []
     for email, pattern in cands[:max_tries]:
         result: VerifyResult = await verifier.verify(email)

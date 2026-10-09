@@ -53,6 +53,9 @@ export interface Lead {
   technologies: string[]
   phone_type: string | null
   candidate_email: string | null
+  email_pattern: string | null
+  email_catch_all: boolean
+  contact_confidence: number
   news_mentions: { title: string; url: string; date: string; source: string }[]
   intent_signals: { kind: string; source: string; source_url: string | null; text: string; organization: string | null; date: string | null; deadline: string | null; matched_terms: string[]; extracted: Record<string, string> | null }[]
   review_verdict: string | null

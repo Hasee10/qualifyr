@@ -97,6 +97,7 @@ class Contact(BaseModel):
     email_pattern: str | None = None     # first.last etc. when discovered
     phone_type: str | None = None        # mobile | landline | unknown
     candidate_email: str | None = None   # discovered but unconfirmed address, for the reviewer
+    email_catch_all: bool = False        # verifier flagged the domain as catch-all
 
 
 class Classification(BaseModel):
@@ -231,6 +232,9 @@ class Lead(BaseModel):
     evidence: dict = Field(default_factory=dict)
     phone_type: str | None = None
     candidate_email: str | None = None
+    email_pattern: str | None = None   # the pattern discover() landed on (first.last / flast / ...)
+    email_catch_all: bool = False      # verifier flagged the domain as catch-all - any address "deliverable"
+    contact_confidence: int = 0        # 0-100 single-column reachability score (see score_contact_confidence)
     news_mentions: list[dict] = Field(default_factory=list)
     domain_age_years: float | None = None
     intent_signals: list[dict] = Field(default_factory=list)   # IntentSignal dicts
@@ -257,7 +261,36 @@ CSV_COLUMNS: list[str] = [
     "address", "industry", "company_description", "company_type", "buyer_fit_score",
     "buyer_fit_reason", "company_quality_score", "buying_signal_score", "total_score",
     "score_reason", "contact_name", "contact_role", "contact_email", "email_status",
+    "candidate_email", "email_pattern", "email_catch_all", "contact_confidence",
     "phone", "linkedin_or_public_profile_url", "pain_signal", "buying_signal",
     "personalization_hook", "source", "source_url", "scraped_at", "outreach_ready",
     "sequence_status", "email_1_sent_at", "followup_1_at", "followup_2_at", "reply_status",
 ]
+
+
+def score_contact_confidence(email_status: EmailStatus, catch_all: bool,
+                             has_candidate: bool, has_phone: bool) -> int:
+    """One number a reviewer can sort/filter on: 'how likely is this contact reachable?'.
+    Deterministic function of signals already captured during run - no new verifier credits.
+    PRICING_PHASES_2.md: 'surface a single confidence column ... our contact-level answer to
+    Vibe's business_warnings'. Scale: 100 = SMTP-confirmed, 0 = nothing usable."""
+    base = {
+        EmailStatus.DELIVERABLE: 100,
+        EmailStatus.MX_VALID: 65,
+        EmailStatus.UNVERIFIED: 35,
+        EmailStatus.GENERIC: 30,
+        EmailStatus.CANDIDATE: 25,
+        EmailStatus.RISKY: 10,
+        EmailStatus.INVALID: 0,
+        EmailStatus.BOUNCED: 0,
+        EmailStatus.NONE: 0,
+    }.get(email_status, 0)
+    # Catch-all means every address "accepts" - the email itself is near-meaningless. Collapse
+    # anything short of SMTP-confirmed to the catch-all floor.
+    if catch_all and email_status != EmailStatus.DELIVERABLE:
+        base = min(base, 15)
+    if has_candidate and email_status in (EmailStatus.GENERIC, EmailStatus.NONE, EmailStatus.INVALID):
+        base = max(base, 20)   # a reasonable guess exists even if the live email is weak
+    if has_phone and base < 100:
+        base = min(100, base + 5)
+    return base

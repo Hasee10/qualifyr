@@ -48,7 +48,8 @@ def lead_row(lead: Lead) -> dict[str, str]:
 CLEAN_COLUMNS: list[str] = [
     "Company", "Website", "City", "Address", "Category", "Type", "Score", "Priority",
     "Summary", "Why it qualified", "Signals", "Contact", "Role", "Email",
-    "Email status", "Phone", "LinkedIn", "Source",
+    "Email status", "Confidence", "Candidate email", "Catch-all",
+    "Phone", "LinkedIn", "Source",
 ]
 
 _EMAIL_STATUS_LABELS = {
@@ -85,6 +86,9 @@ def clean_row(lead: Lead) -> dict[str, str]:
         "Role": lead.contact_role or "",
         "Email": lead.contact_email or "",
         "Email status": _EMAIL_STATUS_LABELS.get(_enum_val(lead.email_status), _enum_val(lead.email_status)),
+        "Confidence": str(lead.contact_confidence or 0),
+        "Candidate email": lead.candidate_email or "",
+        "Catch-all": "yes" if lead.email_catch_all else "",
         "Phone": lead.phone or "",
         "LinkedIn": lead.linkedin_or_public_profile_url or "",
         "Source": lead.source or "",
