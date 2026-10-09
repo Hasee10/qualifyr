@@ -263,6 +263,14 @@ seed is small – grow it to 50+, esp. intent-judge cases, to trust the number.*
   Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
   "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
+- **Hunter removed, direct SMTP is the default verifier (2026-10-09):** `HunterVerifier` class
+  gone from `validation/verifier.py`; `build_verifier()` no longer takes `hunter_api_key`;
+  `email_verification` default changed from `auto` to `direct` (own-infrastructure SMTP RCPT
+  probe, degrades to MX-only when outbound port 25 is blocked). `hunter` removed from
+  `api/keys.py` ALLOWED_KEYS, `api/usage.py` DEFAULT_LIMITS, settings UI, Vercel env map,
+  gather-leads workflow secrets, internal test batch. Engine is now zero paid-verification-API
+  by default. If deliverability confirmation is needed on a port-25-blocked host, stand up
+  Reacher (`GTM_REACHER_URL`) - that path is unchanged.
 - **Contact layer: confidence + catch-all + broader DM finder (2026-10-09):**
   - Pattern-based email discovery no longer gates on `is_decision_maker=True` - any
     `contact.name` triggers it (choose_contact already filters role_blacklist). PRICING_PHASES_2.md

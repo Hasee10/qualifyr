@@ -78,9 +78,9 @@ def test_resolve_falls_back_when_decrypt_fails(monkeypatch):
     monkeypatch.setenv("GTM_ENCRYPTION_KEY", Fernet.generate_key().decode())
     stale = K.encrypt_key("stale-user-key")
     monkeypatch.setenv("GTM_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("GTM_HUNTER_API_KEY", "operator-hunter")
-    db = _StubDB({("user-1", "hunter"): stale})
-    assert K.resolve_api_key(db, "user-1", "hunter") == "operator-hunter"
+    monkeypatch.setenv("GTM_BRAVE_API_KEY", "operator-brave")
+    db = _StubDB({("user-1", "brave"): stale})
+    assert K.resolve_api_key(db, "user-1", "brave") == "operator-brave"
 
 
 def test_resolve_all_keys_covers_allowed_set(enc_key):

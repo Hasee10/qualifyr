@@ -1,12 +1,14 @@
-"""Email existence verification without paid dependencies.
+"""Email existence verification without any paid third-party dependency.
 
 Backends, in preference order chosen by `build_verifier`:
-  direct   - SMTP handshake to the recipient's MX (RCPT TO, no message sent). Needs outbound
-             port 25, which most ISPs and GitHub-hosted runners block; probed once at start.
-  reacher  - self-hosted Reacher (check-if-email-exists) over HTTP: GTM_REACHER_URL.
-  hunter   - Hunter.io verifier, free tier 50/month: GTM_HUNTER_API_KEY. Spent only on
-             decision-maker candidates, never on generic mailboxes.
-  mx_only  - what we had before: the domain accepts mail, nothing known about the mailbox.
+  direct   - SMTP handshake to the recipient's MX (RCPT TO, no message sent). Default. Needs
+             outbound port 25, which most ISPs and serverless runners block; probed once at
+             start. When port 25 isn't reachable, degrades to mx_only rather than failing.
+  reacher  - self-hosted Reacher (check-if-email-exists) over HTTP: GTM_REACHER_URL. Opt-in.
+  mx_only  - the domain accepts mail, nothing known about the mailbox. Final fallback.
+
+(Hunter.io was previously a paid-API fallback here; it was removed on 2026-10-09 along with
+every mention of GTM_HUNTER_API_KEY. The engine is now zero paid-verification-API by default.)
 
 Every backend returns a VerifyResult with a status the outreach gate understands:
   deliverable  mailbox confirmed          -> may be emailed
@@ -179,56 +181,6 @@ class ReacherVerifier:
         await self._client.aclose()
 
 
-# --------------------------------------------------------------------------- Hunter (free 50/mo)
-
-class HunterVerifier:
-    name = "hunter"
-
-    def __init__(self, api_key: str, timeout_s: float = 75.0, monthly_budget: int = 100):
-        # Hunter performs a real SMTP check, which regularly takes 30-60 s; a short timeout
-        # burns a quota credit and returns nothing.
-        self.api_key = api_key
-        self._client = httpx.AsyncClient(timeout=timeout_s)
-        self.used = 0
-        self.monthly_budget = monthly_budget
-        self._catch_all: dict[str, bool | None] = {}
-
-    async def verify(self, email: str) -> VerifyResult:
-        if self.used >= self.monthly_budget:
-            return VerifyResult(VerifyStatus.UNVERIFIED, self.name, "hunter budget exhausted")
-        try:
-            r = await self._client.get("https://api.hunter.io/v2/email-verifier",
-                                       params={"email": email, "api_key": self.api_key})
-        except httpx.HTTPError as exc:
-            return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter error: {type(exc).__name__}")
-        self.used += 1
-        # 202/222: Hunter accepted the job but the SMTP check is still running. One short
-        # re-poll costs no extra quota and turns most of these into a real answer.
-        if r.status_code in (202, 222):
-            await asyncio.sleep(6)
-            try:
-                r = await self._client.get("https://api.hunter.io/v2/email-verifier",
-                                           params={"email": email, "api_key": self.api_key})
-            except httpx.HTTPError as exc:
-                return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter retry error: {type(exc).__name__}")
-        if r.status_code != 200:
-            return VerifyResult(VerifyStatus.UNVERIFIED, self.name, f"hunter {r.status_code}")
-        d = r.json().get("data", {})
-        catch_all = bool(d.get("accept_all"))
-        self._catch_all[email.split("@", 1)[1].lower()] = catch_all
-        status = {"deliverable": VerifyStatus.DELIVERABLE, "undeliverable": VerifyStatus.INVALID,
-                  "risky": VerifyStatus.RISKY}.get(d.get("result"), VerifyStatus.UNVERIFIED)
-        if status == VerifyStatus.DELIVERABLE and catch_all:
-            status = VerifyStatus.RISKY
-        return VerifyResult(status, self.name, f"hunter {d.get('result')} score={d.get('score')}", catch_all)
-
-    async def is_catch_all(self, domain: str) -> bool | None:
-        return self._catch_all.get(domain.lower())
-
-    async def close(self) -> None:
-        await self._client.aclose()
-
-
 # --------------------------------------------------------------------------- MX only
 
 class MxOnlyVerifier:
@@ -243,20 +195,22 @@ class MxOnlyVerifier:
         return None
 
 
-async def build_verifier(mode: str = "auto", reacher_url: str | None = None,
-                         *, hunter_api_key: str | None = None) -> EmailVerifier:
+async def build_verifier(mode: str = "direct", reacher_url: str | None = None) -> EmailVerifier:
+    """Pick a verifier backend. Default is `direct` SMTP (own-infrastructure, no paid API).
+    `auto` keeps the old preference order minus Hunter: reacher if configured, else direct if
+    port 25 is reachable, else MX-only."""
     reacher_url = reacher_url or os.environ.get("GTM_REACHER_URL")
-    hunter_key = hunter_api_key or os.environ.get("GTM_HUNTER_API_KEY")
     if mode == "off":
         return MxOnlyVerifier()
     if mode in ("auto", "reacher") and reacher_url:
         return ReacherVerifier(reacher_url)
-    if mode in ("auto", "direct") and await port25_reachable():
-        return DirectSmtpVerifier()
-    if mode in ("auto", "hunter") and hunter_key:
-        return HunterVerifier(hunter_key)
-    if mode != "auto":
+    if mode in ("auto", "direct"):
+        if await port25_reachable():
+            return DirectSmtpVerifier()
+        if mode == "direct":
+            log.warning("direct SMTP verifier requested but port 25 is blocked here; MX-only")
+    if mode not in ("auto", "direct"):
         log.warning("email verifier '%s' not available; falling back to MX-only", mode)
     else:
-        log.info("no mailbox-level verifier available (port 25 blocked, no Reacher/Hunter); MX-only")
+        log.info("no mailbox-level verifier available (port 25 blocked, no Reacher); MX-only")
     return MxOnlyVerifier()

@@ -15,13 +15,12 @@ from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
 
-ALLOWED_KEYS = frozenset({"brave", "groq", "gemini", "hunter", "places", "companies_house"})
+ALLOWED_KEYS = frozenset({"brave", "groq", "gemini", "places", "companies_house"})
 
 _ENV_MAP = {
     "brave": "GTM_BRAVE_API_KEY",
     "groq": "GTM_GROQ_API_KEY",
     "gemini": "GTM_GEMINI_API_KEY",
-    "hunter": "GTM_HUNTER_API_KEY",
     "places": "GTM_GOOGLE_PLACES_API_KEY",
     "companies_house": "GTM_COMPANIES_HOUSE_API_KEY",
 }

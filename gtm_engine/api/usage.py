@@ -13,7 +13,6 @@ from gtm_engine.storage.database import Database
 DEFAULT_LIMITS: dict[str, int] = {
     "brave": 50,
     "groq": 200,
-    "hunter": 10,
     "places": 20,
     # Campaign-run dispatches per day. Each run is also bounded by the per-run lead cap and the
     # one-run-at-a-time guard. On grydinteam (open-source) all runs share the repo's GitHub
@@ -31,11 +30,11 @@ MAX_LIMITS: dict[str, int] = {k: v * 10 for k, v in DEFAULT_LIMITS.items()}
 
 # Monthly caps, on top of the daily ones above. Only "runs" has one today: PRICING_PHASES_2.md's
 # draft tier table promises "campaign runs/month" and this engine already treats run dispatches
-# as tight-by-design (shared GitHub Actions minutes). Resources like hunter/places also have a
-# monthly number in that table, but those are *per-tier* (Free=0, Pro=750, ...) and there is no
-# billing/tier system yet to tell a paid account apart from a free one - setting a flat monthly
-# cap on them now would silently disable verification/enrichment for every current user. Add
-# those once Stripe billing lands and a user's tier is knowable.
+# as tight-by-design (shared GitHub Actions minutes). Resources like places also have a monthly
+# number in the pricing-tier table, but those are *per-tier* (Free=0, Pro=500, Enterprise=2500)
+# and there is no billing/tier system yet to tell a paid account apart from a free one - setting
+# a flat monthly cap on them now would silently disable enrichment for every current user. Add
+# once Stripe billing lands and a user's tier is knowable.
 MONTHLY_LIMITS: dict[str, int] = {
     "runs": 5,
 }

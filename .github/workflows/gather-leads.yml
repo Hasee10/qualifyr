@@ -51,7 +51,6 @@ jobs:
       # Operator-level API keys (fallback when no per-user key in DB).
       # On grydinteam these are absent – users bring their own via the Settings UI.
       GTM_BRAVE_API_KEY: ${{ secrets.GTM_BRAVE_API_KEY }}
-      GTM_HUNTER_API_KEY: ${{ secrets.GTM_HUNTER_API_KEY }}
       GTM_GROQ_API_KEY: ${{ secrets.GTM_GROQ_API_KEY }}
       GTM_GOOGLE_PLACES_API_KEY: ${{ secrets.GTM_GOOGLE_PLACES_API_KEY }}
       GTM_SHEETS_CREDENTIALS_JSON: ${{ secrets.GTM_SHEETS_CREDENTIALS_JSON }}

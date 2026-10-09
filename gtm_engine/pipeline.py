@@ -533,8 +533,7 @@ class Pipeline:
     async def _verifier(self) -> EmailVerifier:
         if self.verifier is None:
             self.verifier = await build_verifier(
-                self.settings.email_verification, self.settings.reacher_url,
-                hunter_api_key=self._resolved_keys.get("hunter"))
+                self.settings.email_verification, self.settings.reacher_url)
             log.info("email verifier: %s", self.verifier.name)
         return self.verifier
 

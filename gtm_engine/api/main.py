@@ -1150,9 +1150,6 @@ def _test_key(key_name: str, key: str) -> tuple[bool, str]:
                                  "max_tokens": 1},
                            headers={"Authorization": f"Bearer {key}"}, timeout=10)
             return r.status_code == 200, f"Groq: {r.status_code}"
-        if key_name == "hunter":
-            r = httpx.get("https://api.hunter.io/v2/account", params={"api_key": key}, timeout=10)
-            return r.status_code == 200, f"Hunter: {r.status_code}"
         if key_name == "places":
             r = httpx.post("https://places.googleapis.com/v1/places:searchText",
                            json={"textQuery": "test"},

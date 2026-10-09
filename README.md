@@ -264,14 +264,14 @@ All optional. A missing key disables only that feature. Full details and current
 | Key(s) | Unlocks | Free tier |
 |---|---|---|
 | `GTM_BRAVE_API_KEY` | web-search discovery + website finding (falls back to keyless DuckDuckGo) | ~1k searches/mo (card required) |
-| `GTM_HUNTER_API_KEY` / `GTM_REACHER_URL` | decision-maker email verification | Hunter free; Reacher self-host |
+| `GTM_REACHER_URL` | optional decision-maker email verification over HTTP (direct SMTP is the default verifier) | Reacher self-host |
 | `GTM_GROQ_API_KEY` | LLM layer: offer→targets, intent judging, relevance, query generation | Groq `gpt-oss-20b`, ~8k tokens/min |
 | `GTM_GOOGLE_PLACES_API_KEY` | rating, review count, hours, review text (largest scoring boost) | ~1k calls/mo |
 | `GTM_GEMINI_API_KEY` | alternate LLM (Groq is the reliable default — you only need one) | often 404/503 on free tier |
 | `GTM_SMTP_*` / `GTM_GMAIL_*` | actually sending outreach (otherwise every send is a dry run) | – |
 | `GTM_SHEETS_*` | Google Sheets export mirror | – |
 
-**Which to add first?** None is required — the engine runs keyless. If you're adding them one at a time: **Brave** (broader discovery) and **Hunter** (verified emails) give the most out-of-the-box, since both are on by default. **Groq** and **Places** add the biggest quality jump and switch on automatically once their key is present.
+**Which to add first?** None is required — the engine runs keyless. Email verification uses direct SMTP against the recipient's MX by default (no third-party API, no credits), degrading to MX-only when outbound port 25 is blocked. If you're adding keys one at a time, **Brave** (broader discovery), **Groq**, and **Places** give the biggest quality jump and switch on automatically once their key is present.
 
 **Per-user keys (self-hosting).** In the web app, each user stores their own keys, **encrypted at rest** with `GTM_ENCRYPTION_KEY` (Fernet), with per-day usage limits and a free tier (3 campaigns, 10 leads each). At run time a user's keys are decrypted into that run's environment on the GitHub Actions runner — never written to disk in the clear. Generate the encryption key once:
 
@@ -335,7 +335,7 @@ gtm_engine/
                   hours.py, research.py (research brief), fieldclean.py
   llm/            client.py (Groq/Gemini/Ollama) + tasks.py — grounded, optional
   scoring/        scoring.py (decomposed 0–100) + proximity.py
-  validation/     domains, emails, dedupe, verifier (Hunter/Reacher/MX), liveness
+  validation/     domains, emails, dedupe, verifier (direct SMTP / Reacher / MX), liveness
   outreach/       sequencer, sender, reply classifier, mailboxes, durable ledger
   export/         csv_export.py, sheets.py
   storage/        database.py (Postgres via psycopg, plain SQL, no ORM)

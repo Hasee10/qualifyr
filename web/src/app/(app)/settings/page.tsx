@@ -16,7 +16,6 @@ const KEY_INFO: Record<string, { label: string; description: string; url: string
   brave: { label: "Brave Search", description: "Web search for company discovery. Falls back to DuckDuckGo without a key.", url: "https://brave.com/search/api/" },
   groq: { label: "Groq (LLM)", description: "AI-powered keyword generation, intent judging and relevance matching.", url: "https://console.groq.com/keys" },
   gemini: { label: "Google Gemini", description: "Alternative LLM provider. Used as fallback when Groq is unavailable.", url: "https://aistudio.google.com/apikey" },
-  hunter: { label: "Hunter.io", description: "Email verification for decision-maker contacts. Falls back to MX-only check.", url: "https://hunter.io/api-keys" },
   places: { label: "Google Places", description: "Rating, review count and opening hours enrichment. 1K free calls/month.", url: "https://console.cloud.google.com/apis/credentials" },
 }
 
@@ -181,7 +180,6 @@ function UsageDashboard() {
   const resources = [
     { key: "brave", label: "Brave Search", unit: "searches" },
     { key: "groq", label: "Groq LLM", unit: "calls" },
-    { key: "hunter", label: "Hunter.io", unit: "verifications" },
     { key: "places", label: "Google Places", unit: "lookups" },
   ]
 

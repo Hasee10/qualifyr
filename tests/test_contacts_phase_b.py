@@ -107,9 +107,9 @@ async def test_discover_without_verifier_is_candidate_only(defaults):
 async def test_build_verifier_off_and_auto_fallback(monkeypatch):
     assert (await build_verifier("off")).name == "mx_only"
     monkeypatch.delenv("GTM_REACHER_URL", raising=False)
-    monkeypatch.delenv("GTM_HUNTER_API_KEY", raising=False)
     monkeypatch.setattr("gtm_engine.validation.verifier.port25_reachable", lambda *a, **k: _false())
     assert (await build_verifier("auto")).name == "mx_only"
+    assert (await build_verifier("direct")).name == "mx_only"   # direct degrades when port 25 is blocked
     monkeypatch.setenv("GTM_REACHER_URL", "http://reacher.local")
     assert (await build_verifier("auto")).name == "reacher"
 
@@ -188,25 +188,6 @@ async def test_pipeline_keeps_generic_when_unconfirmed(campaign, settings, defau
     db.close()
 
 
-async def test_hunter_repolls_while_the_check_is_still_running():
-    """Hunter answers 222 while its SMTP probe runs; one re-poll turns that into a verdict."""
-    from gtm_engine.validation.verifier import HunterVerifier
-    calls = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url)
-        if len(calls) == 1:
-            return httpx.Response(222, json={"data": {}})
-        return httpx.Response(200, json={"data": {"result": "deliverable", "score": 98, "accept_all": False}})
-
-    v = HunterVerifier("k", timeout_s=5)
-    v._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    import gtm_engine.validation.verifier as mod
-    original = mod.asyncio.sleep
-    mod.asyncio.sleep = lambda s: original(0)
-    try:
-        r = await v.verify("a@b.pk")
-    finally:
-        mod.asyncio.sleep = original
-    assert r.status.value == "deliverable" and len(calls) == 2
-    assert v.used == 1          # a re-poll must not cost a second credit
+# HunterVerifier was removed on 2026-10-09; its repoll test went with it. The engine's
+# default verifier is now DirectSmtpVerifier (own-infra SMTP RCPT), covered elsewhere in
+# this file via ScriptedVerifier and the pipeline integration tests above.

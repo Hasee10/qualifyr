@@ -193,7 +193,7 @@ class EngineSettings(BaseModel):
     # to exhaust memory; no company website needs more than a few MB of HTML.
     max_response_bytes: int = 4_000_000
     # Courtesy delay between requests to the SAME host. Protects shared external services
-    # (Overpass, Nominatim, Hunter) that many runs/users hit in common - those need real
+    # (Overpass, Nominatim) that many runs/users hit in common - those need real
     # rate-limit respect. Left deliberately conservative as the global default.
     per_host_delay_s: float = 2.0
     # A company's own website is a different story: it is hit a handful of times (home,
@@ -251,8 +251,10 @@ class EngineSettings(BaseModel):
     enable_news_signals: bool = True
     news_max_companies_per_run: int = 40
     dns_timeout_s: float = 5.0
-    # Mailbox-level email verification: auto | direct | reacher | hunter | off (see validation/verifier.py)
-    email_verification: str = "auto"
+    # Mailbox-level email verification: direct | reacher | auto | off (see validation/verifier.py).
+    # Default is direct SMTP (own-infrastructure, no paid API) - degrades to MX-only when port 25
+    # is blocked. Hunter was removed on 2026-10-09.
+    email_verification: str = "direct"
     reacher_url: str | None = None
     # Try first.last@ style candidates for a named decision-maker when only a generic mailbox is public.
     discover_decision_maker_email: bool = True

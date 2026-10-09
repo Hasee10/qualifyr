@@ -221,7 +221,6 @@ async def main(max_companies: int, limit: int | None, with_all_keys: bool) -> No
         "gemini": os.environ.get("GTM_GEMINI_API_KEY"),
     }
     if with_all_keys:
-        resolved_keys["hunter"] = os.environ.get("GTM_HUNTER_API_KEY")
         resolved_keys["places"] = os.environ.get("GTM_GOOGLE_PLACES_API_KEY")
 
     defaults = load_defaults()
@@ -231,10 +230,10 @@ async def main(max_companies: int, limit: int | None, with_all_keys: bool) -> No
     if limit:
         campaigns = campaigns[:limit]
 
-    keys_desc = ("brave, groq, gemini, hunter, google places "
+    keys_desc = ("brave, groq, gemini, google places "
                  f"(places capped at {settings.places_max_companies_per_run}/run - shared key budget, not raised)"
                  if with_all_keys else
-                 "brave, groq, gemini (places and hunter explicitly disabled)")
+                 "brave, groq, gemini (places disabled; email verifier: direct SMTP)")
     log_lines = [
         f"internal test batch - {len(campaigns)} campaigns, schema={schema}, max_companies={max_companies}",
         f"keys in use: {keys_desc}",

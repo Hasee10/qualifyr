@@ -42,9 +42,9 @@ def test_check_usage_passes_through_monthly_limit_for_runs(pg_schema, monkeypatc
 
 
 def test_monthly_limit_none_for_resources_without_a_monthly_cap():
-    # hunter/places intentionally have no monthly cap yet - see comment in api/usage.py.
-    assert usage_api._monthly_limit("hunter") is None
+    # places intentionally has no monthly cap yet - see comment in api/usage.py.
     assert usage_api._monthly_limit("places") is None
+    assert usage_api._monthly_limit("brave") is None
     assert usage_api._monthly_limit("runs") == usage_api.MONTHLY_LIMITS["runs"]
 
 
