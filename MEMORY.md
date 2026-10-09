@@ -263,6 +263,16 @@ seed is small – grow it to 50+, esp. intent-judge cases, to trust the number.*
   Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
   "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
+- **Sparse-area discovery fallback (2026-10-09):** `Pipeline.discover()` now splits discovery
+  sources into `geo_sources` (Overture/Foursquare/OSM) and the rest; after they run, if the geo
+  total is below `settings.sparse_discovery_threshold` (default 10), it synthesizes
+  `<category> in <city>` queries from the campaign's categories × search areas (capped at
+  `sparse_fallback_max_queries`, default 5) and runs `WebSearchDiscovery` with them as a
+  backfill - yielding `source="websearch_sparse"` so attribution stays honest. Dedupes
+  synthesized queries against the campaign's own `search_queries` so Brave calls aren't
+  duplicated. Toggle: `enable_sparse_fallback` (default True). Fixes the "niche category in a
+  small town" case from PRICING_PHASES_2.md (vet clinics in Wah Cantt returned 2-5 rows from
+  Overture/OSM).
 - **Monthly usage rollup (2026-10-09):** `usage_counts` gained `monthly_count`/`last_reset_month`
   columns alongside the daily ones; `check_and_increment_usage()` enforces both caps atomically
   in one UPSERT. `api/usage.py` has `MONTHLY_LIMITS` (currently only `runs: 5`, matching

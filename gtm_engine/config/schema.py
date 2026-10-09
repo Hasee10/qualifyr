@@ -237,6 +237,15 @@ class EngineSettings(BaseModel):
     # Bounded per run to cap Brave spend; the run's max_companies still caps what gets processed.
     enable_web_search_discovery: bool = True
     web_search_max_queries_per_run: int = 6
+    # Sparse-area fallback: when the primary geo sources (Overture + Foursquare + OSM) collectively
+    # yield fewer than `sparse_discovery_threshold` companies for the campaign's niche-city combo,
+    # synthesize web-search queries ("<category> in <city>") and run WebSearchDiscovery against
+    # them even if the campaign carries no `search_queries` of its own. Fixes the "niche category
+    # in a small town" case (vet clinics in Wah Cantt returning only 2-5 rows from Overture/OSM).
+    # Capped to `sparse_fallback_max_queries` extra queries per run to bound Brave spend.
+    enable_sparse_fallback: bool = True
+    sparse_discovery_threshold: int = 10
+    sparse_fallback_max_queries: int = 5
     # External signals (all keyless): RDAP domain age, GDELT news mentions (1 req / 5.5 s).
     enable_domain_age: bool = True
     enable_news_signals: bool = True

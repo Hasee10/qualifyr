@@ -379,6 +379,33 @@ async def _area_proximity_filter(
     return kept, dropped
 
 
+def _sparse_fallback_queries(campaign: CampaignConfig, limit: int) -> list[str]:
+    """Synthesize simple "<category> in <city>" queries from the campaign's niche and areas, so
+    WebSearchDiscovery can backfill when Overture/OSM were thin. One query per (category, area)
+    pair, categories taken in order from whichever list the campaign populated (OSM categories
+    tend to read most naturally as English nouns, Overture/Foursquare labels work too), stopping
+    at `limit`. Order preserves city priority so tier-1 cities get queried first."""
+    categories = (campaign.osm_categories
+                  or campaign.overture_categories
+                  or campaign.foursquare_categories
+                  or [])
+    if not categories:
+        return []
+    areas = campaign.geography.search_areas() or []
+    if not areas:
+        return []
+    out: list[str] = []
+    for area in areas:
+        for cat in categories:
+            cat_clean = str(cat).replace("_", " ").strip()
+            if not cat_clean:
+                continue
+            out.append(f"{cat_clean} in {area}")
+            if len(out) >= limit:
+                return out
+    return out
+
+
 def _round_robin(lists: list[list]) -> list:
     """Flatten several source lists by taking one from each in turn (source order preserved
     within a round). Keeps every item; only the order changes, so a downstream cap samples all
@@ -531,42 +558,73 @@ class Pipeline:
         return False
 
     async def discover(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> list[DiscoveredCompany]:
-        sources = []
+        geo_sources: list = []
+        other_sources: list = []
         if campaign.overture_categories and campaign.geography.search_areas():
-            sources.append(OvertureDiscovery(self.fetcher, self.settings))
+            geo_sources.append(OvertureDiscovery(self.fetcher, self.settings))
         if campaign.foursquare_categories and campaign.geography.search_areas():
-            sources.append(FoursquareDiscovery(self.fetcher, self.settings))
+            geo_sources.append(FoursquareDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.search_areas():
-            sources.append(OSMDiscovery(self.fetcher, self.settings))
+            geo_sources.append(OSMDiscovery(self.fetcher, self.settings))
         if self.settings.enable_web_search_discovery and campaign.search_queries:
-            sources.append(WebSearchDiscovery(self.fetcher, self.settings,
-                                             brave_api_key=self._resolved_keys.get("brave")))
+            other_sources.append(WebSearchDiscovery(self.fetcher, self.settings,
+                                                   brave_api_key=self._resolved_keys.get("brave")))
         if "kcci" in campaign.chamber_sources:
-            sources.append(KCCIDirectory(self.fetcher, self.settings))
+            other_sources.append(KCCIDirectory(self.fetcher, self.settings))
         if "ppra" in campaign.intent_sources:
-            sources.append(self.ppra)
+            other_sources.append(self.ppra)
         if self.settings.enable_gleif_discovery and campaign.gleif_lei_queries:
-            sources.append(GLEIFDiscovery(self.fetcher, self.settings))
+            other_sources.append(GLEIFDiscovery(self.fetcher, self.settings))
         if self.settings.enable_gleif_golden_copy and campaign.geography.country_codes:
-            sources.append(GLEIFGoldenCopyDiscovery(self.settings))
+            other_sources.append(GLEIFGoldenCopyDiscovery(self.settings))
         if self.settings.enable_wikidata_discovery and campaign.wikidata_industries:
-            sources.append(WikidataDiscovery(self.fetcher, self.settings))
+            other_sources.append(WikidataDiscovery(self.fetcher, self.settings))
         if self.settings.enable_edgar_discovery and campaign.edgar_sic_codes:
-            sources.append(EDGARDiscovery(self.fetcher, self.settings))
+            other_sources.append(EDGARDiscovery(self.fetcher, self.settings))
         if self.settings.enable_companies_house and campaign.companies_house_sic_codes:
             ch_key = self._resolved_keys.get("companies_house") or self.settings.companies_house_api_key
-            sources.append(CompaniesHouseDiscovery(self.fetcher, self.settings, ch_key))
+            other_sources.append(CompaniesHouseDiscovery(self.fetcher, self.settings, ch_key))
         if campaign.seed_csv:
-            sources.append(CSVSeedDiscovery(campaign.seed_csv))
+            other_sources.append(CSVSeedDiscovery(campaign.seed_csv))
+        sources = geo_sources + other_sources
         if not sources:
             log.warning("no discovery sources configured (need osm_categories+cities or seed_csv)")
         per_source: list[list[DiscoveredCompany]] = []
+        geo_total = 0
         for src in sources:
             items: list[DiscoveredCompany] = []
             async for company in src.discover(campaign):
                 items.append(company)
             per_source.append(items)
+            if src in geo_sources:
+                geo_total += len(items)
             await _emit(progress, "discover", sum(len(s) for s in per_source), 0, f"{src.name}: {len(items)}")
+        # Sparse-area fallback: if the geo sources (Overture/Foursquare/OSM) collectively returned
+        # too few rows for this niche-city combo, backfill with WebSearchDiscovery driven by
+        # synthesized "<category> in <city>" queries - even when the campaign had no explicit
+        # search_queries. Addresses the "niche category in a small town" case (vet clinics, Wah
+        # Cantt returned 2-5 rows from Overture/OSM). Capped to bound Brave spend.
+        if (self.settings.enable_sparse_fallback
+                and geo_sources
+                and geo_total < self.settings.sparse_discovery_threshold
+                and self.settings.enable_web_search_discovery):
+            fallback_queries = _sparse_fallback_queries(
+                campaign, self.settings.sparse_fallback_max_queries)
+            if fallback_queries:
+                existing = {q.strip().lower() for q in campaign.search_queries}
+                new_queries = [q for q in fallback_queries if q.strip().lower() not in existing]
+                if new_queries:
+                    fallback_campaign = campaign.model_copy(update={"search_queries": new_queries})
+                    fallback_src = WebSearchDiscovery(self.fetcher, self.settings,
+                                                     brave_api_key=self._resolved_keys.get("brave"))
+                    fallback_items: list[DiscoveredCompany] = []
+                    async for c in fallback_src.discover(fallback_campaign):
+                        fallback_items.append(c.model_copy(update={"source": "websearch_sparse"}))
+                    log.info("sparse fallback: geo returned %d (< %d) - web search backfilled %d",
+                             geo_total, self.settings.sparse_discovery_threshold, len(fallback_items))
+                    per_source.append(fallback_items)
+                    await _emit(progress, "discover", sum(len(s) for s in per_source), 0,
+                                f"websearch_sparse: {len(fallback_items)}")
         # Round-robin across sources so a small max_companies cap still samples every source. A
         # dense source (Overture/OSM returns thousands) would otherwise exhaust the cap before a
         # single web-search or chamber result is ever processed - which was exactly the case that
