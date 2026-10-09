@@ -77,6 +77,20 @@ above: as of this check it is gated behind a sales-contact form with no transpar
 download, and the historical open-data mirror (`github.com/peopledatalabs/company-dataset`)
 now 404s. Not implemented for the same reason.
 
+## Foursquare – dataset discontinued upstream (code kept, degrades to zero)
+
+`gtm_engine/discovery/foursquare.py` was built against a legacy public S3 bucket
+(`s3://fsq-os-places-us-east-1/release/...`) serving a free, keyless snapshot of Foursquare's
+Open Source Places dataset. As of 2026-10-09 that bucket has been stripped down to just
+`LICENSE.txt`/`NOTICE.txt` – the `release/dt=*/places/parquet/*` data is gone, confirmed by
+`SELECT file FROM glob('s3://fsq-os-places-us-east-1/*')` returning only the two license files.
+Foursquare's current access path is the signup-gated "Places Portal" (Iceberg catalog), which
+breaks the free/keyless design point of this source. The code fails soft (logs a warning,
+yields nothing) rather than erroring – confirmed against two 50-campaign batches where every
+campaign had `foursquare_categories` set and zero rows came from `source=foursquare` – but it is
+effectively dead until a new keyless access path appears. Not scheduled for a rewrite against
+the gated Portal without a product decision to take on that signup.
+
 ## Future-pattern stretch sources (not implemented)
 
 Same live-API/keyless shape as GLEIF API / EDGAR – a company registry with an open HTTP
