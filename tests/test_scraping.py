@@ -58,7 +58,7 @@ def _mock_site(base: str = "https://www.zarafabrics.pk"):
 async def test_crawler_collects_key_pages(settings):
     _mock_site()
     async with HttpFetcher(settings) as fetcher:
-        snap = await SiteCrawler(fetcher, max_pages=6).crawl("https://www.zarafabrics.pk")
+        snap = await SiteCrawler(fetcher, max_pages=6, delay_s=settings.site_crawl_delay_s).crawl("https://www.zarafabrics.pk")
     assert snap.reachable and snap.https
     assert {"home", "about", "contact"} <= set(snap.pages)
     assert snap.emails[0] == "info@zarafabrics.pk"
@@ -70,7 +70,7 @@ async def test_crawler_collects_key_pages(settings):
 async def test_crawler_respects_page_budget(settings):
     _mock_site()
     async with HttpFetcher(settings) as fetcher:
-        snap = await SiteCrawler(fetcher, max_pages=2).crawl("https://www.zarafabrics.pk")
+        snap = await SiteCrawler(fetcher, max_pages=2, delay_s=settings.site_crawl_delay_s).crawl("https://www.zarafabrics.pk")
     assert set(snap.pages) == {"home", "about"}
 
 
@@ -79,7 +79,7 @@ async def test_crawler_unreachable(settings):
     respx.get(url__regex=r"https://dead\.pk.*").mock(side_effect=httpx.ConnectError("boom"))
     respx.get(url__regex=r"http://dead\.pk.*").mock(side_effect=httpx.ConnectError("boom"))
     async with HttpFetcher(settings) as fetcher:
-        snap = await SiteCrawler(fetcher).crawl("https://dead.pk")
+        snap = await SiteCrawler(fetcher, delay_s=settings.site_crawl_delay_s).crawl("https://dead.pk")
     assert not snap.reachable and snap.error.startswith("http_error")
 
 

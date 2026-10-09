@@ -597,6 +597,14 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
               {stats.discovered} discovered → {stats.after_dedupe} unique · {stats.buyer} buyers · {stats.qualified} qualified · {stats.outreach_ready} outreach-ready
             </p>
           )}
+          {stats && !!stats.min_target && (
+            <p className={`text-[11px] leading-relaxed ${stats.target_met ? "text-muted-foreground" : "text-amber-600"}`}>
+              {stats.target_met
+                ? `Guarantee met: ${stats.outreach_ready}/${stats.min_target} outreach-ready delivered` +
+                  (stats.expansion_rounds ? ` (${stats.expansion_rounds} extra round${stats.expansion_rounds === 1 ? "" : "s"})` : "")
+                : `Only found ${stats.outreach_ready} of the ${stats.min_target} guaranteed outreach-ready leads in this area — scanned the full available pool.`}
+            </p>
+          )}
         </div>
       )}
     </div>

@@ -81,7 +81,7 @@ async def test_crawler_rejects_dead_sites(settings, body, reason):
     respx.get("https://x.pk/").mock(return_value=_html(body))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     async with HttpFetcher(settings) as f:
-        snap = await SiteCrawler(f, 3).crawl("https://x.pk")
+        snap = await SiteCrawler(f, 3, delay_s=settings.site_crawl_delay_s).crawl("https://x.pk")
     assert not snap.reachable and snap.integrity_reason == reason and snap.integrity_detail
 
 
@@ -90,7 +90,7 @@ async def test_crawler_accepts_a_real_site(settings):
     respx.get("https://x.pk/").mock(return_value=_html(REAL))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     async with HttpFetcher(settings) as f:
-        snap = await SiteCrawler(f, 3).crawl("https://x.pk")
+        snap = await SiteCrawler(f, 3, delay_s=settings.site_crawl_delay_s).crawl("https://x.pk")
     assert snap.reachable and snap.integrity_reason is None
 
 
@@ -100,7 +100,7 @@ async def test_marketplace_redirect_is_not_a_website(settings):
     respx.get("https://www.daraz.pk/shop/9").mock(return_value=_html(REAL))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     async with HttpFetcher(settings) as f:
-        snap = await SiteCrawler(f, 3).crawl("https://old.pk")
+        snap = await SiteCrawler(f, 3, delay_s=settings.site_crawl_delay_s).crawl("https://old.pk")
     assert not snap.reachable and snap.integrity_reason == "off_domain_not_own" and snap.redirected_to == "daraz.pk"
 
 
@@ -110,7 +110,7 @@ async def test_genuine_move_keeps_content_and_records_new_domain(settings):
     respx.get("https://zarafabrics.com/").mock(return_value=_html(REAL))
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(404))
     async with HttpFetcher(settings) as f:
-        snap = await SiteCrawler(f, 3).crawl("https://old.pk")
+        snap = await SiteCrawler(f, 3, delay_s=settings.site_crawl_delay_s).crawl("https://old.pk")
     assert snap.reachable and snap.redirected_to == "zarafabrics.com"
 
 

@@ -52,9 +52,10 @@ def test_dead_domains_are_replaced_not_merely_dropped():
     companies = [_co(0, "http://dead0.pk"), _co(1, "http://dead1.pk"), _co(2, "http://dead2.pk"),
                  _co(3, "http://live3.pk"), _co(4, "http://live4.pk"),
                  _co(5, "http://live5.pk"), _co(6, "http://live6.pk")]
-    picked, dead = _take(companies, 4)
+    picked, dead, leftover = _take(companies, 4)
     assert [c.name for c in picked] == ["Co 3", "Co 4", "Co 5", "Co 6"]
     assert dead == 3
+    assert leftover == []
 
 
 def test_it_stops_resolving_once_the_budget_is_full():
@@ -65,20 +66,35 @@ def test_it_stops_resolving_once_the_budget_is_full():
     assert len(resolver.seen) <= 50, f"resolved {len(resolver.seen)} to fill 5 slots"
 
 
+def test_unscanned_candidates_are_returned_as_leftover():
+    # The 50-wide batch resolves 50 candidates to fill a 5-slot budget; the other 45
+    # confirmed-alive ones in that batch, plus the 450 never screened, must still be
+    # available for a guaranteed-floor expansion round, not silently dropped.
+    companies = [_co(i, f"http://live{i}.pk") for i in range(500)]
+    picked, dead, leftover = _take(companies, 5)
+    assert len(picked) == 5
+    assert dead == 0
+    assert len(leftover) == 495
+    assert leftover[0].name == "Co 5"   # already-confirmed-alive overflow from the first batch
+    assert leftover[45].name == "Co 50"  # first genuinely unscanned candidate
+
+
 def test_websiteless_companies_fill_the_tail():
     # Nothing to resolve yet, and WebsiteFinder may still find one during processing,
     # so they stay eligible rather than being screened out.
     companies = [_co(0, "http://live0.pk"), _co(1, None), _co(2, None)]
-    picked, dead = _take(companies, 3)
+    picked, dead, leftover = _take(companies, 3)
     assert [c.name for c in picked] == ["Co 0", "Co 1", "Co 2"]
     assert dead == 0
+    assert leftover == []
 
 
 def test_all_dead_yields_only_the_websiteless():
     companies = [_co(i, f"http://dead{i}.pk") for i in range(4)] + [_co(4, None)]
-    picked, dead = _take(companies, 2)
+    picked, dead, leftover = _take(companies, 2)
     assert [c.name for c in picked] == ["Co 4"]
     assert dead == 4
+    assert leftover == []
 
 
 def test_no_screening_when_candidates_do_not_exceed_the_budget():
@@ -87,9 +103,10 @@ def test_no_screening_when_candidates_do_not_exceed_the_budget():
     company for nothing. Also keeps small and offline runs off the network entirely."""
     resolver = FakeResolver()
     companies = [_co(0, "http://dead0.pk"), _co(1, "http://live1.pk")]
-    picked, dead = _take(companies, 5, resolver)
+    picked, dead, leftover = _take(companies, 5, resolver)
     assert [c.name for c in picked] == ["Co 0", "Co 1"]
     assert dead == 0
+    assert leftover == []
     assert resolver.seen == [], "no DNS should happen when screening cannot help"
 
 
@@ -152,6 +169,7 @@ def test_a_transient_failure_is_retried_before_giving_up():
 def test_no_limit_is_a_passthrough_without_any_dns():
     resolver = FakeResolver()
     companies = [_co(0, "http://dead0.pk"), _co(1, "http://live1.pk")]
-    picked, dead = _take(companies, 0, resolver)
+    picked, dead, leftover = _take(companies, 0, resolver)
     assert picked == companies and dead == 0
+    assert leftover == []
     assert resolver.seen == []

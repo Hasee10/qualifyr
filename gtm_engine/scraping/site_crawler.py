@@ -100,10 +100,15 @@ class SiteSnapshot:
 
 
 class SiteCrawler:
-    def __init__(self, fetcher: Fetcher, max_pages: int = 6, deadline_s: float | None = None):
+    def __init__(self, fetcher: Fetcher, max_pages: int = 6, deadline_s: float | None = None,
+                 delay_s: float = 0.3):
         self.fetcher = fetcher
         self.max_pages = max(1, max_pages)
         self.deadline_s = deadline_s
+        # Explicit, lower than the fetcher's default per-host courtesy delay: a company's own
+        # site is hit a handful of times by nobody else in this run, not a shared rate-limited
+        # resource (see EngineSettings.site_crawl_delay_s).
+        self.delay_s = delay_s
 
     async def crawl(self, website: str) -> SiteSnapshot:
         started = time.monotonic()
@@ -111,10 +116,10 @@ class SiteCrawler:
         if not url:
             return SiteSnapshot(website=website, final_url=None, reachable=False, https=False, error="bad_url")
 
-        home = await self.fetcher.get(url)
+        home = await self.fetcher.get(url, delay=self.delay_s)
         if not home.ok and url.startswith("https://"):
             # Small businesses often have http-only sites with broken TLS.
-            fallback = await self.fetcher.get("http://" + url[len("https://"):])
+            fallback = await self.fetcher.get("http://" + url[len("https://"):], delay=self.delay_s)
             if fallback.ok:
                 home = fallback
         if not home.ok or not home.is_html:
@@ -156,7 +161,7 @@ class SiteCrawler:
                 if candidate.rstrip("/") in visited:
                     continue
                 visited.add(candidate.rstrip("/"))
-                res = await self.fetcher.get(candidate)
+                res = await self.fetcher.get(candidate, delay=self.delay_s)
                 budget -= 1
                 if res.ok and res.is_html:
                     snap.pages[kind] = parse_page(res.final_url, res.text)

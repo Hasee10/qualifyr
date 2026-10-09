@@ -4,11 +4,14 @@ export_dir: data/exports
 user_agent: "GTMLeadEngine/0.1 (+business research; contact via site form)"
 request_timeout_s: 30          # Pakistani SMB hosting is slow; 15s lost sites that answer by ~20s
 max_response_bytes: 4000000    # stop reading a response past this size
-per_host_delay_s: 2.0
+per_host_delay_s: 2.0          # shared external services only (Overpass, Nominatim, Hunter)
+site_crawl_delay_s: 0.3        # a company's own site - not a shared rate-limited resource
 max_retries: 2
 host_failure_limit: 3          # circuit breaker: give up on a host after N consecutive failures
 per_company_timeout_s: 90     # hard ceiling per company website
-concurrency: 4
+concurrency: 6                 # companies are almost always on different hosts, so this isn't
+                                # limited by per_host_delay_s - raised now that the real
+                                # per-company bottleneck (site_crawl_delay_s) is fixed
 respect_robots: true
 enable_browser_fallback: false   # pip install -e ".[browser]" && playwright install chromium
 overpass_url: https://overpass-api.de/api/interpreter

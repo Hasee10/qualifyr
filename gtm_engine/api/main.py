@@ -358,6 +358,9 @@ class CampaignCreate(BaseModel):
     overture_categories: list[str] = Field(default=[], max_length=200)
     min_score: int = Field(default=70, ge=0, le=100)
     max_companies: int = Field(default=60, ge=1, le=1000)
+    # Guaranteed floor of qualified + outreach-ready leads the run should try to deliver.
+    # Unset -> Pipeline.run() defaults to ceil(max_companies / 3); 0 opts out of expansion.
+    min_outreach_ready: int | None = Field(default=None, ge=0, le=1000)
 
 
 def _own_campaign_count(db: Database, user_id: str | None) -> int:
@@ -399,6 +402,7 @@ def create_campaign(body: CampaignCreate, user_id: str | None = Depends(current_
             target_industries=body.target_industries, buyer_keywords=body.buyer_keywords,
             osm_categories=body.osm_categories, overture_categories=body.overture_categories,
             min_score=body.min_score, max_companies=_cap_leads(body.max_companies, user_id, email),
+            min_outreach_ready=body.min_outreach_ready,
         )
     except Exception as exc:  # noqa: BLE001 - surface pydantic's message
         db.close()
@@ -417,6 +421,7 @@ class CampaignNLRequest(BaseModel):
     # search). Bounded like every other user-supplied list.
     osm_categories: list[str] = Field(default=[], max_length=200)
     search_queries: list[str] = Field(default=[], max_length=200)
+    min_outreach_ready: int | None = Field(default=None, ge=0, le=1000)
 
 
 @app.post("/campaigns/nl", status_code=201)
@@ -466,6 +471,9 @@ async def create_campaign_nl(body: CampaignNLRequest, user_id: str | None = Depe
     if queries:
         cfg.search_queries = queries
         explanation["search_queries"] = queries
+    if body.min_outreach_ready is not None:
+        cfg.min_outreach_ready = body.min_outreach_ready
+        explanation["min_outreach_ready"] = body.min_outreach_ready
 
     db.upsert_campaign(cfg.campaign_id, cfg.name, cfg.model_dump(mode="json"), owner_id=user_id)
     db.close()
@@ -500,6 +508,7 @@ def campaign_detail(campaign_id: str) -> dict:
 
 class RunRequest(BaseModel):
     max_companies: int | None = Field(default=None, ge=1, le=1000)
+    min_outreach_ready: int | None = Field(default=None, ge=0, le=1000)
 
 
 @app.post("/campaigns/{campaign_id}/run", dependencies=[Depends(require_campaign_access)])
@@ -525,11 +534,13 @@ def run_campaign(campaign_id: str, req: RunRequest,
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
     max_companies = _cap_leads(req.max_companies or campaign.max_companies, user_id, email)
+    min_outreach_ready = req.min_outreach_ready if req.min_outreach_ready is not None else campaign.min_outreach_ready
     dispatch_workflow(
         "gather-leads.yml",
         {
             "campaign": campaign_input,
             "max_companies": str(max_companies),
+            "min_outreach_ready": "" if min_outreach_ready is None else str(min_outreach_ready),
             "user_id": user_id or "",
         },
     )

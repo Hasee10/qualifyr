@@ -123,6 +123,7 @@ def settings(tmp_path: Path, pg_schema) -> EngineSettings:
         database_url=pg_schema(),
         export_dir=tmp_path / "exports",
         per_host_delay_s=0.0,
+        site_crawl_delay_s=0.0,
         search_delay_s=0.0,
         max_retries=0,
         respect_robots=False,

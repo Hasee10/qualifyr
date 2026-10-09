@@ -43,6 +43,8 @@ async def _run(args: argparse.Namespace) -> int:
     campaign = resolve_campaign(args.campaign, settings.database_url)
     if args.max_companies:
         campaign.max_companies = args.max_companies
+    if args.min_outreach_ready is not None:
+        campaign.min_outreach_ready = args.min_outreach_ready
     db = Database(settings.database_url)
     # The pipeline runs its per-company DB writes off the event loop in worker threads; a psycopg
     # connection is not safe for concurrent use, so progress writes (which fire on the main thread
@@ -207,6 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run a campaign end-to-end and export CSVs")
     run.add_argument("campaign", help="campaign YAML path, or a campaign_id stored in the DB")
     run.add_argument("--max-companies", type=int, default=None)
+    run.add_argument("--min-outreach-ready", type=int, default=None,
+                     help="guaranteed floor of qualified+outreach-ready leads; "
+                          "unset defaults to ceil(max_companies/3), 0 disables expansion")
     run.add_argument("--log-level", default=None)
     run.set_defaults(func=lambda a: asyncio.run(_run(a)))
 

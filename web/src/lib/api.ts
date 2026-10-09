@@ -133,7 +133,8 @@ export interface Progress {
   done: number
   total: number
   message: string
-  stats: Record<string, number> | null
+  // target_met is boolean; everything else RunStats tracks is numeric.
+  stats: Record<string, number | boolean> | null
 }
 
 export interface Stats {

@@ -9,6 +9,9 @@ on:
       max_companies:
         description: Companies to process this run
         default: "60"
+      min_outreach_ready:
+        description: "Guaranteed floor of qualified+outreach-ready leads (blank = ceil(max_companies/3))"
+        default: ""
       commit_results:
         description: Commit CSVs into leads/ (otherwise artifacts only)
         type: boolean
@@ -39,6 +42,7 @@ jobs:
     env:
       CAMPAIGN: ${{ github.event.inputs.campaign || 'config/campaigns/example_retail_islamabad.yaml' }}
       MAX_COMPANIES: ${{ github.event.inputs.max_companies || '60' }}
+      MIN_OUTREACH_READY: ${{ github.event.inputs.min_outreach_ready || '' }}
       COMMIT_RESULTS: ${{ github.event.inputs.commit_results || 'true' }}
       USER_ID: ${{ github.event.inputs.user_id || '' }}
       # Infrastructure secrets (shared, repo-level)
@@ -79,7 +83,12 @@ jobs:
           restore-keys: gtm-geocode-
 
       - name: Run campaign
-        run: python -m gtm_engine.cli run "$CAMPAIGN" --max-companies "$MAX_COMPANIES"
+        run: |
+          extra_args=()
+          if [ -n "$MIN_OUTREACH_READY" ]; then
+            extra_args+=(--min-outreach-ready "$MIN_OUTREACH_READY")
+          fi
+          python -m gtm_engine.cli run "$CAMPAIGN" --max-companies "$MAX_COMPANIES" "${extra_args[@]}"
 
       - name: Mirror qualified leads to Google Sheets (when configured)
         if: env.GTM_SHEETS_SPREADSHEET_ID != ''
