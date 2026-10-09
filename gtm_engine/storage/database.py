@@ -174,6 +174,11 @@ CREATE TABLE IF NOT EXISTS usage_counts (
     last_reset_date TEXT NOT NULL,
     PRIMARY KEY (user_id, resource)
 );
+-- Monthly rollup alongside the existing daily counter: the pricing promise ("N/month") is
+-- monthly, the original schema only tracked daily. Added by migration for the same reason
+-- as campaigns.owner_id above - existing rows pick up the columns with safe defaults.
+ALTER TABLE usage_counts ADD COLUMN IF NOT EXISTS monthly_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE usage_counts ADD COLUMN IF NOT EXISTS last_reset_month TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS user_preferences (
     user_id TEXT NOT NULL,
@@ -893,41 +898,56 @@ class Database:
 
     # -- usage counts (daily per-user) ----------------------------------------
 
-    def check_and_increment_usage(self, user_id: str, resource: str, limit: int) -> bool:
-        """Atomically bump today's usage and report whether this request is within `limit`.
+    def check_and_increment_usage(self, user_id: str, resource: str, limit: int,
+                                   monthly_limit: int | None = None) -> bool:
+        """Atomically bump today's (and this month's) usage and report whether this request is
+        within both `limit` (daily) and `monthly_limit` (optional - None means no monthly cap).
 
         One statement (INSERT ... ON CONFLICT DO UPDATE ... WHERE ... RETURNING), so two
         concurrent requests can't both read an under-limit count and both proceed – the old
-        SELECT-then-UPDATE let a user slip past a daily cap under concurrency. The conditional
-        UPDATE is skipped once the cap is reached for the day, so RETURNING yields no row and we
-        deny. A new day (different last_reset_date) resets the count to 1 in the same statement."""
+        SELECT-then-UPDATE let a user slip past a cap under concurrency. The conditional UPDATE
+        is skipped once either cap is reached, so RETURNING yields no row and we deny. A new day
+        resets daily_count to 1, a new month resets monthly_count to 1, in the same statement."""
         if limit <= 0:
             return False
         today = utcnow().strftime("%Y-%m-%d")
+        month = today[:7]
+        # No monthly cap: make the monthly branch always pass by comparing against a limit
+        # the counter can never reach.
+        effective_monthly_limit = monthly_limit if monthly_limit is not None else 2**31
         row = self._execute(
-            "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date) "
-            "VALUES (%s, %s, 1, %s) "
+            "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date, "
+            "                          monthly_count, last_reset_month) "
+            "VALUES (%s, %s, 1, %s, 1, %s) "
             "ON CONFLICT (user_id, resource) DO UPDATE SET "
             "  daily_count = CASE WHEN usage_counts.last_reset_date <> EXCLUDED.last_reset_date THEN 1 "
             "                     ELSE usage_counts.daily_count + 1 END, "
-            "  last_reset_date = EXCLUDED.last_reset_date "
-            "WHERE usage_counts.last_reset_date <> EXCLUDED.last_reset_date "
-            "   OR usage_counts.daily_count < %s "
-            "RETURNING daily_count",
-            (user_id, resource, today, limit),
+            "  last_reset_date = EXCLUDED.last_reset_date, "
+            "  monthly_count = CASE WHEN usage_counts.last_reset_month <> EXCLUDED.last_reset_month THEN 1 "
+            "                     ELSE usage_counts.monthly_count + 1 END, "
+            "  last_reset_month = EXCLUDED.last_reset_month "
+            "WHERE (usage_counts.last_reset_date <> EXCLUDED.last_reset_date "
+            "       OR usage_counts.daily_count < %s) "
+            "  AND (usage_counts.last_reset_month <> EXCLUDED.last_reset_month "
+            "       OR usage_counts.monthly_count < %s) "
+            "RETURNING daily_count, monthly_count",
+            (user_id, resource, today, month, limit, effective_monthly_limit),
         ).fetchone()
         self._commit()
         return row is not None
 
     def get_usage(self, user_id: str) -> list[dict]:
         today = utcnow().strftime("%Y-%m-%d")
+        month = today[:7]
         rows = self._execute(
-            "SELECT resource, daily_count, last_reset_date FROM usage_counts WHERE user_id = %s",
+            "SELECT resource, daily_count, last_reset_date, monthly_count, last_reset_month "
+            "FROM usage_counts WHERE user_id = %s",
             (user_id,),
         ).fetchall()
         return [
             {"resource": r["resource"],
-             "daily_count": r["daily_count"] if r["last_reset_date"] == today else 0}
+             "daily_count": r["daily_count"] if r["last_reset_date"] == today else 0,
+             "monthly_count": r["monthly_count"] if r["last_reset_month"] == month else 0}
             for r in rows
         ]
 

@@ -263,6 +263,18 @@ seed is small – grow it to 50+, esp. intent-judge cases, to trust the number.*
   Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
   "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
+- **Monthly usage rollup (2026-10-09):** `usage_counts` gained `monthly_count`/`last_reset_month`
+  columns alongside the daily ones; `check_and_increment_usage()` enforces both caps atomically
+  in one UPSERT. `api/usage.py` has `MONTHLY_LIMITS` (currently only `runs: 5`, matching
+  PRICING_PHASES_2.md's Free-tier promise and the existing GH-Actions-minutes constraint) and a
+  `_monthly_limit()` helper mirroring `_limit()` (user pref `monthly_limit_{resource}` → env
+  `GTM_MONTHLY_LIMIT_{RESOURCE}` → default, capped at 10×). `PUT /settings/usage/{resource}/monthly`
+  sets the user override. Deliberately did **not** add monthly caps for hunter/places yet — the
+  draft tier table's Free=0/Pro=750/Enterprise=3000 numbers are per-tier, and there's no
+  billing/tier system yet to tell a paid account from a free one; a flat monthly cap on those two
+  today would silently disable verification/enrichment for every current user. Add once Stripe
+  billing (still unbuilt) lands and a user's tier is knowable. Settings → Usage tab shows a
+  separate "Monthly usage" card below the daily one, only for resources with a real monthly cap.
 - Monetization vote: `user_preferences` table, radio + comment in Settings; captures
   own-keys/managed-paid/undecided preference for product direction.
 - CSV + Google Sheets deep link: after download, "View in Google Sheets" link on leads page.

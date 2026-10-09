@@ -22,7 +22,9 @@ from pydantic import BaseModel, Field
 from gtm_engine import __version__
 from gtm_engine.api.auth import auth_disabled, current_user_email, current_user_id, verify_request
 from gtm_engine.api.keys import ALLOWED_KEYS, decrypt_key, encrypt_key, encryption_available
-from gtm_engine.api.usage import DEFAULT_LIMITS, MAX_LIMITS, check_usage, get_all_usage
+from gtm_engine.api.usage import (
+    DEFAULT_LIMITS, MAX_LIMITS, MONTHLY_LIMITS, MONTHLY_MAX_LIMITS, check_usage, get_all_usage,
+)
 from gtm_engine.config import CampaignConfig, load_campaign, load_defaults, load_settings, slugify_campaign_id
 from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
@@ -528,7 +530,7 @@ def run_campaign(campaign_id: str, req: RunRequest,
     # accounts are unlimited; everyone else is backstopped against spamming workflow dispatches.
     if user_id is not None and not _is_unlimited(email) and not check_usage(db, user_id, "runs"):
         db.close()
-        raise HTTPException(429, "Daily run limit reached – try again tomorrow.")
+        raise HTTPException(429, "Run limit reached for today or this month – try again later.")
     db.close()
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
@@ -1196,6 +1198,21 @@ def update_usage_limit(resource: str, body: UsageLimitBody,
     return {"ok": True, "resource": resource, "limit": clamped}
 
 
+@app.put("/settings/usage/{resource}/monthly")
+def update_monthly_usage_limit(resource: str, body: UsageLimitBody,
+                               user_id: str | None = Depends(current_user_id)) -> dict:
+    if not user_id:
+        raise HTTPException(401, "sign in to update limits")
+    if resource not in MONTHLY_LIMITS:
+        raise HTTPException(422, f"no monthly cap for resource: {resource}")
+    cap = MONTHLY_MAX_LIMITS.get(resource, 1000)
+    clamped = max(1, min(body.limit, cap))
+    db = _db()
+    db.set_preference(user_id, f"monthly_limit_{resource}", str(clamped))
+    db.close()
+    return {"ok": True, "resource": resource, "monthly_limit": clamped}
+
+
 @app.get("/settings/preferences")
 def get_preferences(user_id: str | None = Depends(current_user_id)) -> dict:
     if not user_id:
@@ -1210,7 +1227,7 @@ class PreferenceBody(BaseModel):
     value: str
 
 
-_BLOCKED_PREF_PREFIXES = ("daily_limit_",)
+_BLOCKED_PREF_PREFIXES = ("daily_limit_", "monthly_limit_")
 
 
 @app.put("/settings/preferences/{pref_key}")

@@ -161,11 +161,19 @@ function ApiKeys() {
   )
 }
 
+type UsageRow = {
+  count: number; limit: number; default_limit: number; max_limit: number
+  monthly_count?: number; monthly_limit?: number | null; monthly_default_limit?: number; monthly_max_limit?: number
+}
+
 function UsageDashboard() {
-  const [usage, setUsage] = React.useState<Record<string, { count: number; limit: number; default_limit: number; max_limit: number }>>({})
+  const [usage, setUsage] = React.useState<Record<string, UsageRow>>({})
   const [editing, setEditing] = React.useState<string | null>(null)
   const [editValue, setEditValue] = React.useState("")
   const [saving, setSaving] = React.useState(false)
+  const [monthlyEditing, setMonthlyEditing] = React.useState<string | null>(null)
+  const [monthlyEditValue, setMonthlyEditValue] = React.useState("")
+  const [monthlySaving, setMonthlySaving] = React.useState(false)
 
   const load = React.useCallback(() => { api.getUsage().then((r) => setUsage(r.usage)).catch(() => {}) }, [])
   React.useEffect(() => { load() }, [load])
@@ -175,6 +183,10 @@ function UsageDashboard() {
     { key: "groq", label: "Groq LLM", unit: "calls" },
     { key: "hunter", label: "Hunter.io", unit: "verifications" },
     { key: "places", label: "Google Places", unit: "lookups" },
+  ]
+
+  const monthlyResources = [
+    { key: "runs", label: "Campaign runs", unit: "runs" },
   ]
 
   const startEdit = (key: string) => {
@@ -194,7 +206,25 @@ function UsageDashboard() {
     } catch { /* */ } finally { setSaving(false) }
   }
 
+  const startMonthlyEdit = (key: string) => {
+    setMonthlyEditing(key)
+    setMonthlyEditValue(String(usage[key]?.monthly_limit ?? 5))
+  }
+
+  const saveMonthlyLimit = async () => {
+    if (!monthlyEditing) return
+    const val = parseInt(monthlyEditValue, 10)
+    if (!val || val < 1) return
+    setMonthlySaving(true)
+    try {
+      await api.updateMonthlyUsageLimit(monthlyEditing, val)
+      setMonthlyEditing(null)
+      load()
+    } catch { /* */ } finally { setMonthlySaving(false) }
+  }
+
   return (
+    <div className="grid gap-4">
     <Card>
       <CardHeader>
         <CardTitle>Daily usage</CardTitle>
@@ -260,6 +290,74 @@ function UsageDashboard() {
         })}
       </CardContent>
     </Card>
+    <Card>
+      <CardHeader>
+        <CardTitle>Monthly usage</CardTitle>
+        <CardDescription>
+          Resets on the 1st of each month (UTC). This is the predictable monthly cap, separate
+          from the daily limits above.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {monthlyResources.map((r) => {
+          const u = usage[r.key]
+          if (!u || u.monthly_limit == null) return null
+          const count = u.monthly_count ?? 0
+          const limit = u.monthly_limit
+          const pct = Math.min(100, Math.round((count / limit) * 100))
+          const isEditing = monthlyEditing === r.key
+          return (
+            <div key={r.key}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium">{r.label}</span>
+                <div className="flex items-center gap-2">
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={u.monthly_max_limit}
+                        value={monthlyEditValue}
+                        onChange={(e) => setMonthlyEditValue(e.target.value)}
+                        className="w-16 rounded border bg-transparent px-1.5 py-0.5 text-xs text-right"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === "Enter") saveMonthlyLimit(); if (e.key === "Escape") setMonthlyEditing(null) }}
+                      />
+                      <span className="text-xs text-muted-foreground">/ {u.monthly_max_limit} max</span>
+                      <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs" onClick={saveMonthlyLimit} disabled={monthlySaving}>
+                        <Save className="h-3 w-3" />
+                      </Button>
+                      <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setMonthlyEditing(null)}>✕</button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-xs text-muted-foreground">{count} / {limit} {r.unit}</span>
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground underline hover:text-foreground"
+                        onClick={() => startMonthlyEdit(r.key)}
+                      >
+                        edit
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn("h-full rounded-full transition-all", pct >= 90 ? "bg-destructive" : pct >= 70 ? "bg-yellow-500" : "bg-primary")}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              {isEditing && limit !== u.monthly_default_limit && (
+                <p className="text-[11px] text-muted-foreground mt-0.5">Default: {u.monthly_default_limit}</p>
+              )}
+            </div>
+          )
+        })}
+      </CardContent>
+    </Card>
+    </div>
   )
 }
 
