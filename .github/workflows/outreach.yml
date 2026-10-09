@@ -99,32 +99,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Commit send ledger
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add leads/*/outreach_ledger.json 2>/dev/null || true
-          git diff --cached --quiet && echo "ledger unchanged" && exit 0
-          git commit -m "outreach: $CAMPAIGN_ID ledger run ${{ github.run_number }} [skip ci]"
-          # main moves under a long send. Retry the rebase-and-push with growing backoff so
-          # a race against other pushes never reds a run whose sends already went out - the
-          # ledger records real emails and must not be lost to a non-fast-forward.
-          for attempt in 1 2 3 4 5 6; do
-            git fetch origin main || true
-            # Replay our ledger commit onto the latest ref. Outreach runs are globally
-            # serialized (concurrency: outreach), so no other run edits this ledger at the
-            # same time - the only failure is a non-fast-forward from unrelated pushes, which
-            # this rides out. -X theirs keeps our just-recorded sends if anything collides,
-            # and a failed rebase is aborted so the next attempt starts clean rather than
-            # deadlocking on unmerged files. The DB remains the authoritative send record.
-            if git rebase -X theirs origin/main && git push; then
-              echo "ledger pushed on attempt $attempt"
-              exit 0
-            fi
-            git rebase --abort 2>/dev/null || true
-            echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
-            sleep $((attempt * 4))
-          done
-          echo "could not push ledger after 6 attempts" >&2
-          exit 1
+      # The "Commit send ledger" step was DELETED on 2026-10-09. It auto-committed
+      # leads/*/outreach_ledger.json (recipient addresses + send timestamps - PII) into main.
+      # The database is the authoritative send record; the on-disk ledger exists only for the
+      # ledger-based double-send guard within a single runner. Nothing lead-related persists
+      # to git from CI anymore.

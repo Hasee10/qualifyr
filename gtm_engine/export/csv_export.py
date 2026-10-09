@@ -49,7 +49,7 @@ CLEAN_COLUMNS: list[str] = [
     "Company", "Website", "City", "Address", "Category", "Type", "Score", "Priority",
     "Summary", "Why it qualified", "Signals", "Contact", "Role", "Email",
     "Email status", "Confidence", "Candidate email", "Catch-all",
-    "Phone", "LinkedIn", "Source",
+    "Phone", "Exec contact", "LinkedIn", "Source",
 ]
 
 _EMAIL_STATUS_LABELS = {
@@ -90,6 +90,11 @@ def clean_row(lead: Lead) -> dict[str, str]:
         "Candidate email": lead.candidate_email or "",
         "Catch-all": "yes" if lead.email_catch_all else "",
         "Phone": lead.phone or "",
+        # Premium subset flag: a named buyer-aligned contact (choose_contact only populates
+        # contact_name when role_rank > 0, so a present name means a decision-maker-ish role)
+        # AND at least one reachable channel. Lets the reviewer filter "premium exec leads"
+        # vs the broader qualified-and-contactable set in one click, without excluding anything.
+        "Exec contact": "yes" if (lead.contact_name and (lead.contact_email or lead.phone)) else "",
         "LinkedIn": lead.linkedin_or_public_profile_url or "",
         "Source": lead.source or "",
     }

@@ -7,9 +7,15 @@ sheets-api-key.json
 Cred*.pdf
 *.pem
 
-# Data (local engine state and exports; CI publishes leads into leads/)
+# Data (local engine state and exports). As of 2026-10-09, CI no longer commits lead CSVs
+# or outreach ledgers into leads/ - the Supabase DB is authoritative and CI uploads CSVs as
+# 90-day artifacts. leads/ stays gitignored belt-and-braces so a future accidental commit of
+# PII can't happen even if someone re-adds the step.
 data/*
 !data/**/.gitkeep
+leads/
+stress_*.log
+stress_*.stdout
 
 # Node
 node_modules/

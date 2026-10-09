@@ -12,10 +12,13 @@ on:
       min_outreach_ready:
         description: "Guaranteed floor of qualified+outreach-ready leads (blank = ceil(max_companies/3))"
         default: ""
+      # commit_results input removed 2026-10-09: the step that used it was deleted below so
+      # lead CSVs never land in the repo. Operators download them from the Upload-artifact step
+      # above (90-day retention). Kept the flag so a stale dispatch URL still parses.
       commit_results:
-        description: Commit CSVs into leads/ (otherwise artifacts only)
+        description: "(deprecated, ignored) CSVs are artifact-only; never committed to the repo"
         type: boolean
-        default: true
+        default: false
       user_id:
         description: Supabase user ID (resolves per-user API keys from DB)
         default: ""
@@ -109,50 +112,12 @@ jobs:
           path: data/exports/*.csv
           retention-days: 90
 
-      - name: Commit results into leads/
-        if: env.COMMIT_RESULTS == 'true' && github.repository == 'Hasee10/qualifyr'
-        run: |
-          campaign_id=$(python -m gtm_engine.cli campaign-id "$CAMPAIGN")
-          mkdir -p "leads/$campaign_id"
-          cp data/exports/*_qualified.csv "leads/$campaign_id/"
-          cp data/exports/*_all.csv "leads/$campaign_id/"
-          # Keep a stable "latest" pointer so downstream tools have a fixed path.
-          cp "$(ls -t data/exports/*_qualified.csv | head -1)" "leads/$campaign_id/latest_qualified.csv"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add leads
-          git diff --cached --quiet && echo "no new leads" && exit 0
-          git commit -m "leads: $campaign_id run ${{ github.run_number }} [skip ci]"
-          # The branch moves under us. A crawl takes minutes, during which another
-          # campaign's run commits its own leads and ordinary development gets pushed,
-          # so a bare push fails non-fast-forward and reds the job *after* the pipeline
-          # already succeeded - losing the CSVs for a reason unrelated to the run.
-          # Each run writes only leads/<its own campaign>/, so rebasing is safe.
-          #
-          # Retry generously with growing backoff: a burst of pushes (a dev pushing several
-          # commits while the crawl runs) can lose several races in a row, and three quick
-          # tries over ~15s is not enough to outlast it. Six tries with a widening gap ride
-          # out a burst without ever failing a run whose real work already succeeded.
-          for attempt in 1 2 3 4 5 6; do
-            git fetch origin "$GITHUB_REF_NAME" || true
-            # Replay our leads commit onto the latest ref. latest_qualified.csv is a
-            # whole-file "latest pointer" that every run of this campaign rewrites, so back-
-            # to-back runs always collide on exactly that file - a plain rebase then stops
-            # with a conflict and leaves unmerged files, which no number of retries can clear.
-            # Our run owns that pointer (it is the newest export), so -X theirs makes the
-            # commit being replayed (ours) win the colliding hunk; the unique timestamped
-            # CSVs never conflict. Any other failure (a genuine race) aborts the half-done
-            # rebase so the next attempt starts from a clean tree instead of deadlocking.
-            if git rebase -X theirs "origin/$GITHUB_REF_NAME" && git push; then
-              echo "leads pushed on attempt $attempt"
-              exit 0
-            fi
-            git rebase --abort 2>/dev/null || true
-            echo "push attempt $attempt failed, retrying in $((attempt * 4))s"
-            sleep $((attempt * 4))
-          done
-          echo "could not push leads after 6 attempts" >&2
-          exit 1
+      # The "Commit results into leads/" step was DELETED on 2026-10-09. It auto-committed
+      # per-campaign CSVs into leads/<campaign_id>/ on main, which was later found to contain
+      # real lead PII in git history. Lead CSVs now live only in the Upload-artifact step above
+      # (90-day retention, downloadable from the Actions UI) and in the Supabase database -
+      # never in the git repo. Operators who need to persist leads should pull from Supabase or
+      # download the artifact.
 
       # Beyond GitHub's default failure email: open (or comment on) a tracking issue so a failed
       # scheduled crawl is visible in the repo, not just in one person's inbox. Keyless - uses
