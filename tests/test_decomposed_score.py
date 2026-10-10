@@ -240,7 +240,7 @@ def test_outreach_ready_requires_buyer_and_min_score():
     )
     score = score_lead(inputs, campaign)
     assert score.total >= campaign.min_score
-    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 # ── proximity in score ────────────────────────────────────────────────

@@ -920,12 +920,24 @@ class Pipeline:
                 provenance["intent_judge_degraded"] = f"{self.llm.name}:rate_limited_or_unavailable"
 
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence, self.settings), campaign)
-        ready = is_outreach_ready(cls, score, contact, campaign)
+        ready, skip_reason = is_outreach_ready(cls, score, contact, campaign)
         suppressed = await self._db_call(self.db.is_suppressed, domain, contact.email,
                                          owner_id=getattr(self, "_owner_id", None))
         if suppressed:
             ready = False
+            skip_reason = "suppressed"
             stats.suppressed += 1
+        # B1 (2026-10-10): every outreach-skip is logged with the specific reason so operators
+        # can see which gate dropped a lead rather than only aggregate counters.
+        if not ready and skip_reason:
+            log.info("outreach skip: company=%s campaign=%s reason=%s score=%d priority=%s",
+                     company.name, campaign.campaign_id, skip_reason, score.total, score.priority.value)
+        # B3 (2026-10-10): a qualified lead with no usable contact lands in NEEDS_CONTACT
+        # instead of silently NOT_QUEUED - operator can see it, add contact manually, promote.
+        if not ready and skip_reason == "no_usable_contact":
+            sequence_status_override = SequenceStatus.NEEDS_CONTACT
+        else:
+            sequence_status_override = None
 
         buying, pain = summarize(signals)
         gaps = online_gap_labels(online_presence)
@@ -995,7 +1007,11 @@ class Pipeline:
             source=company.source,
             source_url=company.source_url,
             outreach_ready=ready,
-            sequence_status=SequenceStatus.SUPPRESSED if suppressed else SequenceStatus.NOT_QUEUED,
+            outreach_skip_reason=skip_reason,
+            # B3: NEEDS_CONTACT when qualified-but-no-contact; SUPPRESSED when on the DNC list;
+            # NOT_QUEUED otherwise. sequence_status_override is only set for the no_contact case.
+            sequence_status=(sequence_status_override
+                             or (SequenceStatus.SUPPRESSED if suppressed else SequenceStatus.NOT_QUEUED)),
             priority=score.priority,
             technologies=signals.technologies,
             evidence={

@@ -39,6 +39,10 @@ class EmailStatus(str, Enum):
 class SequenceStatus(str, Enum):
     NOT_QUEUED = "not_queued"
     QUEUED = "queued"
+    # B3 (2026-10-10): qualified lead with no usable contact. Visible to the operator in the
+    # queue (unlike NOT_QUEUED's generic bucket); never auto-sent. Operator finds the contact
+    # manually, writes it in, promotes to QUEUED.
+    NEEDS_CONTACT = "needs_contact"
     EMAIL_1_SENT = "email_1_sent"
     FOLLOWUP_1_SENT = "followup_1_sent"
     FOLLOWUP_2_SENT = "followup_2_sent"
@@ -235,6 +239,10 @@ class Lead(BaseModel):
     email_pattern: str | None = None   # the pattern discover() landed on (first.last / flast / ...)
     email_catch_all: bool = False      # verifier flagged the domain as catch-all - any address "deliverable"
     contact_confidence: int = 0        # 0-100 single-column reachability score (see score_contact_confidence)
+    # B2 (2026-10-10): why this lead didn't become outreach_ready. None when outreach_ready=True.
+    # Values: not_a_buyer | score_below_min | priority_below_qualified | no_usable_contact | suppressed.
+    # Persists so operators can filter the CSV instead of trusting aggregate counters alone.
+    outreach_skip_reason: str | None = None
     news_mentions: list[dict] = Field(default_factory=list)
     domain_age_years: float | None = None
     intent_signals: list[dict] = Field(default_factory=list)   # IntentSignal dicts
@@ -262,6 +270,7 @@ CSV_COLUMNS: list[str] = [
     "buyer_fit_reason", "company_quality_score", "buying_signal_score", "total_score",
     "score_reason", "contact_name", "contact_role", "contact_email", "email_status",
     "candidate_email", "email_pattern", "email_catch_all", "contact_confidence",
+    "outreach_skip_reason",
     "phone", "linkedin_or_public_profile_url", "pain_signal", "buying_signal",
     "personalization_hook", "source", "source_url", "scraped_at", "outreach_ready",
     "sequence_status", "email_1_sent_at", "followup_1_at", "followup_2_at", "reply_status",

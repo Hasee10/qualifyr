@@ -160,7 +160,7 @@ def test_strong_buyer_scores_high_and_is_outreach_ready(campaign):
     assert score.total >= campaign.min_score and score.priority in (Priority.HIGH, Priority.QUALIFIED)
     assert score.total == score.review_band + score.rating_score + score.proximity_tier + score.online_gap + score.pain_evidence
     assert any("decision-maker" in r for r in score.reasons)
-    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_vendor_is_rejected_regardless_of_score(campaign):
@@ -168,21 +168,21 @@ def test_vendor_is_rejected_regardless_of_score(campaign):
     score = score_lead(inputs, campaign)
     assert score.priority == Priority.REJECT
     assert score.reasons[0].startswith("classified as VENDOR")
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_unknown_never_exceeds_review(campaign):
     inputs = _good_inputs(cls_type=CompanyType.UNKNOWN)
     score = score_lead(inputs, campaign)
     assert score.priority in (Priority.REVIEW, Priority.REJECT)
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_unverified_email_blocks_outreach(campaign):
     # Unverified email AND no phone -> unreachable.
     inputs = _good_inputs(email_status=EmailStatus.UNVERIFIED)
     score = score_lead(inputs, campaign)
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_phone_only_buyer_is_outreach_ready(campaign):
@@ -196,7 +196,7 @@ def test_phone_only_buyer_is_outreach_ready(campaign):
     inputs.contact.phone = "+92 300 1234567"
     score = score_lead(inputs, campaign)
     assert score.priority in (Priority.HIGH, Priority.QUALIFIED)
-    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_no_email_and_no_phone_is_not_outreach_ready(campaign):
@@ -204,7 +204,7 @@ def test_no_email_and_no_phone_is_not_outreach_ready(campaign):
     inputs.contact.email = None
     inputs.contact.phone = None
     score = score_lead(inputs, campaign)
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
 def test_proximity_tier_scores(campaign):
@@ -255,7 +255,7 @@ def test_wrong_website_is_held_for_review(campaign):
     )
     score = score_lead(inputs, campaign)
     assert score.priority == Priority.REVIEW
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
+    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
     assert not assess_quality(snap, "Zara Fabrics", "zarafabrics.pk").website_mismatch
 
 

@@ -207,8 +207,10 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
     )
 
 
-def is_outreach_ready(cls: Classification, score: ScoreBreakdown, contact: Contact, campaign: CampaignConfig) -> bool:
-    """Whether a qualified buyer is actually reachable.
+def is_outreach_ready(cls: Classification, score: ScoreBreakdown, contact: Contact,
+                      campaign: CampaignConfig) -> tuple[bool, str | None]:
+    """Returns (ready, skip_reason). skip_reason is None when ready=True; otherwise one of:
+    "not_a_buyer", "score_below_min", "priority_below_qualified", "no_usable_contact".
 
     A usable contact is a deliverable email OR a phone number. Phone matters because most SMBs
     in this market (shops, clinics, retailers) publish a number and run on call / WhatsApp, while
@@ -217,14 +219,20 @@ def is_outreach_ready(cls: Classification, score: ScoreBreakdown, contact: Conta
 
     The email sequencer requires a usable email on its own (see outreach.sequencer.eligible), so a
     phone-only lead is surfaced as reachable here but is never auto-emailed; it is a call/WhatsApp
-    lead for the operator."""
-    if not (
-        cls.company_type == CompanyType.BUYER
-        and score.total >= campaign.min_score
-        and score.priority in (Priority.HIGH, Priority.QUALIFIED)
-    ):
-        return False
+    lead for the operator.
+
+    (2026-10-10) Signature changed from `bool` to `(bool, reason)` so B1/B2 can log and persist
+    the specific drop reason per lead. CEO ask: every qualified lead gets outreach OR a logged
+    skip reason."""
+    if cls.company_type != CompanyType.BUYER:
+        return False, "not_a_buyer"
+    if score.total < campaign.min_score:
+        return False, "score_below_min"
+    if score.priority not in (Priority.HIGH, Priority.QUALIFIED):
+        return False, "priority_below_qualified"
     has_email = contact.email is not None and contact.email_status in (
         EmailStatus.MX_VALID, EmailStatus.GENERIC, EmailStatus.DELIVERABLE)
     has_phone = bool(contact.phone)
-    return has_email or has_phone
+    if not (has_email or has_phone):
+        return False, "no_usable_contact"
+    return True, None

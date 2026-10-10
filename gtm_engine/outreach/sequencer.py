@@ -61,7 +61,9 @@ def eligible(lead: Lead, settings: OutreachSettings) -> tuple[bool, str]:
         return False, "not outreach-ready"
     if not lead.contact_email or lead.email_status not in (EmailStatus.MX_VALID, EmailStatus.GENERIC, EmailStatus.DELIVERABLE):
         return False, "no validated email"
-    if lead.sequence_status != SequenceStatus.NOT_QUEUED:
+    # NEEDS_CONTACT leads reaching this gate means the operator added a contact and the
+    # outreach_ready + email checks above now pass; promote them like any NOT_QUEUED lead.
+    if lead.sequence_status not in (SequenceStatus.NOT_QUEUED, SequenceStatus.NEEDS_CONTACT):
         return False, f"already {lead.sequence_status.value}"
     return True, "ok"
 
@@ -74,11 +76,17 @@ def enqueue(db: Database, campaign_id: str, settings: OutreachSettings, ledger: 
     for lead in db.list_leads(campaign_id, outreach_ready=True):
         ok, why = eligible(lead, settings)
         if not ok:
-            log.debug("skip %s: %s", lead.company_name, why)
+            # B1 (2026-10-10): lifted from DEBUG to INFO so operators see every skip,
+            # not just when they bump the log level. Previously silent in production.
+            log.info("outreach enqueue skip: lead=%s campaign=%s reason=%s",
+                     lead.lead_id, campaign_id, why)
             continue
         email = lead.contact_email
         if db.is_suppressed(lead.domain, email, owner_id=owner_id) or ledger.is_stopped(email):
+            log.info("outreach enqueue skip: lead=%s campaign=%s reason=suppressed email=%s",
+                     lead.lead_id, campaign_id, email)
             lead.sequence_status = SequenceStatus.SUPPRESSED
+            lead.outreach_skip_reason = "suppressed"
             db.update_lead(lead)
             continue
         if ledger.has_sent(email, "email_1"):

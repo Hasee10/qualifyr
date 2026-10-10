@@ -49,7 +49,7 @@ CLEAN_COLUMNS: list[str] = [
     "Company", "Website", "City", "Address", "Category", "Type", "Score", "Priority",
     "Summary", "Why it qualified", "Signals", "Contact", "Role", "Email",
     "Email status", "Confidence", "Candidate email", "Catch-all",
-    "Phone", "Exec contact", "LinkedIn", "Source",
+    "Phone", "Exec contact", "LinkedIn", "Source", "Outreach skip reason",
 ]
 
 _EMAIL_STATUS_LABELS = {
@@ -97,6 +97,8 @@ def clean_row(lead: Lead) -> dict[str, str]:
         "Exec contact": "yes" if (lead.contact_name and (lead.contact_email or lead.phone)) else "",
         "LinkedIn": lead.linkedin_or_public_profile_url or "",
         "Source": lead.source or "",
+        # Why the lead didn't become outreach_ready (if applicable). Empty when outreach_ready=True.
+        "Outreach skip reason": lead.outreach_skip_reason or "",
     }
 
 
