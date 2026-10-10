@@ -13,6 +13,7 @@ import { CampaignProvider, useCampaign } from "@/components/campaign-context"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SignOutButton } from "@/components/sign-out-button"
 import { QualifyrMark } from "@/components/qualifyr-mark"
+import { TierBadge } from "@/components/tier-badge"
 
 const nav = [
   // "/" is the public landing page now; the dashboard lives at /dashboard.
@@ -33,6 +34,11 @@ function SidebarContent() {
         </span>
         <span className="text-lg font-semibold tracking-tight">Qualifyr</span>
       </Link>
+      <div className="px-5 pb-4">
+        <Link href="/settings?tab=plan">
+          <TierBadge />
+        </Link>
+      </div>
       <Separator />
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <div className="flex flex-col gap-1">

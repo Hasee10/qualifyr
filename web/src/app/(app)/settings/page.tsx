@@ -1,15 +1,19 @@
 "use client"
 
 import * as React from "react"
-import { Ban, Trash2, Save, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff, Power, Loader2 } from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Ban, Trash2, Save, Plus, Key, BarChart3, FlaskConical, Eye, EyeOff, Power, Loader2, Wallet, Check, Mail } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { api, type MailboxState, type Suppression } from "@/lib/api"
+import { api, type MailboxState, type PricingTier, type Suppression, type UsageRow } from "@/lib/api"
 import { useCampaign } from "@/components/campaign-context"
+import { useTier } from "@/lib/use-tier"
+import { TierBadge } from "@/components/tier-badge"
+import { CreditsMeter } from "@/components/credits-meter"
 import { cn } from "@/lib/utils"
 
 const KEY_INFO: Record<string, { label: string; description: string; url: string }> = {
@@ -160,9 +164,118 @@ function ApiKeys() {
   )
 }
 
-type UsageRow = {
-  count: number; limit: number; default_limit: number; max_limit: number
-  monthly_count?: number; monthly_limit?: number | null; monthly_default_limit?: number; monthly_max_limit?: number
+const TIER_LABEL: Record<string, string> = { free: "Free", pro: "Pro", enterprise: "Enterprise" }
+const UPGRADE_EMAIL = "hello@grydin.co"
+
+function upgradeMailto(tierName: string) {
+  const label = TIER_LABEL[tierName] ?? tierName
+  return `mailto:${UPGRADE_EMAIL}?subject=${encodeURIComponent(`Upgrade to ${label}`)}&body=${encodeURIComponent(`Hi, I'd like to upgrade my Qualifyr plan to ${label}.`)}`
+}
+
+/** Plan badge + credits meter + upgrade CTA, shown atop the Usage tab. Local operators and
+ *  master accounts (unlimited) skip the credits meter entirely - credit_status is computed
+ *  against the free tier's allowance for them, which would read as a false "0/30" ceiling
+ *  they never actually hit. */
+function YourPlan() {
+  const { tier, unlimited, loading } = useTier()
+  if (loading) return null
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CardTitle>Your plan</CardTitle>
+            <TierBadge />
+          </div>
+          {!unlimited && tier && tier !== "enterprise" && (
+            <a href={upgradeMailto(tier === "free" ? "pro" : "enterprise")}>
+              <Button size="sm" variant="outline"><Mail className="h-3.5 w-3.5 mr-1" /> Upgrade</Button>
+            </a>
+          )}
+        </div>
+        <CardDescription>
+          {unlimited
+            ? "This account isn't metered - no credit limits apply."
+            : "Credits are the unit of charge: 1 credit = 1 outreach-ready lead returned."}
+        </CardDescription>
+      </CardHeader>
+      {!unlimited && (
+        <CardContent>
+          <CreditsMeter />
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
+function PlansComparison() {
+  const [tiers, setTiers] = React.useState<PricingTier[]>([])
+  const { tier: currentTier, unlimited } = useTier()
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    api.pricingTiers().then((r) => setTiers(r.tiers)).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  const rows: { label: string; render: (t: PricingTier) => React.ReactNode }[] = [
+    { label: "Price", render: (t) => t.price_usd_per_month === 0 ? "Free" : `$${t.price_usd_per_month}/mo` },
+    { label: "Monthly credits", render: (t) => `${t.monthly_credits} credits` },
+    { label: "Daily throttle", render: (t) => `${t.daily_credit_throttle}/day` },
+    { label: "Leads per run", render: (t) => t.allowed_leads_per_run.join(", ") },
+    { label: "Max campaigns", render: (t) => String(t.max_campaigns) },
+    { label: "API keys", render: (t) => t.byok_only ? "Bring your own" : "Included" },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Plans</CardTitle>
+        <CardDescription>
+          1 credit = 1 outreach-ready lead returned, billed when a run finishes. Upgrading is
+          handled manually for now &ndash; email us and we&rsquo;ll set it up.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? <CheckingConfig /> : (
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[640px] grid-cols-4 gap-px overflow-hidden rounded-xl border bg-border">
+              <div className="bg-card p-4" />
+              {tiers.map((t) => {
+                const isCurrent = !unlimited && currentTier === t.name
+                return (
+                  <div key={t.name} className={cn("flex flex-col gap-2 bg-card p-4", isCurrent && "bg-brand-muted/30")}>
+                    <span className="text-sm font-semibold">{TIER_LABEL[t.name] ?? t.name}</span>
+                    {isCurrent && (
+                      <Badge className="w-fit border-transparent bg-brand text-brand-foreground">
+                        <Check className="size-3" /> Current plan
+                      </Badge>
+                    )}
+                    <span className="text-2xl font-bold">
+                      {t.price_usd_per_month === 0 ? "Free" : `$${t.price_usd_per_month}`}
+                      {t.price_usd_per_month > 0 && <span className="text-xs font-normal text-muted-foreground">/mo</span>}
+                    </span>
+                    {!isCurrent && (
+                      <a href={upgradeMailto(t.name)}>
+                        <Button size="sm" variant="outline" className="w-full"><Mail className="h-3.5 w-3.5 mr-1" /> Upgrade</Button>
+                      </a>
+                    )}
+                  </div>
+                )
+              })}
+              {rows.map((r) => (
+                <React.Fragment key={r.label}>
+                  <div className="bg-muted/30 p-4 text-sm font-medium text-muted-foreground">{r.label}</div>
+                  {tiers.map((t) => (
+                    <div key={`${r.label}-${t.name}`} className="bg-card p-4 text-sm">{r.render(t)}</div>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 function UsageDashboard() {
@@ -583,27 +696,55 @@ function Mailboxes({ campaignId }: { campaignId: string | null }) {
   )
 }
 
-export default function SettingsPage() {
+const TAB_VALUES = ["api-keys", "usage", "plan", "mailboxes", "suppressions"] as const
+
+function SettingsInner() {
   const { campaignId } = useCampaign()
-  const [tab, setTab] = React.useState("api-keys")
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedTab = searchParams.get("tab")
+  const initialTab = (TAB_VALUES as readonly string[]).includes(requestedTab ?? "") ? requestedTab! : "api-keys"
+  const [tab, setTab] = React.useState(initialTab)
+
+  const changeTab = (v: string) => {
+    setTab(v)
+    router.replace(`/settings?tab=${v}`, { scroll: false })
+  }
+
   return (
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">API keys, usage limits, mailboxes and suppressions.</p>
+        <p className="text-muted-foreground">Plan, API keys, usage limits, mailboxes and suppressions.</p>
       </div>
-      <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
+      <Tabs value={tab} onValueChange={(v) => changeTab(String(v))}>
         <TabsList>
           <TabsTrigger value="api-keys"><Key className="h-3.5 w-3.5 mr-1" />API Keys</TabsTrigger>
           <TabsTrigger value="usage"><BarChart3 className="h-3.5 w-3.5 mr-1" />Usage</TabsTrigger>
+          <TabsTrigger value="plan"><Wallet className="h-3.5 w-3.5 mr-1" />Plan</TabsTrigger>
           <TabsTrigger value="mailboxes">Mailboxes</TabsTrigger>
           <TabsTrigger value="suppressions">Suppressions</TabsTrigger>
         </TabsList>
       </Tabs>
       {tab === "api-keys" && <ApiKeys />}
       {tab === "usage" && <UsageDashboard />}
+      {tab === "plan" && (
+        <div className="grid gap-4">
+          <YourPlan />
+          <PlansComparison />
+        </div>
+      )}
       {tab === "mailboxes" && <Mailboxes campaignId={campaignId} />}
       {tab === "suppressions" && <Suppressions />}
     </div>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    // useSearchParams needs a Suspense boundary or the whole route opts out of static rendering.
+    <React.Suspense fallback={<div className="h-64" />}>
+      <SettingsInner />
+    </React.Suspense>
   )
 }

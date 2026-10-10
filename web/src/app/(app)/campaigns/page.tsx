@@ -47,8 +47,9 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   // Key availability
   const [hasGroq, setHasGroq] = React.useState<boolean | null>(null)
   const [hasBrave, setHasBrave] = React.useState<boolean | null>(null)
-  // Free-tier per-campaign lead cap, read from the backend (not hardcoded).
+  // Per-campaign lead cap and tier, read from the backend (not hardcoded).
   const [maxLeads, setMaxLeads] = React.useState<number | null>(null)
+  const [tier, setTier] = React.useState<string | null>(null)
   const [expanded, setExpanded] = React.useState(false)
 
   React.useEffect(() => {
@@ -58,7 +59,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
       setHasGroq(names.has("groq"))
       setHasBrave(names.has("brave"))
     }).catch(() => { setHasGroq(false); setHasBrave(false) })
-    api.myLimits().then((l) => setMaxLeads(l.max_leads_per_campaign)).catch(() => {})
+    api.myLimits().then((l) => { setMaxLeads(l.max_leads_per_campaign); setTier(l.unlimited ? null : l.tier) }).catch(() => {})
   }, [open])
 
   const nlMode = hasGroq === true
@@ -230,7 +231,9 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
               className="w-20 rounded-md border bg-transparent px-2 py-1 text-sm"
             />
             {maxLeads != null && (
-              <span className="text-xs text-muted-foreground">Free tier: up to {maxLeads} per campaign</span>
+              <span className="text-xs text-muted-foreground">
+                {tier ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)} plan: ` : ""}up to {maxLeads} per campaign
+              </span>
             )}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

@@ -171,6 +171,37 @@ export interface Queue {
 
 export interface Suppression { value: string; kind: string; reason: string | null; created_at: string }
 
+export interface UsageRow {
+  count: number
+  limit: number
+  default_limit: number
+  max_limit: number
+  monthly_count?: number
+  monthly_limit?: number | null
+  monthly_default_limit?: number
+  monthly_max_limit?: number
+}
+
+export interface CreditStatus {
+  tier: string
+  monthly_used: number
+  monthly_limit: number
+  monthly_remaining: number
+  daily_used: number
+  daily_limit: number
+  daily_remaining: number
+}
+
+export interface PricingTier {
+  name: string
+  price_usd_per_month: number
+  monthly_credits: number
+  daily_credit_throttle: number
+  allowed_leads_per_run: number[]
+  max_campaigns: number
+  byok_only: boolean
+}
+
 export interface MailboxState {
   address: string
   auth_mode: string
@@ -358,10 +389,10 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/settings/api-keys/${name}/test`, { method: "POST" }),
 
   // Settings: usage
-  getUsage: () => request<{ usage: Record<string, {
-    count: number; limit: number; default_limit: number; max_limit: number;
-    monthly_count?: number; monthly_limit?: number | null; monthly_default_limit?: number; monthly_max_limit?: number;
-  }> }>("/settings/usage"),
+  getUsage: () => request<{ usage: Record<string, UsageRow>; credits: CreditStatus }>("/settings/usage"),
+
+  // Pricing: static tier catalog (no auth)
+  pricingTiers: () => request<{ tiers: PricingTier[] }>("/pricing/tiers"),
   updateUsageLimit: (resource: string, limit: number) =>
     request<{ ok: boolean; resource: string; limit: number }>(`/settings/usage/${resource}`, { method: "PUT", body: JSON.stringify({ limit }) }),
   updateMonthlyUsageLimit: (resource: string, limit: number) =>

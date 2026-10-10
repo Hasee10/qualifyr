@@ -40,7 +40,10 @@ from gtm_engine.outreach.reply_state import sync_replies
 from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes, mailboxes_from_db
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
-from gtm_engine.pricing.tiers import allowed_per_run_for, credit_status, resolve_user_tier
+from gtm_engine.pricing.tiers import (
+    TIERS, allowed_per_run_for, credit_status, resolve_user_tier,
+    resolved_max_campaigns, resolved_monthly_credits,
+)
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -303,6 +306,24 @@ def my_limits(user_id: str | None = Depends(current_user_id),
         "tier": tier.name,
         "allowed_leads_per_run": allowed_per_run_for(tier),
     }
+
+
+@app.get("/pricing/tiers")
+def pricing_tiers() -> dict:
+    """Static Free/Pro/Enterprise catalog for the frontend's plan badge and pricing table.
+    No auth - this is marketing data, not account data, same as /health."""
+    return {"tiers": [
+        {
+            "name": t.name,
+            "price_usd_per_month": t.price_usd_per_month,
+            "monthly_credits": resolved_monthly_credits(t),
+            "daily_credit_throttle": t.daily_credit_throttle,
+            "allowed_leads_per_run": allowed_per_run_for(t),
+            "max_campaigns": resolved_max_campaigns(t),
+            "byok_only": t.byok_only,
+        }
+        for t in TIERS.values()
+    ]}
 
 
 def _campaign_summary(db: Database, c: CampaignConfig, file: str | None) -> dict:

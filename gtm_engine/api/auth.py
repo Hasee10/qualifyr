@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # /docs and /openapi.json are absent for a different reason - main.py does not register
 # them at all unless auth is disabled. FastAPI builds those in its own setup(), outside
 # these dependencies, so listing them here would have done nothing.
-PUBLIC_PATHS = frozenset({"/health"})
+PUBLIC_PATHS = frozenset({"/health", "/pricing/tiers"})
 
 _ALGORITHMS = ["ES256"]
 _jwk_client: PyJWKClient | None = None
