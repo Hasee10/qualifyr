@@ -19,7 +19,7 @@ export function Hero() {
 
       <div className="mx-auto max-w-6xl px-4 text-center sm:px-6">
         <span className="qf-rise inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-          Buyer-only lead engine for Pakistan &amp; the GCC
+          Buyer-only lead engine for Pakistan
         </span>
 
         <h1 className="qf-rise mx-auto mt-6 max-w-3xl text-5xl font-semibold tracking-tight sm:text-6xl" style={{ animationDelay: "80ms" }}>

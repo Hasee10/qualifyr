@@ -95,7 +95,14 @@ export function SiteFooter() {
       <div className="relative border-t">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-muted-foreground sm:flex-row sm:px-6">
           <span>© {new Date().getFullYear()} GrydIn Qualifyr. All rights reserved.</span>
-          {/* <span className="text-xs">Built on free, public data sources.</span> */}
+          <div className="flex items-center gap-4 text-xs">
+            <Link href="/terms" className="transition-colors hover:text-foreground">
+              Terms of Service
+            </Link>
+            <Link href="/privacy" className="transition-colors hover:text-foreground">
+              Privacy Policy
+            </Link>
+          </div>
         </div>
       </div>
     </footer>

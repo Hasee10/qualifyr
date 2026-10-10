@@ -18,9 +18,9 @@ const rows = [
     with: "A 0–100 score with a written reason",
   },
   {
-    task: "Catching hiring or funding signals",
-    without: "Usually you don't, until it's old news",
-    with: "Surfaced with a source link, same run",
+    task: "Spotting who needs a better online presence",
+    without: "You'd have to check every site and page by hand",
+    with: "Flagged automatically, with the specific gap and pain point",
   },
   {
     task: "Sending the first email",

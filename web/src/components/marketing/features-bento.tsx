@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ShieldCheck, Gauge, UserSearch, Radar, MailCheck, Sheet } from "lucide-react"
+import { ShieldCheck, Gauge, UserSearch, Globe, MailCheck, Sheet } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Illustration } from "@/components/marketing/illustration"
 
@@ -117,9 +117,9 @@ export function FeaturesBento() {
         />
         <FeatureCard
           className="lg:col-span-2"
-          icon={Radar}
-          title="GTM intelligence signals"
-          description="Hiring, GitHub activity, press and funding mentions – evidence of momentum, not just a static company profile."
+          icon={Globe}
+          title="Online presence gap detection"
+          description="Flags businesses with no real website, no ordering, and no social presence – and mines their public reviews for the actual pain points to pitch against."
         />
 
         <FeatureCard
