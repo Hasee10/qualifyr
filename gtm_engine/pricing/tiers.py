@@ -18,6 +18,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gtm_engine.storage.database import Database
 
 
 @dataclass(frozen=True)
@@ -93,3 +97,16 @@ def resolved_monthly_credits(tier: Tier) -> int:
 def allowed_per_run_for(tier: Tier) -> list[int]:
     """The per-run dropdown choices (P1). Returned sorted ascending."""
     return sorted(tier.allowed_leads_per_run)
+
+
+# P1 (2026-10-10): no Stripe billing yet, so tier assignment is operator-set via the
+# "tier" user_preferences row rather than a payment webhook. Deliberately NOT exposed
+# through the generic PUT /settings/preferences/{pref_key} endpoint (see
+# api/main.py's _RESERVED_PREF_KEYS) — a self-service write there would let any free
+# user hand themselves Enterprise. Set it directly in the DB until billing lands.
+def resolve_user_tier(db: "Database", user_id: str | None) -> Tier:
+    """Resolve a user's tier from their `tier` preference row. No row / no user_id -> FREE."""
+    if not user_id:
+        return FREE
+    prefs = {p["pref_key"]: p["pref_value"] for p in db.get_preferences(user_id)}
+    return tier_for(prefs.get("tier"))

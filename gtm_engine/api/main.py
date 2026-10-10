@@ -38,6 +38,7 @@ from gtm_engine.outreach.reply_state import sync_replies
 from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes, mailboxes_from_db
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
+from gtm_engine.pricing.tiers import allowed_per_run_for, resolve_user_tier
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -282,12 +283,23 @@ def health() -> dict:
 @app.get("/settings/limits")
 def my_limits(user_id: str | None = Depends(current_user_id),
               email: str | None = Depends(current_user_email)) -> dict:
-    """The caller's effective quota. null means unlimited (local operator or master account)."""
+    """The caller's effective quota. null means unlimited (local operator or master account).
+
+    P1 (2026-10-10): adds `tier` + `allowed_leads_per_run` so the frontend can render the
+    per-run lead-count dropdown from the caller's actual tier instead of a hardcoded list.
+    The older `max_campaigns`/`max_leads_per_campaign` fields stay for back-compat with
+    existing frontend code that hasn't switched to the tier fields yet.
+    """
     unlimited = user_id is None or _is_unlimited(email)
+    db = _db()
+    tier = resolve_user_tier(db, user_id)
+    db.close()
     return {
         "unlimited": unlimited,
         "max_campaigns": None if unlimited else FREE_MAX_CAMPAIGNS,
         "max_leads_per_campaign": None if unlimited else FREE_MAX_LEADS_PER_CAMPAIGN,
+        "tier": tier.name,
+        "allowed_leads_per_run": allowed_per_run_for(tier),
     }
 
 
@@ -533,10 +545,26 @@ def run_campaign(campaign_id: str, req: RunRequest,
         db.close()
         raise HTTPException(429, "Run limit reached for today or this month – try again later.")
     db.close()
+    # P1 (2026-10-10): leads_per_run (req.max_companies) is a dropdown choice on the
+    # frontend, sourced from GET /settings/limits.allowed_leads_per_run — so an explicit
+    # value outside the caller's tier means a stale client or a direct API call, not a
+    # legitimate choice. Local operators and master accounts (unlimited) aren't tier-gated.
+    # A validated explicit choice is trusted as-is (no further flat-10 clamp below) so
+    # Pro/Enterprise accounts actually get their tier's higher per-run ceilings.
+    if req.max_companies is not None and user_id is not None and not _is_unlimited(email):
+        db = _db()
+        tier = resolve_user_tier(db, user_id)
+        db.close()
+        allowed = allowed_per_run_for(tier)
+        if req.max_companies not in allowed:
+            raise HTTPException(400, f"{req.max_companies} leads/run is not available on the "
+                                      f"{tier.name} tier. Choose one of: {allowed}")
+        max_companies = req.max_companies
+    else:
+        max_companies = _cap_leads(req.max_companies or campaign.max_companies, user_id, email)
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
-    max_companies = _cap_leads(req.max_companies or campaign.max_companies, user_id, email)
     min_outreach_ready = req.min_outreach_ready if req.min_outreach_ready is not None else campaign.min_outreach_ready
     dispatch_workflow(
         "gather-leads.yml",
@@ -1226,6 +1254,10 @@ class PreferenceBody(BaseModel):
 
 
 _BLOCKED_PREF_PREFIXES = ("daily_limit_", "monthly_limit_")
+# "tier" is operator-only (resolve_user_tier in pricing/tiers.py) — there is no Stripe
+# billing yet, so a self-service write here would let any free user grant themselves
+# Enterprise. Exact-match block since it's a short, otherwise-unprefixed key.
+_RESERVED_PREF_KEYS = {"tier"}
 
 
 @app.put("/settings/preferences/{pref_key}")
@@ -1233,6 +1265,8 @@ def set_preference(pref_key: str, body: PreferenceBody,
                    user_id: str | None = Depends(current_user_id)) -> dict:
     if not user_id:
         raise HTTPException(401, "sign in to save preferences")
+    if pref_key in _RESERVED_PREF_KEYS:
+        raise HTTPException(403, f"'{pref_key}' is not user-settable")
     if any(pref_key.startswith(p) for p in _BLOCKED_PREF_PREFIXES):
         raise HTTPException(422, f"use PUT /settings/usage/{{resource}} to change usage limits")
     if len(pref_key) > 100:

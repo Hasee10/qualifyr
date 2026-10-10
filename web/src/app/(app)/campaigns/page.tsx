@@ -525,11 +525,21 @@ function yamlVal(v: unknown): string {
 
 function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: () => void }) {
   const { keyCount } = useCampaign()
+  const [allowedLeads, setAllowedLeads] = React.useState<number[]>([3, 5, 10])
   const [max, setMax] = React.useState(String(campaign.max_companies))
   const [progress, setProgress] = React.useState<RunProgress | null>(campaign.live)
   const [error, setError] = React.useState<string | null>(null)
   const running = progress && !["idle", "completed", "failed"].includes(progress.stage)
   const noKeys = keyCount === 0
+
+  // Tier-gated dropdown choices (P1) – the server also validates this, but offering only
+  // the caller's actual tier options up front avoids a round-trip 400.
+  React.useEffect(() => {
+    api.myLimits().then((l) => {
+      setAllowedLeads(l.allowed_leads_per_run)
+      setMax((cur) => (l.allowed_leads_per_run.includes(Number(cur)) ? cur : String(l.allowed_leads_per_run[0])))
+    }).catch(() => {})
+  }, [])
 
   // Adopt the server's live status whenever the campaign list refreshes (e.g. after returning
   // to the page) – unless a local poll is already tracking an active run, so finer-grained
@@ -572,7 +582,16 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Input className="w-20 h-8 text-sm" value={max} onChange={(e) => setMax(e.target.value)} disabled={!!running} />
+        <select
+          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+          value={max}
+          onChange={(e) => setMax(e.target.value)}
+          disabled={!!running}
+        >
+          {allowedLeads.map((n) => (
+            <option key={n} value={n}>{n} leads</option>
+          ))}
+        </select>
         <Button size="sm" onClick={start} disabled={!!running || noKeys} title={noKeys ? "Add at least one API key in Settings first" : undefined}>
           <Play className="size-3.5" /> {running ? "Running…" : "Run"}
         </Button>

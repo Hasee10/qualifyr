@@ -60,7 +60,45 @@ def test_health_exposes_limits(client):
 
 def test_my_limits_reports_free_tier(client):
     r = client.get("/settings/limits").json()
-    assert r == {"unlimited": False, "max_campaigns": 3, "max_leads_per_campaign": 10}
+    assert r == {
+        "unlimited": False, "max_campaigns": 3, "max_leads_per_campaign": 10,
+        "tier": "free", "allowed_leads_per_run": [3, 5, 10],
+    }
+
+
+def test_run_rejects_leads_per_run_outside_free_tier(client):
+    cid = _create(client, "Run Me").json()["campaign_id"]
+    r = client.post(f"/campaigns/{cid}/run", json={"max_companies": 50})
+    assert r.status_code == 400
+    assert "free tier" in r.json()["detail"]
+
+
+def test_run_accepts_leads_per_run_within_free_tier(client, monkeypatch):
+    import gtm_engine.api.main as m
+    monkeypatch.setattr(m, "dispatch_workflow", lambda *a, **k: None)
+    cid = _create(client, "Run Me Too").json()["campaign_id"]
+    r = client.post(f"/campaigns/{cid}/run", json={"max_companies": 5})
+    assert r.status_code == 200, r.text
+
+
+def test_tier_preference_is_not_user_settable(client):
+    r = client.put("/settings/preferences/tier", json={"value": "enterprise"})
+    assert r.status_code == 403
+    # Confirms it didn't silently write through: limits still report free.
+    assert client.get("/settings/limits").json()["tier"] == "free"
+
+
+def test_pro_tier_unlocks_bigger_leads_per_run(client, settings, monkeypatch):
+    import gtm_engine.api.main as m
+    monkeypatch.setattr(m, "dispatch_workflow", lambda *a, **k: None)
+    db = Database(settings.database_url)
+    db.set_preference("user-free-1", "tier", "pro")
+    db.close()
+    r = client.get("/settings/limits").json()
+    assert r["tier"] == "pro"
+    assert 50 in r["allowed_leads_per_run"]
+    cid = _create(client, "Pro Run").json()["campaign_id"]
+    assert client.post(f"/campaigns/{cid}/run", json={"max_companies": 50}).status_code == 200
 
 
 @pytest.fixture
