@@ -130,12 +130,18 @@ class GroqLLM:
 
     async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
         await _GROQ_BUCKET.acquire(_estimate_tokens(system, user, max_tokens))
+        payload = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if self.model.startswith("openai/gpt-oss"):
+            # gpt-oss reasoning models default to "medium" reasoning effort, which on longer,
+            # constraint-heavy prompts can consume the entire max_tokens budget on chain-of-
+            # thought before emitting any content (finish_reason="length", empty message).
+            # "low" leaves the budget for the actual answer.
+            payload["reasoning_effort"] = "low"
         async with httpx.AsyncClient(timeout=60) as c:
             r = await _post_with_retry(
                 c, "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "temperature": 0, "max_tokens": max_tokens,
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+                headers={"Authorization": f"Bearer {self.api_key}"}, json=payload)
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
 
