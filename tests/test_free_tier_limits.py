@@ -101,6 +101,53 @@ def test_pro_tier_unlocks_bigger_leads_per_run(client, settings, monkeypatch):
     assert client.post(f"/campaigns/{cid}/run", json={"max_companies": 50}).status_code == 200
 
 
+def test_consume_credits_tracked_monthly(settings):
+    """P2: Database.consume_credits accumulates against the shared usage_counts table and is
+    readable back via the generic get_usage (same path /settings/usage reports from)."""
+    db = Database(settings.database_url)
+    db.consume_credits("user-credits-1", 4)
+    db.consume_credits("user-credits-1", 3)
+    rows = {r["resource"]: r for r in db.get_usage("user-credits-1")}
+    assert rows["credits"]["monthly_count"] == 7
+    assert rows["credits"]["daily_count"] == 7
+    db.close()
+
+
+def test_run_rejected_when_monthly_credits_exhausted(client, settings):
+    """P2 pre-run gate: a free-tier user who has already consumed their monthly credit
+    allowance (30) is blocked from starting a new run, even one that fits the leads-per-run
+    dropdown."""
+    db = Database(settings.database_url)
+    db.consume_credits("user-free-1", 30)
+    db.close()
+    cid = _create(client, "No Credits Left").json()["campaign_id"]
+    r = client.post(f"/campaigns/{cid}/run", json={"max_companies": 3})
+    assert r.status_code == 402
+    assert "credits" in r.json()["detail"]
+
+
+def test_run_allowed_within_remaining_credits(client, settings, monkeypatch):
+    import gtm_engine.api.main as m
+    monkeypatch.setattr(m, "dispatch_workflow", lambda *a, **k: None)
+    db = Database(settings.database_url)
+    db.consume_credits("user-free-1", 5)  # free tier: 10/day, 30/month - 5 leaves room for 5 more today
+    db.close()
+    cid = _create(client, "Just Enough Credits").json()["campaign_id"]
+    r = client.post(f"/campaigns/{cid}/run", json={"max_companies": 5})
+    assert r.status_code == 200, r.text
+
+
+def test_credits_surfaced_in_settings_usage(client, settings):
+    db = Database(settings.database_url)
+    db.consume_credits("user-free-1", 6)
+    db.close()
+    r = client.get("/settings/usage").json()
+    assert r["credits"]["tier"] == "free"
+    assert r["credits"]["monthly_used"] == 6
+    assert r["credits"]["monthly_limit"] == 30
+    assert r["credits"]["monthly_remaining"] == 24
+
+
 @pytest.fixture
 def master_client(settings, tmp_path, monkeypatch):
     """A client acting as a master (unlimited) account via the UNLIMITED_EMAILS allowlist."""

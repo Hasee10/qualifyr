@@ -61,6 +61,12 @@ async def _run(args: argparse.Namespace) -> int:
         raise
     progress_db.set_run_progress(campaign.campaign_id, result.run_id, "completed", 0, 0, "done")
     progress_db.close()
+    # P2 (2026-10-10): credits are billed at run completion - 1 credit per outreach_ready
+    # lead actually returned, not per lead attempted. Local/operator campaigns (no owner_id)
+    # aren't tracked - there's no tier to bill against.
+    owner_id = db.campaign_owner(campaign.campaign_id)
+    if owner_id:
+        db.consume_credits(owner_id, result.stats.outreach_ready)
     if getattr(fetcher, "fallbacks", 0):
         print(f"  browser fallback rendered {fetcher.fallbacks} page(s)")
 
@@ -174,6 +180,9 @@ async def _nl(args: argparse.Namespace) -> int:
         raise
     progress_db.set_run_progress(cfg.campaign_id, result.run_id, "completed", 0, 0, "done")
     progress_db.close()
+    owner_id = db.campaign_owner(cfg.campaign_id)
+    if owner_id:
+        db.consume_credits(owner_id, result.stats.outreach_ready)
 
     s = result.stats
     print(f"\nrun {result.run_id} finished")

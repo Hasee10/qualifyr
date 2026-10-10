@@ -951,6 +951,32 @@ class Database:
             for r in rows
         ]
 
+    def consume_credits(self, user_id: str, amount: int) -> None:
+        """Record `amount` credits consumed (P2: 1 credit = 1 outreach_ready lead returned),
+        stored as the "credits" row in the same usage_counts table as the daily API-call
+        counters above. Called once at run completion with the run's actual outreach_ready
+        count - always recorded, even past a tier cap, since the leads already shipped; it's
+        the pre-run gate (credits_remaining in pricing/tiers.py) that prevents overconsumption
+        going forward, not this write."""
+        if amount <= 0:
+            return
+        today = utcnow().strftime("%Y-%m-%d")
+        month = today[:7]
+        self._execute(
+            "INSERT INTO usage_counts (user_id, resource, daily_count, last_reset_date, "
+            "                          monthly_count, last_reset_month) "
+            "VALUES (%s, 'credits', %s, %s, %s, %s) "
+            "ON CONFLICT (user_id, resource) DO UPDATE SET "
+            "  daily_count = CASE WHEN usage_counts.last_reset_date <> EXCLUDED.last_reset_date THEN %s "
+            "                     ELSE usage_counts.daily_count + %s END, "
+            "  last_reset_date = EXCLUDED.last_reset_date, "
+            "  monthly_count = CASE WHEN usage_counts.last_reset_month <> EXCLUDED.last_reset_month THEN %s "
+            "                     ELSE usage_counts.monthly_count + %s END, "
+            "  last_reset_month = EXCLUDED.last_reset_month",
+            (user_id, amount, today, amount, month, amount, amount, amount, amount),
+        )
+        self._commit()
+
     # -- user preferences -----------------------------------------------------
 
     def get_preferences(self, user_id: str) -> list[dict]:

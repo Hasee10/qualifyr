@@ -110,3 +110,22 @@ def resolve_user_tier(db: "Database", user_id: str | None) -> Tier:
         return FREE
     prefs = {p["pref_key"]: p["pref_value"] for p in db.get_preferences(user_id)}
     return tier_for(prefs.get("tier"))
+
+
+# P2 (2026-10-10): credits are the unit of charge - 1 credit = 1 outreach_ready lead
+# returned (Database.consume_credits, called at run completion). This reads the same
+# "credits" usage_counts row for the pre-run gate in api/main.py's run_campaign.
+def credit_status(db: "Database", user_id: str, tier: Tier) -> dict:
+    """This month's/today's credit consumption against the user's tier allowance."""
+    rows = {r["resource"]: r for r in db.get_usage(user_id)}
+    credits = rows.get("credits", {"daily_count": 0, "monthly_count": 0})
+    monthly_limit = resolved_monthly_credits(tier)
+    daily_limit = tier.daily_credit_throttle
+    return {
+        "monthly_used": credits["monthly_count"],
+        "monthly_limit": monthly_limit,
+        "monthly_remaining": max(0, monthly_limit - credits["monthly_count"]),
+        "daily_used": credits["daily_count"],
+        "daily_limit": daily_limit,
+        "daily_remaining": max(0, daily_limit - credits["daily_count"]),
+    }

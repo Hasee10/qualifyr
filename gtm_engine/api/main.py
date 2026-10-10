@@ -38,7 +38,7 @@ from gtm_engine.outreach.reply_state import sync_replies
 from gtm_engine.outreach.mailboxes import MailboxPool, load_mailboxes, mailboxes_from_db
 from gtm_engine.outreach.sequencer import ACTIVE, enqueue, prepare_drafts, send_due, stop_lead
 from gtm_engine.outreach.templates import render
-from gtm_engine.pricing.tiers import allowed_per_run_for, resolve_user_tier
+from gtm_engine.pricing.tiers import allowed_per_run_for, credit_status, resolve_user_tier
 from gtm_engine.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -551,17 +551,35 @@ def run_campaign(campaign_id: str, req: RunRequest,
     # legitimate choice. Local operators and master accounts (unlimited) aren't tier-gated.
     # A validated explicit choice is trusted as-is (no further flat-10 clamp below) so
     # Pro/Enterprise accounts actually get their tier's higher per-run ceilings.
-    if req.max_companies is not None and user_id is not None and not _is_unlimited(email):
+    tier = None
+    db = None
+    if user_id is not None and not _is_unlimited(email):
         db = _db()
         tier = resolve_user_tier(db, user_id)
-        db.close()
+    if req.max_companies is not None and tier is not None:
         allowed = allowed_per_run_for(tier)
         if req.max_companies not in allowed:
+            db.close()
             raise HTTPException(400, f"{req.max_companies} leads/run is not available on the "
                                       f"{tier.name} tier. Choose one of: {allowed}")
         max_companies = req.max_companies
     else:
         max_companies = _cap_leads(req.max_companies or campaign.max_companies, user_id, email)
+    # P2 (2026-10-10): credits are the unit of charge - 1 credit = 1 outreach_ready lead
+    # returned, billed at run completion (cli.py, after the pipeline finishes). This gate is
+    # pessimistic: it blocks a run that COULD cost up to max_companies credits even though the
+    # actual run may return fewer outreach_ready leads and cost less. Unlimited/local accounts
+    # skip this (tier is None for them).
+    if tier is not None:
+        status = credit_status(db, user_id, tier)
+        db.close()
+        if status["monthly_remaining"] < max_companies:
+            raise HTTPException(402, f"not enough credits: {status['monthly_remaining']} left "
+                                      f"this month (resets monthly), this run could cost up to "
+                                      f"{max_companies}")
+        if status["daily_remaining"] < max_companies:
+            raise HTTPException(429, f"daily credit throttle reached: {status['daily_remaining']} "
+                                      f"left today, this run could cost up to {max_companies}")
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
@@ -1201,8 +1219,13 @@ def usage_dashboard(user_id: str | None = Depends(current_user_id)) -> dict:
         raise HTTPException(401, "sign in to view usage")
     db = _db()
     usage = get_all_usage(db, user_id)
+    tier = resolve_user_tier(db, user_id)
+    credits = credit_status(db, user_id, tier)
     db.close()
-    return {"usage": usage}
+    # P2 (2026-10-10): credits surfaced separately from `usage` above - credits are
+    # tier-derived (not a flat DEFAULT_LIMITS resource), so they don't fit get_all_usage's
+    # daily_limit_*/monthly_limit_* preference-override model.
+    return {"usage": usage, "credits": {"tier": tier.name, **credits}}
 
 
 class UsageLimitBody(BaseModel):
