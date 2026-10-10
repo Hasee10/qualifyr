@@ -361,7 +361,8 @@ class CampaignCreate(BaseModel):
     min_score: int = Field(default=70, ge=0, le=100)
     max_companies: int = Field(default=60, ge=1, le=1000)
     # Guaranteed floor of qualified + outreach-ready leads the run should try to deliver.
-    # Unset -> Pipeline.run() defaults to ceil(max_companies / 3); 0 opts out of expansion.
+    # Unset -> Pipeline.run() defaults to max_companies itself (P3: max_companies is the
+    # user's lead target); 0 opts out of expansion.
     min_outreach_ready: int | None = Field(default=None, ge=0, le=1000)
 
 

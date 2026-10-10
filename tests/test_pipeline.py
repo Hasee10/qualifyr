@@ -241,7 +241,11 @@ async def test_expansion_pulls_more_when_floor_is_not_met(campaign, settings, de
     honestly instead of silently returning fewer leads than promised."""
     _mock_world(settings)
     campaign.geography.cities = ["Islamabad"]
-    campaign.max_companies = 1
+    # P3 (2026-10-10): max_companies is now the user's lead target itself, and
+    # min_outreach_ready is capped at it — so the floor here must be <= max_companies
+    # for this test to still exercise "floor requested but unreachable" rather than
+    # the newer "floor silently capped down to the target" path.
+    campaign.max_companies = 2
     campaign.min_outreach_ready = 2
     db = Database(settings.database_url)
     from gtm_engine.models import DiscoveredCompany

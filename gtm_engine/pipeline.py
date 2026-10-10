@@ -941,8 +941,12 @@ class Pipeline:
 
         buying, pain = summarize(signals)
         gaps = online_gap_labels(online_presence)
+        # P5 (2026-10-10): CEO direction - deterministic personalization only. Passing
+        # llm=None forces the deterministic fallback path in generate_pitch_angle; no LLM
+        # call per lead. Same pitch quality floor for every tier, zero per-lead LLM cost,
+        # removes a major contributor to the Groq 429 cascade seen in 2026-10-09.
         pitch = await generate_pitch_angle(
-            self.llm, campaign.offer, company.name,
+            None, campaign.offer, company.name,
             online_gaps=gaps,
             pain_signals=list(signals.pain.keys()) if signals.pain else [],
             buying_signals=list(signals.buying.keys()) if signals.buying else [],
@@ -1188,14 +1192,21 @@ class Pipeline:
                 dedupe_msg += f" ({stats.discovery_relevance_dropped} irrelevant dropped)"
             await _emit(progress, "dedupe", len(batch), len(batch), dedupe_msg)
 
-            # Guaranteed-floor expansion: a run should not just stop at max_companies if that
-            # batch under-delivers qualified+outreach-ready leads. min_outreach_ready unset
-            # defaults to a third of max_companies (the "30 in -> 10 out" promise); 0 means the
-            # caller explicitly wants today's single-pass behavior.
+            # Guaranteed-floor expansion (P3, 2026-10-10): max_companies is now the user's
+            # lead target itself, not an input-company budget. min_outreach_ready unset ->
+            # the floor is max_companies (deliver exactly what was asked for, no more). An
+            # explicit min_outreach_ready is a one-shot override but is capped at
+            # max_companies so a run can never return more leads than requested; 0 opts out
+            # of expansion entirely (single-pass behavior).
             if campaign.min_outreach_ready is None:
-                stats.min_target = math.ceil(campaign.max_companies / 3)
+                stats.min_target = campaign.max_companies
             else:
-                stats.min_target = campaign.min_outreach_ready
+                stats.min_target = min(campaign.min_outreach_ready, campaign.max_companies) \
+                    if campaign.min_outreach_ready > 0 else 0
+            # max_expansion_multiplier is an internal safety ceiling (not user-settable, see
+            # schema.py) bounding how many companies a round may crawl while chasing the
+            # floor above — this is what stops a 10-lead run from scraping hundreds of
+            # companies looking for them.
             expansion_ceiling = max(campaign.max_companies,
                                     int(campaign.max_companies * campaign.max_expansion_multiplier))
 

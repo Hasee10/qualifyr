@@ -115,16 +115,24 @@ class CampaignConfig(BaseModel):
     # US SEC EDGAR SIC codes, e.g. ["5961"] (catalog/mail-order houses).
     edgar_sic_codes: list[str] = Field(default_factory=list)
     min_score: int = 40
-    max_companies: int = 150
+    # max_companies is the user-visible per-run lead target (renamed semantics 2026-10-10 for P3).
+    # The user chooses this via the "leads this run" dropdown (3/5/10/...). The pipeline will
+    # stop as soon as it has that many outreach_ready leads, OR exhausts the expansion ceiling
+    # below, whichever comes first. No more infinite loops: if a 50-lead run finds 33, it
+    # stops at 33 and reports partial.
+    max_companies: int = 10
     # Guaranteed floor of qualified + outreach-ready leads the run should try to deliver,
     # expanding into the already-discovered pool beyond max_companies if the first pass falls
-    # short. Unset (None) -> Pipeline.run() applies ceil(max_companies / 3) as the default
-    # target. Explicit 0 opts out of expansion entirely (today's single-pass behavior).
+    # short. Unset (None) -> Pipeline.run() uses `max_companies` as the floor. Explicit 0 opts
+    # out of expansion entirely (today's single-pass behavior). Capped at max_companies now
+    # (P3): a run can never produce more than max_companies outreach_ready leads.
     min_outreach_ready: int | None = None
-    # Hard ceiling on how many companies a single run may process while trying to hit
-    # min_outreach_ready, expressed as a multiple of max_companies. Bounds worst-case run
-    # time/cost regardless of how far short of the floor the first passes land.
-    max_expansion_multiplier: float = 4.0
+    # P3 (2026-10-10): internal safety ceiling, not user-settable. The expansion loop may
+    # process at most max_companies * MAX_EXPANSION_MULTIPLIER_INTERNAL companies before
+    # giving up and reporting partial. Hard-coded to 3 so a 10-lead run never crawls more
+    # than 30 companies looking for them. Replaces the former `max_expansion_multiplier`
+    # field which was user-settable (bad: user could ask for 10× scraping).
+    max_expansion_multiplier: float = 3.0
     max_pages_per_site: int = 6
     allow_multiple_contacts_per_company: bool = False
     # Drop branches of national/international chains (OSM `brand` tag): decisions are not
