@@ -99,6 +99,18 @@ from scratch:
   resolution's registration-number tier.
 - **Norway Brreg** – `https://data.brreg.no` – organisation number, same tier.
 
+## Multi-email key resolution (P6, 2026-10-10)
+
+Supabase auth is 1 user = 1 email. API keys are stored in `user_api_keys(user_id, key_name)`
+with `(user_id, key_name) UNIQUE`. If one human has multiple Supabase accounts (one per
+email), each account has its own key set — there's no cross-email sharing. Signing in with
+a different email means re-adding every key from scratch.
+
+**No code change this round.** If this needs to change (e.g. a team of 3 shares one Groq
+key), the right fix is Orgs: a new `orgs` table + `org_members` + fallback resolution
+user → org → operator env var. Estimated ~2-3 days of work; not scoped for this release —
+revisit if customer demand materializes.
+
 ## Where they are read
 
 - Mailboxes: `gtm_engine/outreach/mailboxes.py` (`load_mailboxes`)
