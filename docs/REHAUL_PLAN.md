@@ -17,20 +17,25 @@ in-flight.
 | # | Item | Status | Commit |
 |---|---|---|---|
 | plan | REHAUL_PLAN.md | ✅ done | `(this commit)` |
-| A1 | Delete Foursquare | ⏳ pending | — |
-| A2 | Hide 5 global registries behind `GTM_UNLOCK_GLOBAL` | ⏳ pending | — |
-| A3 | OSM warn-and-continue when Overpass fails | ⏳ pending | — |
-| B1 | Per-lead `outreach skip` log at every drop point | ⏳ pending | — |
-| B2 | `Lead.outreach_skip_reason` field + CSV column | ⏳ pending | — |
-| B3 | `SequenceStatus.NEEDS_CONTACT` for qualified-no-contact | ⏳ pending | — |
-| C1 | `evidence["intent_judge_degraded"]` on LLM 429 | ⏳ pending | — |
-| P4 | Three tiers as data (`gtm_engine/pricing/tiers.py`) | ⏳ pending | — |
-| P3 | Hard `max_leads_hard_cap` + remove multiplier knob | ⏳ pending | — |
+| A1 | Delete Foursquare | ✅ done | `4437fc7` |
+| A2 | Hide 5 global registries behind `GTM_UNLOCK_GLOBAL` | ✅ done | `19c4de5` |
+| A3 | OSM warn-and-continue when Overpass fails | ✅ done | `cdfe6d6` |
+| B1 | Per-lead `outreach skip` log at every drop point | ✅ done | `2873c05` |
+| B2 | `Lead.outreach_skip_reason` field + CSV column | ✅ done | `2873c05` |
+| B3 | `SequenceStatus.NEEDS_CONTACT` for qualified-no-contact | ✅ done | `2873c05` |
+| C1 | `evidence["intent_judge_degraded"]` on LLM 429 | ✅ done | `c029369` |
+| P4 | Three tiers as data (`gtm_engine/pricing/tiers.py`) | ✅ done | `4058f28` |
+| P3 | Hard `max_leads_hard_cap` + remove multiplier knob | ✅ done | `4058f28` |
+| P5 | Deterministic personalization only (`llm=None` in `generate_pitch_angle`)* | ✅ done | `4058f28` |
 | P1 | Per-run `leads_per_run` dropdown (3/5/10/…) | ⏳ pending | — |
 | P2 | Credit-based accounting (`credits_consumed`) | ⏳ pending | — |
-| P5 | Tier-gated personalization (basic / LLM / custom) | ⏳ pending | — |
 | P6 | Document multi-email key resolution | ⏳ pending | — |
 | test | End-to-end campaign before/after | ⏳ pending | — |
+
+\* P5 as landed is partial: only the `llm=None` call-site change shipped (forces the
+existing deterministic fallback path). The fuller P5 scope in the plan below — deleting
+`generate_pitch_angle`/`build_research_brief` from `llm/tasks.py` and dropping
+`pitch_angle` from CSV exports — has not been done yet.
 
 ---
 
