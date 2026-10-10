@@ -27,10 +27,11 @@ def app(settings, tmp_path, monkeypatch):
     from gtm_engine.api.auth import verify_request
     monkeypatch.setattr(m, "_settings", settings)
     monkeypatch.setattr(m, "dispatch_workflow", lambda *a, **k: None)
-    # These tests probe concurrency and scale, not the free-tier quota (which has its own
-    # tests). Lift the caps so a 50-campaign dedup race and an 800-lead listing can run.
-    monkeypatch.setattr(m, "FREE_MAX_CAMPAIGNS", 10_000)
-    monkeypatch.setattr(m, "FREE_MAX_LEADS_PER_CAMPAIGN", 10_000)
+    # These tests probe concurrency and scale, not the free-tier quota or the credit-tier
+    # gate (both have their own tests). Treat every test user as unlimited so a 50-campaign
+    # dedup race, an 800-lead listing, and a 12-way run-dispatch stampede can all run without
+    # tripping campaign/lead caps or the per-run credit gate.
+    monkeypatch.setattr(m, "_is_unlimited", lambda email: True)
     camp_dir = tmp_path / "campaigns"
     camp_dir.mkdir()
     monkeypatch.setattr(m, "CAMPAIGN_DIR", camp_dir)
