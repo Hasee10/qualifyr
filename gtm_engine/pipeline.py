@@ -904,10 +904,20 @@ class Pipeline:
         # the score. A confident "not a buyer" demotes a keyword-only BUYER to UNKNOWN; a
         # confident buyer promotes an UNKNOWN. VENDOR (agency/competitor) is a hard reject and
         # is never promoted. Without the LLM this is skipped and the keyword path stands.
+        intent_degraded = False
         if self.llm and cls.company_type != CompanyType.VENDOR:
-            verdict = await judge_intent(self.llm, campaign.offer, _intent_evidence(company, bundle, signals))
+            try:
+                verdict = await judge_intent(self.llm, campaign.offer, _intent_evidence(company, bundle, signals))
+            except Exception as exc:  # noqa: BLE001 - intent judge failure must never kill the batch
+                verdict = None
+                intent_degraded = True
+                log.warning("intent judge degraded: %s for %s", type(exc).__name__, company.name)
             if verdict:
                 provenance["intent_fit"] = apply_intent_verdict(cls, verdict)
+            elif intent_degraded:
+                # Mark the lead so the operator knows the score is an artificial floor
+                # (seen in the 2026-10-09 stress run: Groq 429s silently degraded intent to 0).
+                provenance["intent_judge_degraded"] = f"{self.llm.name}:rate_limited_or_unavailable"
 
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence, self.settings), campaign)
         ready = is_outreach_ready(cls, score, contact, campaign)
@@ -995,6 +1005,10 @@ class Pipeline:
                 "contact_evidence": contact.evidence,
                 "pages": {k: p.url for k, p in snapshot.pages.items()},
                 "crawl_error": snapshot.error,
+                # C1 (2026-10-10): the operator sees "score is an artificial floor" when the
+                # LLM intent judge couldn't run (rate-limit, outage). Only present on degraded leads.
+                **({"intent_judge_degraded": provenance["intent_judge_degraded"]}
+                   if "intent_judge_degraded" in provenance else {}),
             },
         )
         # One lead per company per campaign: reuse the id so re-runs update in place.
