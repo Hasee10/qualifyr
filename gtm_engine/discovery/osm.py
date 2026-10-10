@@ -90,12 +90,18 @@ class OSMDiscovery:
         self.fetcher = fetcher
         self.settings = settings
         self.geocoder = geocoder or Geocoder(fetcher, settings.db_path.parent / "geocode_cache.json")
+        # Per-run state so one failing area doesn't waste time retrying mirrors we already
+        # proved broken this run. `all_mirrors_dead` lets the pipeline mark stats.osm_unavailable.
+        self._dead_mirrors: set[str] = set()
+        self.all_mirrors_dead: bool = False
 
     async def discover(self, campaign: CampaignConfig) -> AsyncIterator[DiscoveredCompany]:
         if not campaign.osm_categories:
             log.info("osm: campaign has no osm_categories; skipping")
             return
         countries = campaign.geography.countries or [None]
+        total_elements = 0
+        areas_queried = 0
         for area in campaign.geography.search_areas():
             bbox, country = await self._geocode_area(area, countries)
             if bbox is None:
@@ -103,11 +109,19 @@ class OSMDiscovery:
                 continue
             query = build_query(bbox, campaign.osm_categories, self.settings.overpass_timeout_s)
             elements = await self._run_query(query)
+            areas_queried += 1
+            total_elements += len(elements)
             log.info("osm: %s -> %d elements", area, len(elements))
             for el in elements:
                 company = element_to_company(el, area, country or "", None)
                 if company:
                     yield company
+        # All mirrors were marked dead AND we queried at least one area means Overpass was
+        # unavailable to us this run. Overture carries PK volume; we don't crash on this.
+        all_bases = [self.settings.overpass_url, *self.settings.overpass_mirrors]
+        if areas_queried > 0 and total_elements == 0 and all(b in self._dead_mirrors for b in all_bases):
+            self.all_mirrors_dead = True
+            log.warning("osm: all Overpass mirrors unavailable this run; Overture-only discovery")
 
     async def _geocode_area(self, area: str, countries: list[str | None]):
         """Resolve an area to a bbox, trying each configured country as a hint. Lets one
@@ -121,16 +135,22 @@ class OSMDiscovery:
 
     async def _run_query(self, query: str) -> list[dict]:
         # Overpass instances are shared and often overloaded; fall through the mirror list.
+        # Within one run, a mirror that failed once is skipped for subsequent areas - no point
+        # paying the retry+backoff cost per area when the mirror is proven unavailable.
         for base in [self.settings.overpass_url, *self.settings.overpass_mirrors]:
+            if base in self._dead_mirrors:
+                continue
             url = f"{base}?{urlencode({'data': query})}"
             result = await self.fetcher.get(url, delay=self.settings.per_host_delay_s * 2, api=True)
             if not result.ok:
-                log.warning("osm: %s failed (%s %s); trying next mirror", base, result.status_code, result.error)
+                log.warning("osm: %s failed (%s %s); marking dead for this run", base, result.status_code, result.error)
+                self._dead_mirrors.add(base)
                 continue
             try:
                 payload = json.loads(result.text)
             except json.JSONDecodeError:
-                log.warning("osm: non-JSON response from %s; trying next mirror", base)
+                log.warning("osm: non-JSON response from %s; marking dead for this run", base)
+                self._dead_mirrors.add(base)
                 continue
             return payload.get("elements", [])
         return []

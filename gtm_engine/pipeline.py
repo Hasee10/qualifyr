@@ -73,6 +73,7 @@ class RunStats:
     unreachable: int = 0
     rejected_sites: int = 0      # parked / soft-404 / placeholder / marketplace redirect
     dead_websites: int = 0       # skipped before crawling: the domain no longer resolves
+    osm_unavailable: bool = False  # all Overpass mirrors failed this run; Overture carried alone
     intent_dropped_irrelevant: int = 0  # hiring/RFQ signals dropped for not matching the offer
     discovery_relevance_dropped: int = 0  # companies dropped post-discovery for not matching offer keywords
     area_proximity_dropped: int = 0  # companies dropped for being too far from the requested area
@@ -558,10 +559,12 @@ class Pipeline:
     async def discover(self, campaign: CampaignConfig, progress: ProgressFn | None = None) -> list[DiscoveredCompany]:
         geo_sources: list = []
         other_sources: list = []
+        osm_source = None  # kept so run() can propagate all_mirrors_dead to stats.osm_unavailable
         if campaign.overture_categories and campaign.geography.search_areas():
             geo_sources.append(OvertureDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.search_areas():
-            geo_sources.append(OSMDiscovery(self.fetcher, self.settings))
+            osm_source = OSMDiscovery(self.fetcher, self.settings)
+            geo_sources.append(osm_source)
         if self.settings.enable_web_search_discovery and campaign.search_queries:
             other_sources.append(WebSearchDiscovery(self.fetcher, self.settings,
                                                    brave_api_key=self._resolved_keys.get("brave")))
@@ -635,6 +638,10 @@ class Pipeline:
                     per_source.append(fallback_items)
                     await _emit(progress, "discover", sum(len(s) for s in per_source), 0,
                                 f"websearch_sparse: {len(fallback_items)}")
+        # Record OSM availability on the Pipeline instance so run() can propagate to stats.
+        # getattr guard so tests that monkeypatch OSMDiscovery with a stub don't need to
+        # mock the all_mirrors_dead attribute.
+        self._last_osm_unavailable = bool(osm_source and getattr(osm_source, "all_mirrors_dead", False))
         # Round-robin across sources so a small max_companies cap still samples every source. A
         # dense source (Overture/OSM returns thousands) would otherwise exhaust the cap before a
         # single web-search or chamber result is ever processed - which was exactly the case that
@@ -1111,6 +1118,7 @@ class Pipeline:
         try:
             discovered = await self.discover(campaign, progress)
             stats.discovered = len(discovered)
+            stats.osm_unavailable = getattr(self, "_last_osm_unavailable", False)
             if campaign.exclude_chains:
                 before = len(discovered)
                 discovered = [c for c in discovered if not c.extra.get("brand")]
