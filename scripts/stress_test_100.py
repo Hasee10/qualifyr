@@ -82,7 +82,6 @@ def build_campaign(campaign_id: str, max_companies: int, min_outreach_ready: int
             "shop=clothes", "shop=shoes", "shop=department_store", "shop=supermarket",
         ],
         overture_categories=["clothing_store", "shoe_store", "department_store", "supermarket"],
-        foursquare_categories=["clothing store", "shoe store", "department store", "supermarket"],
         search_queries=[
             "clothing retailer in Pakistan",
             "multi-brand fashion stores Karachi",

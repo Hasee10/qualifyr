@@ -92,8 +92,7 @@ class CampaignConfig(BaseModel):
     osm_categories: list[str] = Field(default_factory=list)
     # Overture category substrings, e.g. ["clothing", "shoe_store", "supermarket"].
     overture_categories: list[str] = Field(default_factory=list)
-    # Foursquare OS Places category-label substrings, e.g. ["clothing store", "pharmacy"].
-    foursquare_categories: list[str] = Field(default_factory=list)
+    # (Foursquare support removed 2026-10-10 — the keyless upstream dataset was discontinued.)
     # Web-search discovery queries (E2). Normally derived from the offer at run time; the user
     # rarely sets these directly.
     search_queries: list[str] = Field(default_factory=list)
@@ -147,7 +146,7 @@ class CampaignConfig(BaseModel):
 
     @field_validator(
         "target_industries", "target_roles", "buyer_keywords", "negative_keywords",
-        "allowed_vendor_keywords", "osm_categories", "overture_categories", "foursquare_categories", "chamber_sources", "chamber_name_keywords", "intent_sources", "intent_keywords",
+        "allowed_vendor_keywords", "osm_categories", "overture_categories", "chamber_sources", "chamber_name_keywords", "intent_sources", "intent_keywords",
         "wikidata_industries",
     )
     @classmethod

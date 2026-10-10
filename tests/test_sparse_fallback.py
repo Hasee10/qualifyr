@@ -64,7 +64,7 @@ def test_fallback_queries_respects_limit():
 
 
 def test_fallback_queries_falls_back_through_category_sources():
-    # No OSM categories - should fall back to overture_categories, then foursquare_categories.
+    # No OSM categories - should fall back to overture_categories.
     campaign = CampaignConfig(
         campaign_id="c", name="n", offer="o",
         overture_categories=["clothing_store"],
@@ -101,7 +101,6 @@ def _build_pipeline(settings, defaults, db, geo_rows, fallback_rows, monkeypatch
 
     monkeypatch.setattr(pl, "OvertureDiscovery", lambda f, s: _StubSource("overture", geo_rows))
     monkeypatch.setattr(pl, "OSMDiscovery", lambda f, s: _StubSource("osm", []))
-    monkeypatch.setattr(pl, "FoursquareDiscovery", lambda f, s: _StubSource("foursquare", []))
 
     class _StubWebSearch:
         name = "websearch"
@@ -199,7 +198,6 @@ async def test_fallback_skips_queries_that_duplicate_campaign_search_queries(
 
     campaign.overture_categories = ["clothing_store"]
     campaign.osm_categories = []
-    campaign.foursquare_categories = []
     campaign.geography = GeographyConfig(countries=["Pakistan"], cities=["Wah Cantt", "Taxila"])
     # First synthesized query is "clothing store in Wah Cantt" - already explicitly asked for.
     campaign.search_queries = ["clothing store in Wah Cantt"]

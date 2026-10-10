@@ -19,7 +19,6 @@ from gtm_engine.discovery.edgar import EDGARDiscovery
 from gtm_engine.discovery.gleif import GLEIFDiscovery
 from gtm_engine.discovery.gleif_golden_copy import GLEIFGoldenCopyDiscovery
 from gtm_engine.discovery.osm import OSMDiscovery
-from gtm_engine.discovery.foursquare import FoursquareDiscovery
 from gtm_engine.discovery.overture import OvertureDiscovery
 from gtm_engine.discovery.wikidata import WikidataDiscovery
 from gtm_engine.discovery.search import WebsiteFinder
@@ -383,11 +382,10 @@ def _sparse_fallback_queries(campaign: CampaignConfig, limit: int) -> list[str]:
     """Synthesize simple "<category> in <city>" queries from the campaign's niche and areas, so
     WebSearchDiscovery can backfill when Overture/OSM were thin. One query per (category, area)
     pair, categories taken in order from whichever list the campaign populated (OSM categories
-    tend to read most naturally as English nouns, Overture/Foursquare labels work too), stopping
+    tend to read most naturally as English nouns, Overture labels work too), stopping
     at `limit`. Order preserves city priority so tier-1 cities get queried first."""
     categories = (campaign.osm_categories
                   or campaign.overture_categories
-                  or campaign.foursquare_categories
                   or [])
     if not categories:
         return []
@@ -561,8 +559,6 @@ class Pipeline:
         other_sources: list = []
         if campaign.overture_categories and campaign.geography.search_areas():
             geo_sources.append(OvertureDiscovery(self.fetcher, self.settings))
-        if campaign.foursquare_categories and campaign.geography.search_areas():
-            geo_sources.append(FoursquareDiscovery(self.fetcher, self.settings))
         if campaign.osm_categories and campaign.geography.search_areas():
             geo_sources.append(OSMDiscovery(self.fetcher, self.settings))
         if self.settings.enable_web_search_discovery and campaign.search_queries:
@@ -598,7 +594,7 @@ class Pipeline:
             if src in geo_sources:
                 geo_total += len(items)
             await _emit(progress, "discover", sum(len(s) for s in per_source), 0, f"{src.name}: {len(items)}")
-        # Sparse-area fallback: if the geo sources (Overture/Foursquare/OSM) collectively returned
+        # Sparse-area fallback: if the geo sources (Overture/OSM) collectively returned
         # too few rows for this niche-city combo, backfill with WebSearchDiscovery driven by
         # synthesized "<category> in <city>" queries - even when the campaign had no explicit
         # search_queries. Addresses the "niche category in a small town" case (vet clinics, Wah
@@ -1078,8 +1074,7 @@ class Pipeline:
         # Offer-driven discovery (E1 categories + E2 web-search queries). Derive from the offer
         # to fill map categories the user did not hand-pick and to produce web-search queries.
         # Explicit user map categories always win - deriving only fills the gap, never overrides.
-        user_configured_categories = bool(campaign.osm_categories or campaign.overture_categories
-                                          or campaign.foursquare_categories)
+        user_configured_categories = bool(campaign.osm_categories or campaign.overture_categories)
         needs_categories = not user_configured_categories
         if campaign.offer and (needs_categories or not campaign.search_queries):
             targets = await derive_discovery_targets(
@@ -1110,8 +1105,7 @@ class Pipeline:
                     discovered, campaign.geography.areas, campaign.geography.cities,
                     self.fetcher, self.settings)
             campaign_cats = (set(campaign.osm_categories)
-                            | {f"overture={c}" for c in campaign.overture_categories}
-                            | {f"foursquare={c}" for c in campaign.foursquare_categories})
+                            | {f"overture={c}" for c in campaign.overture_categories})
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
                 discovered, self._relevance_keywords, campaign_cats,
                 user_configured_categories=user_configured_categories)

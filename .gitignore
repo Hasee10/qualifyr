@@ -17,6 +17,16 @@ leads/
 stress_*.log
 stress_*.stdout
 
+# User scratch / strategy docs that stay local only (per CEO; also contain lead run summaries)
+PRICING_PHASES_2.md
+PRICING_STRATEGY_RESEARCH.md
+STRATEGY.md
+planned_out.md
+log.txt
+log_2.txt
+batch_run.log
+batch2_chain.log
+
 # Node
 node_modules/
 dist/
