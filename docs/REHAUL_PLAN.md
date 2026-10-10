@@ -29,7 +29,7 @@ in-flight.
 | P5 | Deterministic personalization only (`llm=None` in `generate_pitch_angle`)* | ✅ done | `4058f28` |
 | P1 | Per-run `leads_per_run` dropdown (3/5/10/…) | ✅ done | `9095375` |
 | P2 | Credit-based accounting (`credits_consumed`) | ✅ done | `b31ab2c` |
-| P6 | Document multi-email key resolution | ⏳ pending | — |
+| P6 | Document multi-email key resolution | ✅ done | `97ceee0` |
 | test | End-to-end campaign before/after | ⏳ pending | — |
 
 \* P5 as landed is partial: only the `llm=None` call-site change shipped (forces the
