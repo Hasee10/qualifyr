@@ -13,7 +13,7 @@ import urllib.parse
 import psycopg
 from psycopg.rows import dict_row
 
-from gtm_engine.models import Lead, utcnow
+from gtm_engine.models import Lead, new_id, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -191,6 +191,28 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 CREATE TABLE IF NOT EXISTS hidden_campaigns (
     campaign_id TEXT PRIMARY KEY,
     hidden_at TEXT NOT NULL
+);
+
+-- Per-user invisible personalization (docs/PERSONALIZATION_PLAN.md). lead_feedback stores the
+-- raw feature vector + outcome (not just a label) so a v2 listwise/RL upgrade needs no migration.
+CREATE TABLE IF NOT EXISTS lead_feedback (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    lead_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    feature_vector TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reward REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON lead_feedback(user_id);
+
+-- The per-person memory: one logistic-bandit weight vector per user.
+CREATE TABLE IF NOT EXISTS user_pref_model (
+    user_id TEXT PRIMARY KEY,
+    weights TEXT NOT NULL,
+    n_updates INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
 );
 
 -- Foreign-key lookups that have no index scan the whole table as a campaign/lead accumulates
@@ -520,10 +542,17 @@ class Database:
         LIST paths so one unreadable row can't 500 the whole leads page or export; a run can
         always re-derive a lead, so skipping a stale one is safer than failing the request."""
         try:
-            return Lead.model_validate_json(data_json)
+            lead = Lead.model_validate_json(data_json)
         except Exception as exc:  # noqa: BLE001 - any validation/parse error: skip, don't crash
             log.warning("skipping unreadable lead blob %s: %s", lead_id, exc)
             return None
+        # rank_score was added after some leads were persisted; those rows default it to 0 on
+        # load, which would sort them to the bottom. Cold-start parity means rank_score ==
+        # total_score until personalization actually biases it, so backfill rather than let a
+        # pre-existing lead silently drop to last place.
+        if lead.rank_score == 0 and lead.total_score != 0:
+            lead.rank_score = lead.total_score
+        return lead
 
     def get_lead(self, lead_id: str) -> Lead | None:
         row = self._execute("SELECT data_json FROM leads WHERE lead_id = %s", (lead_id,)).fetchone()
@@ -992,5 +1021,36 @@ class Database:
             "ON CONFLICT (user_id, pref_key) DO UPDATE SET pref_value = EXCLUDED.pref_value, "
             "updated_at = EXCLUDED.updated_at",
             (user_id, pref_key, pref_value, utcnow().isoformat()),
+        )
+        self._commit()
+
+    # -- personalization (invisible per-user lead ranking, docs/PERSONALIZATION_PLAN.md) -----
+
+    def record_lead_feedback(self, user_id: str, lead_id: str, campaign_id: str,
+                             feature_vector: list[float], action: str, reward: float) -> None:
+        self._execute(
+            "INSERT INTO lead_feedback (id, user_id, lead_id, campaign_id, feature_vector, "
+            "                           action, reward, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (new_id("fb"), user_id, lead_id, campaign_id, json.dumps(feature_vector),
+             action, reward, utcnow().isoformat()),
+        )
+        self._commit()
+
+    def get_pref_model(self, user_id: str) -> dict | None:
+        row = self._execute(
+            "SELECT weights, n_updates FROM user_pref_model WHERE user_id = %s", (user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"weights": json.loads(row["weights"]), "n_updates": row["n_updates"]}
+
+    def upsert_pref_model(self, user_id: str, weights: list[float], n_updates: int) -> None:
+        self._execute(
+            "INSERT INTO user_pref_model (user_id, weights, n_updates, updated_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET weights = EXCLUDED.weights, "
+            "n_updates = EXCLUDED.n_updates, updated_at = EXCLUDED.updated_at",
+            (user_id, json.dumps(weights), n_updates, utcnow().isoformat()),
         )
         self._commit()

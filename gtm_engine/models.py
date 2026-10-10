@@ -232,6 +232,10 @@ class Lead(BaseModel):
     followup_2_at: datetime | None = None
     reply_status: str | None = None
     priority: Priority = Priority.REJECT
+    # Invisible per-user personalization (docs/PERSONALIZATION_PLAN.md): total_score +/- a
+    # bounded bandit bias, used only for display/surfacing order. Never used for priority
+    # routing. Equals total_score whenever personalization is off or the user has no model yet.
+    rank_score: int = 0
     technologies: list[str] = Field(default_factory=list)
     evidence: dict = Field(default_factory=dict)
     phone_type: str | None = None

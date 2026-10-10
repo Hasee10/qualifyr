@@ -30,7 +30,9 @@ from gtm_engine.config.schema import GeographyConfig
 from gtm_engine.config.loader import CONFIG_DIR, PROJECT_ROOT, is_serverless, runtime_dir
 from gtm_engine.export.csv_export import export_path, write_clean_csv, write_csv
 from gtm_engine.export import sheets as sheets_export
-from gtm_engine.models import CompanyType, EmailStatus, SequenceStatus
+from gtm_engine.models import CompanyType, EmailStatus, Lead, SequenceStatus
+from gtm_engine.personalization.bandit import update as bandit_update
+from gtm_engine.personalization.features import extract_features
 from gtm_engine.outreach.cli import ledger_path
 from gtm_engine.outreach.config import load_outreach_settings, load_templates
 from gtm_engine.outreach.ledger import Ledger
@@ -617,6 +619,21 @@ def stats(campaign_id: str) -> dict:
     return row
 
 
+def _record_feedback(db: Database, lead: Lead, user_id: str | None, action: str, reward: float) -> None:
+    """Invisible per-user learning loop (docs/PERSONALIZATION_PLAN.md): log the raw feature
+    vector + outcome, then one online SGD step on that user's own bandit weights. No-op for
+    anonymous/shared campaigns (no owner to learn for) or when the kill-switch is off."""
+    if not user_id or not _settings.enable_personalization:
+        return
+    x = extract_features(lead)
+    db.record_lead_feedback(user_id, lead.lead_id, lead.campaign_id, x, action, reward)
+    model = db.get_pref_model(user_id)
+    weights = model["weights"] if model else [0.0] * len(x)
+    n_updates = model["n_updates"] if model else 0
+    new_weights = bandit_update(weights, x, reward, _settings.personalization_learning_rate)
+    db.upsert_pref_model(user_id, new_weights, n_updates + 1)
+
+
 # -- leads --------------------------------------------------------------------------------
 
 @app.get("/campaigns/{campaign_id}/leads", dependencies=[Depends(require_campaign_access)])
@@ -629,6 +646,11 @@ def leads(campaign_id: str, min_score: int = 0, company_type: str | None = None,
     rows = db.list_leads(campaign_id, min_score=min_score, company_type=company_type,
                          outreach_ready=outreach_ready, q=q, order=order, limit=limit, offset=offset)
     db.close()
+    # Personalization reorders only within the page the deterministic query already fetched
+    # (grouped by the untouched priority/total_score band) - it never changes which leads
+    # qualify or which page they land on, only their order within it.
+    if order == "score":
+        rows = sorted(rows, key=lambda l: (l.rank_score, l.total_score), reverse=True)
     return {"items": [_lead_summary(l) for l in rows], "total": total}
 
 
@@ -672,6 +694,7 @@ def suppress(lead_id: str, req: SuppressRequest) -> dict:
     if l.contact_email:
         db.add_suppression(l.contact_email, "email", req.reason or "suppressed from UI", owner_id=owner)
     stop_lead(db, l, SequenceStatus.SUPPRESSED, req.reason or "suppressed from UI", _read_only_ledger(l.campaign_id))
+    _record_feedback(db, l, owner, "skipped", 0.0)
     db.close()
     return {"ok": True}
 
@@ -849,8 +872,35 @@ def review_lead(lead_id: str, body: ReviewBody) -> dict:
         l.outreach_ready = False
     db.update_lead(l)
     db.add_event(lead_id, "reviewed", detail=body.verdict)
+    if body.verdict == "correct":
+        _record_feedback(db, l, db.campaign_owner(l.campaign_id), "approved", 1.0)
+    elif body.verdict.startswith("wrong_"):
+        _record_feedback(db, l, db.campaign_owner(l.campaign_id), "skipped", 0.0)
     db.close()
     return {"ok": True, "review_verdict": l.review_verdict}
+
+
+class FeedbackBody(BaseModel):
+    action: str  # approved | skipped | exported | contacted
+
+
+_FEEDBACK_REWARD = {"approved": 1.0, "exported": 1.0, "contacted": 1.0, "skipped": 0.0, "dismissed": 0.0}
+
+
+@app.post("/leads/{lead_id}/feedback", dependencies=[Depends(require_lead_access)])
+def lead_feedback(lead_id: str, body: FeedbackBody, user_id: str | None = Depends(current_user_id)) -> dict:
+    """The invisible learning loop (docs/PERSONALIZATION_PLAN.md): the frontend fires this
+    alongside an existing approve/skip/export/contact action; the user never sees a model."""
+    if body.action not in _FEEDBACK_REWARD:
+        raise HTTPException(422, "action must be one of: " + ", ".join(_FEEDBACK_REWARD))
+    db = _db()
+    l = db.get_lead(lead_id)
+    if not l:
+        db.close()
+        raise HTTPException(404, "lead not found")
+    _record_feedback(db, l, user_id or db.campaign_owner(l.campaign_id), body.action, _FEEDBACK_REWARD[body.action])
+    db.close()
+    return {"ok": True}
 
 
 class ReferralAction(BaseModel):
@@ -902,6 +952,9 @@ def export(campaign_id: str, min_score: int = 70, buyers_only: bool = True,
     campaign = _campaign(campaign_id)
     db = _db()
     rows = db.list_leads(campaign_id, min_score=min_score, company_type=ct)
+    owner = db.campaign_owner(campaign_id)
+    for row in rows:
+        _record_feedback(db, row, owner, "exported", 1.0)
     db.close()
     # Scratch on serverless: the CSV only has to survive long enough to be streamed back.
     export_dir = runtime_dir() / "exports" if is_serverless() else _settings.export_dir
@@ -996,6 +1049,9 @@ def approve_draft(lead_id: str, step: str) -> dict:
     db.set_draft_status(lead_id, step, "approved")
     db.add_event(lead_id, "approved", step=step)
     out = db.get_draft(lead_id, step)
+    l = db.get_lead(lead_id)
+    if l:
+        _record_feedback(db, l, db.campaign_owner(l.campaign_id), "contacted", 1.0)
     db.close()
     return out
 

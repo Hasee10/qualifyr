@@ -49,6 +49,8 @@ from gtm_engine.models import (
 )
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
 from gtm_engine.scoring.proximity import haversine_km
+from gtm_engine.personalization.features import extract_features_from_score
+from gtm_engine.personalization.ranker import rerank_bias
 from gtm_engine.scoring.scoring import ScoreInputs, is_outreach_ready, score_lead
 from gtm_engine.scraping.fetcher import Fetcher, HttpFetcher
 from gtm_engine.scraping.site_crawler import SiteCrawler, SiteSnapshot
@@ -921,6 +923,18 @@ class Pipeline:
 
         score = score_lead(ScoreInputs(company, cls, quality, contact, signals, online_presence, self.settings), campaign)
         ready, skip_reason = is_outreach_ready(cls, score, contact, campaign)
+
+        # Invisible per-user personalization (docs/PERSONALIZATION_PLAN.md): a bounded bandit
+        # bias on top of the grounded total, used only for surfacing order. Cold start / no
+        # owner / kill-switch off -> rank_score falls back to total_score exactly.
+        rank_score = score.total
+        owner = getattr(self, "_owner_id", None)
+        if self.settings.enable_personalization and owner:
+            model_row = await self._db_call(self.db.get_pref_model, owner)
+            x = extract_features_from_score(score, has_email=bool(contact.email),
+                                            has_phone=bool(contact.phone or company.phone))
+            bias = rerank_bias(model_row, x, self.settings.personalization_max_bias)
+            rank_score = score.total + round(bias)
         suppressed = await self._db_call(self.db.is_suppressed, domain, contact.email,
                                          owner_id=getattr(self, "_owner_id", None))
         if suppressed:
@@ -1017,6 +1031,7 @@ class Pipeline:
             sequence_status=(sequence_status_override
                              or (SequenceStatus.SUPPRESSED if suppressed else SequenceStatus.NOT_QUEUED)),
             priority=score.priority,
+            rank_score=rank_score,
             technologies=signals.technologies,
             evidence={
                 "classification": cls.model_dump(mode="json"),

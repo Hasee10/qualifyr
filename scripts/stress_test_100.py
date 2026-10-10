@@ -149,16 +149,16 @@ async def run_stress(min_target: int, max_companies: int, max_multiplier: int,
 
         elapsed = time.monotonic() - start
         s = result.stats
-        high = sum(1 for l in result.leads if l.priority == Priority.HIGH_PRIORITY)
+        high = sum(1 for l in result.leads if l.priority == Priority.HIGH)
         qualified = sum(1 for l in result.leads if l.priority == Priority.QUALIFIED)
         with_email = sum(1 for l in result.leads
-                         if l.priority in (Priority.HIGH_PRIORITY, Priority.QUALIFIED)
+                         if l.priority in (Priority.HIGH, Priority.QUALIFIED)
                          and l.contact_email)
         with_phone = sum(1 for l in result.leads
-                         if l.priority in (Priority.HIGH_PRIORITY, Priority.QUALIFIED)
+                         if l.priority in (Priority.HIGH, Priority.QUALIFIED)
                          and l.phone)
         with_both = sum(1 for l in result.leads
-                        if l.priority in (Priority.HIGH_PRIORITY, Priority.QUALIFIED)
+                        if l.priority in (Priority.HIGH, Priority.QUALIFIED)
                         and l.contact_email and l.phone)
 
         log_lines += [

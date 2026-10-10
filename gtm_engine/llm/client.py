@@ -173,6 +173,34 @@ class GeminiLLM:
         raise last or RuntimeError("gemini: no model produced a response")
 
 
+@dataclass
+class FallbackLLM:
+    """Tries `primary` first; on a rate-limit/server error (or any exception once primary's own
+    retries are exhausted) falls through to `secondary` for that single call. Keeps the primary's
+    `name` for logging continuity, but tags the response's provenance via `last_used`."""
+    primary: LLM
+    secondary: LLM
+    name: str = ""
+    last_used: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            self.name = f"{self.primary.name}+{self.secondary.name}"
+        self.last_used = self.primary.name
+
+    async def complete(self, system: str, user: str, *, max_tokens: int = 400) -> str:
+        try:
+            result = await self.primary.complete(system, user, max_tokens=max_tokens)
+            self.last_used = self.primary.name
+            return result
+        except Exception as exc:  # noqa: BLE001 - any primary failure falls through to secondary
+            log.warning("llm: %s failed (%s), falling back to %s",
+                        self.primary.name, type(exc).__name__, self.secondary.name)
+            result = await self.secondary.complete(system, user, max_tokens=max_tokens)
+            self.last_used = self.secondary.name
+            return result
+
+
 def build_llm(provider: str = "auto", model: str | None = None,
               *, groq_api_key: str | None = None, gemini_api_key: str | None = None) -> LLM | None:
     groq = groq_api_key or os.environ.get("GTM_GROQ_API_KEY")
@@ -187,6 +215,13 @@ def build_llm(provider: str = "auto", model: str | None = None,
                 log.warning("llm: ollama not reachable at %s", ollama_url)
                 return None
     if provider in ("groq", "auto") and groq:
+        # Groq's free-tier 8k tokens/min budget is tight under batch load; when a Gemini key is
+        # also configured, fall through to it on rate-limit/failure instead of silently
+        # degrading every throttled company to keyword-only. `llm_provider: groq` is set
+        # explicitly in config/engine.yaml to skip the local-Ollama probe above, not to forbid
+        # this fallback - so "groq" opportunistically becomes "groq, then gemini" when able.
+        if gemini:
+            return FallbackLLM(GroqLLM(groq, model or "openai/gpt-oss-20b"), GeminiLLM(gemini))
         return GroqLLM(groq, model or "openai/gpt-oss-20b")
     if provider in ("gemini", "auto") and gemini:
         return GeminiLLM(gemini, model)

@@ -282,6 +282,12 @@ class EngineSettings(BaseModel):
     google_places_api_key: str | None = None
     places_max_companies_per_run: int = 20
     enable_review_text: bool = False
+    # Invisible per-user lead personalization (docs/PERSONALIZATION_PLAN.md). The grounded
+    # total_score/priority are never touched; this only biases a separate rank_score used for
+    # surfacing order. Kill-switch: false forces bias=0 everywhere, i.e. today's exact behavior.
+    enable_personalization: bool = True
+    personalization_max_bias: float = 8.0
+    personalization_learning_rate: float = 0.05
     # Proximity scoring anchor: the user's office/home location.
     # Companies are ranked by distance from this point (Tier 1/2/3).
     # When unset, all companies get Tier 1 (same-city assumption).
