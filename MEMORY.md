@@ -9,7 +9,7 @@ starting engine work.
 - **`docs/DIRECTION.md`** – CEO direction; **`docs/ROADMAP.txt`** – historical phases A–G.
 - This file – the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-05 (Open-source repo + Vercel env var fixes)
+Last updated: 2026-10-10 (CEO filler audit in progress; see "CEO audit — 2026-10-10" below)
 
 **2026-10-05 open-source collaboration repo (grydinteam/qualifyr):**
 - **Two remotes:** `origin` = `Hasee10/qualifyr` (private), `grydinteam` = `grydinteam/qualifyr` (public).
@@ -263,6 +263,37 @@ seed is small – grow it to 50+, esp. intent-judge cases, to trust the number.*
   Resolution priority: user preference → env var → default. `PUT /settings/usage/{resource}`.
 - Settings UI: "API Keys" tab (save/delete/test per key, masked input, status badges) +
   "Usage" tab (progress bars per resource, editable limits, daily reset at UTC midnight).
+- **CEO audit — 2026-10-10 (in progress):** CEO flagged possible "generated filler" and asked
+  for an audit before any changes. Current honest findings:
+  - **Foursquare source is dead** (upstream S3 bucket stripped); 125 lines of code+tests fail
+    soft, yield 0 — proposed for hard delete.
+  - **5 global registries (GLEIF/Wikidata/EDGAR/Companies House/GLEIF Golden Copy)** are wired
+    but **have never fired in any Pakistan-only campaign** — proposed to hide behind a
+    `GTM_UNLOCK_GLOBAL=1` flag so they don't bloat the surface for PK users.
+  - **OSM/Overpass is unreliable** — mirrors returning 500/504 in the current stress run
+    (Karachi + Lahore both → 0 elements). Overture carries 90%+ of PK volume. Proposal: demote
+    to warn-and-continue, not delete.
+  - **Outreach does not cover every qualified lead** — any qualified lead without a usable
+    email AND without a phone is silently excluded at `scoring.py:is_outreach_ready` (no
+    per-lead log). Suppressed leads at pipeline/queue time also silent. CEO wants: every
+    qualified lead gets outreach (or a logged skip reason + a NEEDS_CONTACT bucket).
+  - **No Claude API anywhere** — engine uses Groq + Gemini + optional Ollama. CEO mentioned
+    "Claude-based scraping" was probably a mishear.
+  - **Scraping error handling is actually solid** — failed sites persist as Lead with
+    `evidence["crawl_error"]`, contact falls back to discovery source.
+  - **LLM intent-judge failures (Groq 429) silently degrade scores** — this IS a real
+    silent-degradation. Proposed: tag the lead with `evidence["intent_judge_degraded"]`.
+  Full plan in session transcript; no code changes until CEO signs off per item.
+- **CI stops committing lead CSVs; Exec-contact column; stress harness (2026-10-09,
+  commit `663676b`):** Deleted the "Commit results into leads/" step in
+  `.github/workflows/gather-leads.yml` and the "Commit send ledger" step in `outreach.yml` -
+  CSVs now land only in the 90-day Upload-artifact step (not git). `leads/` added to
+  `.gitignore` belt-and-braces. Client-ready CSV gained an "Exec contact" column
+  (`yes`/empty) marking the premium subset (named decision-maker + reachable channel) without
+  excluding anyone from the export. New dev harness `scripts/stress_test_100.py` runs one
+  dense multi-city campaign against an isolated Supabase schema end-to-end. Historical
+  commits with lead PII (Oct 5 CI auto-commits) remain in git history by design (destructive
+  rewrite deferred).
 - **Hunter removed, direct SMTP is the default verifier (2026-10-09):** `HunterVerifier` class
   gone from `validation/verifier.py`; `build_verifier()` no longer takes `hunter_api_key`;
   `email_verification` default changed from `auto` to `direct` (own-infrastructure SMTP RCPT
