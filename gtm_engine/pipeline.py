@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
@@ -568,17 +569,31 @@ class Pipeline:
             other_sources.append(KCCIDirectory(self.fetcher, self.settings))
         if "ppra" in campaign.intent_sources:
             other_sources.append(self.ppra)
-        if self.settings.enable_gleif_discovery and campaign.gleif_lei_queries:
-            other_sources.append(GLEIFDiscovery(self.fetcher, self.settings))
-        if self.settings.enable_gleif_golden_copy and campaign.geography.country_codes:
-            other_sources.append(GLEIFGoldenCopyDiscovery(self.settings))
-        if self.settings.enable_wikidata_discovery and campaign.wikidata_industries:
-            other_sources.append(WikidataDiscovery(self.fetcher, self.settings))
-        if self.settings.enable_edgar_discovery and campaign.edgar_sic_codes:
-            other_sources.append(EDGARDiscovery(self.fetcher, self.settings))
-        if self.settings.enable_companies_house and campaign.companies_house_sic_codes:
-            ch_key = self._resolved_keys.get("companies_house") or self.settings.companies_house_api_key
-            other_sources.append(CompaniesHouseDiscovery(self.fetcher, self.settings, ch_key))
+        # Global-registry discovery sources are gated behind GTM_UNLOCK_GLOBAL=1. They target
+        # UK/US/global registries (LEI, SIC, Companies Act), and have never fired in a
+        # Pakistan-only campaign because none of our PK campaigns set the trigger fields
+        # (gleif_lei_queries / wikidata_industries / edgar_sic_codes / companies_house_sic_codes
+        # / country_codes). Hiding them keeps PK users from accidentally enabling them and
+        # keeps the pipeline's wiring block short + readable. Flip the env var to re-enable.
+        global_unlocked = os.environ.get("GTM_UNLOCK_GLOBAL") == "1"
+        _wants_global = (campaign.gleif_lei_queries or campaign.wikidata_industries
+                         or campaign.edgar_sic_codes or campaign.companies_house_sic_codes
+                         or (self.settings.enable_gleif_golden_copy and campaign.geography.country_codes))
+        if _wants_global and not global_unlocked:
+            log.warning("global discovery sources (GLEIF/Wikidata/EDGAR/Companies House/GLEIF "
+                        "Golden Copy) are hidden; set GTM_UNLOCK_GLOBAL=1 to enable them")
+        if global_unlocked:
+            if self.settings.enable_gleif_discovery and campaign.gleif_lei_queries:
+                other_sources.append(GLEIFDiscovery(self.fetcher, self.settings))
+            if self.settings.enable_gleif_golden_copy and campaign.geography.country_codes:
+                other_sources.append(GLEIFGoldenCopyDiscovery(self.settings))
+            if self.settings.enable_wikidata_discovery and campaign.wikidata_industries:
+                other_sources.append(WikidataDiscovery(self.fetcher, self.settings))
+            if self.settings.enable_edgar_discovery and campaign.edgar_sic_codes:
+                other_sources.append(EDGARDiscovery(self.fetcher, self.settings))
+            if self.settings.enable_companies_house and campaign.companies_house_sic_codes:
+                ch_key = self._resolved_keys.get("companies_house") or self.settings.companies_house_api_key
+                other_sources.append(CompaniesHouseDiscovery(self.fetcher, self.settings, ch_key))
         if campaign.seed_csv:
             other_sources.append(CSVSeedDiscovery(campaign.seed_csv))
         sources = geo_sources + other_sources
