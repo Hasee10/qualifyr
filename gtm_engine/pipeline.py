@@ -1269,6 +1269,14 @@ class Pipeline:
                 before = len(leads)
                 leads = _apply_hard_filters(leads, campaign.hard_filters)
                 stats.hard_filtered = before - len(leads)
+            # Billing invariant (2026-10-11): credits are charged per outreach_ready lead at run
+            # completion (cli.py) straight off this counter, so it has to describe the leads we
+            # actually hand back. _tally() ran per-company during the rounds, before the hard
+            # filters above dropped rows - so without this recompute a campaign carrying hard
+            # filters bills the user for leads that were removed from their results.
+            # target_met above deliberately keeps the pre-filter count: it reports whether the
+            # expansion loop hit its floor, which is a statement about the loop, not the output.
+            stats.outreach_ready = sum(1 for l in leads if l.outreach_ready)
             self.db.finish_run(run_id, "completed", stats.as_dict())
             if stats.places_api_calls:
                 log.info("Google Places API: %d calls this run (budget remaining: %d/%d)",

@@ -31,6 +31,49 @@ in-flight.
 | P2 | Credit-based accounting (`credits_consumed`) | ✅ done | `b31ab2c` |
 | P6 | Document multi-email key resolution | ✅ done | `97ceee0` |
 | test | End-to-end campaign before/after | ⏳ pending | — |
+| F1 | Bill only for delivered leads (recompute after hard filters) | ✅ done | `(this commit)` |
+| F2 | Tier-aware monthly runs cap (paid tiers were capped at 20–50%) | ✅ done | `(this commit)` |
+| F3 | Reserve credits at dispatch (gate/consume TOCTOU) | ⬜ needs decision | — |
+| F4 | Surface `NEEDS_CONTACT` / skip reasons in the Leads UI | ⬜ open | — |
+
+---
+
+## Post-ship audit — 2026-10-11
+
+A read-only audit of all 14 items above (verification-only, no edits) confirmed A1, A2, A3,
+B1, B2, C1 are genuinely implemented, not cosmetic. It also found four gaps that only exist
+on a paying user's path — which is why none had been caught: **no paid account has ever
+existed** (tier is set by direct DB write; the `test` row above is still pending).
+
+**F1 — users were billed for leads they never received.** `_tally()` increments
+`stats.outreach_ready` per company during the expansion rounds; `_apply_hard_filters()` then
+drops leads from the returned set; `cli.py` bills that stale pre-filter counter. Any campaign
+with hard filters overbilled by up to `stats.hard_filtered`, and NL campaigns set hard filters
+routinely ("businesses lacking online presence"). Fixed by recomputing `stats.outreach_ready`
+from the delivered list before `finish_run()`. Guarded by `tests/test_billing_invariant.py`,
+which asserts the recompute sits between the filter and the persist.
+
+**F2 — paid tiers could not spend what they bought.** `MONTHLY_LIMITS["runs"]` was a flat
+`5`/month for every account, predating the tier system; its own comment justified this with
+"no billing/tier system yet to tell a paid account apart from a free one", which went stale
+when P4 landed `resolve_user_tier()`. Enterprise could reach 500 of 2,500 credits (20%), Pro
+250 of 500 (50%). The runs cap is now derived from the tier's credits at its *smallest* run
+size, so the runs counter can never bind before credits do (all three tiers now reach 100%).
+Precedence is unchanged: user preference → operator env var → default. The daily runs limit
+and `tier.daily_credit_throttle` remain the burst controls.
+
+**F3 — credits are gated but never reserved (open).** The pre-run gate runs in the API at
+dispatch; consumption happens minutes-to-hours later in the Actions runner. Concurrent
+dispatches across different campaigns each see the same pre-consumption balance, so N
+simultaneous runs can overspend. This was previously *masked* by the flat runs cap — F2
+removes that mask, so F3 should be scheduled next. Design decisions needed before building:
+refund semantics on a failed run, reconciliation for a runner that never reports back
+(stale reservation leak), and whether to reserve the run's full cap or its requested size.
+
+**F4 — B3's operator visibility stops at the CSV (open).** `outreach_skip_reason` and
+`SequenceStatus.NEEDS_CONTACT` are persisted and exported, but there are zero references to
+either in `web/src` — no Leads filter, no badge. B3's stated purpose was that the operator can
+*see and act on* qualified-but-unreachable leads; today that only works if they open the CSV.
 
 \* P5 as landed is partial: only the `llm=None` call-site change shipped (forces the
 existing deterministic fallback path). The fuller P5 scope in the plan below — deleting

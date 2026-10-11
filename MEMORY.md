@@ -9,7 +9,32 @@ starting engine work.
 - **`docs/DIRECTION.md`** – CEO direction; **`docs/ROADMAP.txt`** – historical phases A–G.
 - This file – the live "what's done / what's next / how it works / what we verified".
 
-Last updated: 2026-10-10 (CEO filler audit in progress; see "CEO audit — 2026-10-10" below)
+Last updated: 2026-10-11 (post-ship audit of the 2026-10-10 rehaul; see below)
+
+**2026-10-11 billing-correctness fixes (full detail in `docs/REHAUL_PLAN.md` → "Post-ship audit"):**
+- **Pricing tiers now have a frontend** (commit `edfb439`): `GET /pricing/tiers` (public, listed
+  in `auth.PUBLIC_PATHS`), sidebar `TierBadge`, Settings → **Plan** tab with a credits meter and
+  a 3-tier comparison table. Upgrade is a `mailto:` — **no Stripe, no payment integration**, and
+  `_RESERVED_PREF_KEYS = {"tier"}` still blocks self-service tier writes.
+- **F1 — billed ≠ delivered (fixed).** `_tally()` counted `outreach_ready` during the expansion
+  rounds; `_apply_hard_filters()` then dropped leads afterwards; `cli.py` billed the stale
+  pre-filter number. Campaigns with hard filters (which NL campaigns set routinely) overbilled.
+  `stats.outreach_ready` is now recomputed from the delivered list before `finish_run()`.
+  Guarded by `tests/test_billing_invariant.py`.
+- **F2 — paid tiers couldn't spend what they bought (fixed).** The flat `MONTHLY_LIMITS["runs"]
+  = 5` predated the tier system: Enterprise reached 20% of its 2,500 credits, Pro 50% of 500.
+  Now derived from the tier's credits at its smallest run size, so runs can never bind before
+  credits (all tiers reach 100%). Precedence unchanged: user pref → env → default.
+- **F3 (open) — credits are gated but never reserved.** Gate runs in the API at dispatch,
+  consumption in the Actions runner minutes-to-hours later, so concurrent dispatches across
+  different campaigns all see the same balance. Was masked by the flat runs cap; **F2 removes
+  that mask, so this is now the next thing to fix.** Needs decisions on refund-on-failure and
+  stale-reservation reconciliation.
+- **F4 (open) —** `outreach_skip_reason` / `NEEDS_CONTACT` exist in the model, DB and CSV but
+  have **zero references in `web/src`**; B3's operator visibility stops at the CSV.
+- ⚠️ **No paid account has ever existed** (tier = manual DB write, no admin endpoint/CLI), which
+  is why F1–F3 went unnoticed — they only occur on a paying user's path. The end-to-end
+  verification run in the rehaul tracker is still pending.
 
 **2026-10-05 open-source collaboration repo (grydinteam/qualifyr):**
 - **Two remotes:** `origin` = `Hasee10/qualifyr` (private), `grydinteam` = `grydinteam/qualifyr` (public).

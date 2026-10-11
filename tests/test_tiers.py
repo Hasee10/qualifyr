@@ -74,3 +74,79 @@ def test_tier_is_frozen_dataclass():
     import pytest
     with pytest.raises(Exception):
         FREE.monthly_credits = 999  # type: ignore[misc]
+
+
+# --- the monthly runs cap must never bind before credits do -------------------------
+#
+# Regression (found 2026-10-11): MONTHLY_LIMITS["runs"] was a flat 5/month for everyone,
+# predating the tier system. Enterprise could reach only 500 of its 2,500 credits (20%)
+# and Pro 250 of 500 (50%) - we were selling capacity the engine then refused to serve.
+
+
+class _FakeDB:
+    """Minimal stand-in: _monthly_limit only needs get_preferences()."""
+
+    def __init__(self, tier: str | None = None, prefs: dict | None = None):
+        self._rows = [{"pref_key": k, "pref_value": v} for k, v in (prefs or {}).items()]
+        if tier:
+            self._rows.append({"pref_key": "tier", "pref_value": tier})
+
+    def get_preferences(self, user_id):  # noqa: ARG002 - signature parity only
+        return self._rows
+
+
+def test_every_tier_can_spend_all_its_credits():
+    """The invariant: runs_cap * smallest_run_size >= the tier's whole credit allowance."""
+    from gtm_engine.api.usage import _monthly_limit
+
+    for name, tier in TIERS.items():
+        cap = _monthly_limit("runs", _FakeDB(name), "u1")
+        smallest = min(allowed_per_run_for(tier))
+        reachable = cap * smallest
+        assert reachable >= resolved_monthly_credits(tier), (
+            f"{name}: runs cap {cap} x {smallest} leads = {reachable} credits reachable, "
+            f"but the tier sells {resolved_monthly_credits(tier)}"
+        )
+
+
+def test_paid_tiers_get_more_runs_than_the_old_flat_cap():
+    from gtm_engine.api.usage import MONTHLY_LIMITS, _monthly_limit
+
+    old_flat = MONTHLY_LIMITS["runs"]
+    assert _monthly_limit("runs", _FakeDB("pro"), "u1") > old_flat
+    assert _monthly_limit("runs", _FakeDB("enterprise"), "u1") > old_flat
+
+
+def test_runs_cap_still_scales_with_tier():
+    from gtm_engine.api.usage import _monthly_limit
+
+    free = _monthly_limit("runs", _FakeDB("free"), "u1")
+    pro = _monthly_limit("runs", _FakeDB("pro"), "u1")
+    ent = _monthly_limit("runs", _FakeDB("enterprise"), "u1")
+    assert free < pro < ent
+
+
+def test_unresolvable_user_falls_back_to_flat_default():
+    """Local operator / no signed-in user keeps the original conservative number."""
+    from gtm_engine.api.usage import MONTHLY_LIMITS, _monthly_limit
+
+    assert _monthly_limit("runs", None, None) == MONTHLY_LIMITS["runs"]
+
+
+def test_user_override_ceiling_never_lands_below_the_tier_default():
+    """A paid user editing their own monthly limit must not be able to cap themselves
+    under what they bought - the old 10x-of-flat ceiling (50) was far below Enterprise."""
+    from gtm_engine.api.usage import _monthly_limit
+
+    tier_default = _monthly_limit("runs", _FakeDB("enterprise"), "u1")
+    asked_for_more = _monthly_limit(
+        "runs", _FakeDB("enterprise", {"monthly_limit_runs": str(tier_default + 100)}), "u1"
+    )
+    assert asked_for_more >= tier_default
+
+
+def test_operator_env_var_still_wins(monkeypatch):
+    from gtm_engine.api.usage import _monthly_limit
+
+    monkeypatch.setenv("GTM_MONTHLY_LIMIT_RUNS", "9")
+    assert _monthly_limit("runs", _FakeDB("enterprise"), "u1") == 9

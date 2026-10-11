@@ -6,8 +6,12 @@ Override per resource via GTM_DAILY_LIMIT_{RESOURCE} env vars.
 
 from __future__ import annotations
 
+import math
 import os
 
+from gtm_engine.pricing.tiers import (
+    allowed_per_run_for, resolve_user_tier, resolved_monthly_credits,
+)
 from gtm_engine.storage.database import Database
 
 DEFAULT_LIMITS: dict[str, int] = {
@@ -55,20 +59,48 @@ def _limit(resource: str, db: Database | None = None, user_id: str | None = None
     return DEFAULT_LIMITS.get(resource, 100)
 
 
+def _tier_monthly_runs(db: Database | None, user_id: str | None) -> int | None:
+    """The monthly run allowance implied by the caller's tier. None if it can't be resolved.
+
+    Credits - not runs - are the unit of charge (P2). A flat runs cap that binds *before* the
+    credit allowance sells a tier the engine then refuses to deliver: the old flat 5/month let
+    Enterprise reach only 500 of its 2,500 credits (20%) and Pro 250 of 500 (50%). The comment
+    that justified the flat number ("no billing/tier system yet to tell a paid account apart
+    from a free one") went stale when P4 landed resolve_user_tier().
+
+    Deriving the cap from the tier's own credits at its SMALLEST run size guarantees the runs
+    counter can never bind before credits do, whatever run size the user picks, while still
+    leaving a finite backstop against dispatch spam. The daily runs limit and the tier's
+    daily_credit_throttle remain the burst controls.
+    """
+    if not (db and user_id):
+        return None
+    tier = resolve_user_tier(db, user_id)
+    smallest_run = min(allowed_per_run_for(tier) or [1]) or 1
+    return math.ceil(resolved_monthly_credits(tier) / smallest_run)
+
+
 def _monthly_limit(resource: str, db: Database | None = None, user_id: str | None = None) -> int | None:
     """None means no monthly cap for this resource."""
     if resource not in MONTHLY_LIMITS:
         return None
+    # Precedence is unchanged (user preference -> operator env var -> default); only the
+    # *default* for "runs" became tier-derived rather than one flat number for everyone.
+    default = MONTHLY_LIMITS[resource]
+    if resource == "runs":
+        default = _tier_monthly_runs(db, user_id) or default
     if db and user_id:
         prefs = {r["pref_key"]: r["pref_value"] for r in db.get_preferences(user_id)}
         user_val = prefs.get(f"monthly_limit_{resource}")
         if user_val and user_val.isdigit():
-            cap = MONTHLY_MAX_LIMITS.get(resource, 1000)
+            # Never let the override ceiling land below the tier's own default, or a paid user
+            # editing this field could silently cap themselves under what they bought.
+            cap = max(MONTHLY_MAX_LIMITS.get(resource, 1000), default)
             return max(1, min(int(user_val), cap))
     env = os.environ.get(f"GTM_MONTHLY_LIMIT_{resource.upper()}")
     if env and env.isdigit():
         return int(env)
-    return MONTHLY_LIMITS[resource]
+    return default
 
 
 def check_usage(db: Database, user_id: str | None, resource: str) -> bool:
