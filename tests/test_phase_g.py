@@ -20,9 +20,9 @@ from gtm_engine.storage.database import Database
 
 PPRA_HTML = """<table>
 <tr><th>Sr</th><th>Tender No</th><th>Tender Details</th><th>Organization Details</th><th>Status</th><th>Advertised</th><th>Closing</th><th>Actions</th></tr>
-<tr><td>1</td><td>TS0001E</td><td>Supply of readymade garments and uniforms for staff</td><td>Pakistan Railways Lahore</td><td>Published</td><td>Sep 21, 2026</td><td>Oct 10, 2026 10:30 AM</td><td><a href="https://epms.ppra.gov.pk/t/1">view</a></td></tr>
-<tr><td>2</td><td>TS0002E</td><td>Procurement of inventory management software (ERP) for stores</td><td>Utility Stores Corporation</td><td>Published</td><td>Sep 20, 2026</td><td>Nov 01, 2026 11:00 AM</td><td></td></tr>
-<tr><td>3</td><td>TS0003E</td><td>Tank spares</td><td>Directorate General Procurement (Army)</td><td>Published</td><td>Sep 21, 2026</td><td>Dec 07, 2026 10:30 AM</td><td></td></tr>
+<tr><td>1</td><td>TS0001E</td><td>Supply of readymade garments and uniforms for staff</td><td>Pakistan Railways Lahore</td><td>Published</td><td>Sep 21, 2099</td><td>Oct 10, 2099 10:30 AM</td><td><a href="https://epms.ppra.gov.pk/t/1">view</a></td></tr>
+<tr><td>2</td><td>TS0002E</td><td>Procurement of inventory management software (ERP) for stores</td><td>Utility Stores Corporation</td><td>Published</td><td>Sep 20, 2099</td><td>Nov 01, 2099 11:00 AM</td><td></td></tr>
+<tr><td>3</td><td>TS0003E</td><td>Tank spares</td><td>Directorate General Procurement (Army)</td><td>Published</td><td>Sep 21, 2099</td><td>Dec 07, 2099 10:30 AM</td><td></td></tr>
 </table>"""
 
 
@@ -30,7 +30,7 @@ def test_parse_ppra_rows_and_dates():
     rows = parse_ppra(PPRA_HTML)
     assert len(rows) == 3
     assert rows[0]["tender_no"] == "TS0001E" and rows[0]["organization"] == "Pakistan Railways Lahore"
-    assert rows[0]["advertised"] == "2026-09-21" and rows[0]["closing"] == "2026-10-10"
+    assert rows[0]["advertised"] == "2099-09-21" and rows[0]["closing"] == "2099-10-10"
     assert rows[0]["url"] == "https://epms.ppra.gov.pk/t/1" and rows[1]["url"] == PPRA_URL
 
 
@@ -51,7 +51,7 @@ async def test_ppra_discovery_and_matching(campaign, settings):
         found = [c async for c in src.discover(campaign)]
         sigs = await src.signals_for("Utility Stores", campaign)
     assert [c.name for c in found] == ["Pakistan Railways Lahore", "Utility Stores Corporation"]
-    assert found[1].extra["intent"]["kind"] == "tender" and found[1].extra["intent"]["deadline"] == "2026-11-01"
+    assert found[1].extra["intent"]["kind"] == "tender" and found[1].extra["intent"]["deadline"] == "2099-11-01"
     assert len(sigs) == 1 and sigs[0].organization == "Utility Stores Corporation" and "erp" in sigs[0].matched_terms
 
 
