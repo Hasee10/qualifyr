@@ -31,12 +31,22 @@ class GeographyConfig(BaseModel):
     def _upper(cls, values: list[str]) -> list[str]:
         return [v.strip().upper() for v in values if v and v.strip()]
 
-    def search_areas(self) -> list[str]:
+    def search_areas(self, include_country_fallback: bool = False) -> list[str]:
         """Places to geocode into search bboxes: provinces first (broader), then cities.
-        De-duped, order preserved, so a run does not scan the same area twice."""
+        De-duped, order preserved, so a run does not scan the same area twice.
+
+        include_country_fallback=True additionally falls back to `countries` when neither
+        provinces nor cities is set, so a query that only names a country (e.g. "grocery
+        stores in France") still gets a geocodable bbox for OSM/Overture map discovery
+        instead of silently disabling it. Left off by default: country-wide text-search
+        queries (e.g. sparse-fallback "<category> in Pakistan") are too broad to be useful,
+        so only the map-discovery geocoding call sites opt in."""
         seen: set[str] = set()
         out: list[str] = []
-        for area in [*self.provinces, *self.cities]:
+        candidates = [*self.provinces, *self.cities]
+        if not candidates and include_country_fallback:
+            candidates = list(self.countries)
+        for area in candidates:
             key = area.lower()
             if key not in seen:
                 seen.add(key)

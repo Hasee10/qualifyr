@@ -509,7 +509,7 @@ def test_discovery_relevance_filter_drops_irrelevant():
     companies = [
         DiscoveredCompany(name="Laser Equipment Co", category="shop=tools", source="osm"),
         DiscoveredCompany(name="Gloria Jeans Coffee", category="shop=coffee", source="osm"),
-        DiscoveredCompany(name="Some Web Result", category=None, source="web_search"),
+        DiscoveredCompany(name="Some Web Result", category=None, source="websearch"),
     ]
     kept, dropped = _discovery_relevance_filter(companies, ["laser", "equipment", "leveler"])
     assert dropped == 1

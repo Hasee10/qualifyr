@@ -72,9 +72,18 @@ _COUNTRY_ALIASES.update({
     "uae": "United Arab Emirates", "u.a.e.": "United Arab Emirates",
 })
 # Longest alias first so "United Arab Emirates" matches before a shorter substring could.
-_COUNTRY_RE = re.compile(
-    r"\b(" + "|".join(re.escape(a) for a in sorted(_COUNTRY_ALIASES, key=len, reverse=True)) + r")\b",
-    re.I,
+_COUNTRY_PATTERN = "|".join(re.escape(a) for a in sorted(_COUNTRY_ALIASES, key=len, reverse=True))
+_COUNTRY_RE = re.compile(r"\b(" + _COUNTRY_PATTERN + r")\b", re.I)
+
+# Generic, country-agnostic city capture: "Paris, France" / "Madrid and Barcelona, Spain".
+# Requires an explicit "<City list>, <Country>" pattern - deliberately conservative, since
+# bare capitalized words without a trailing country are too noisy to trust (titles, brand
+# names, etc). This is what lets international queries populate draft.cities without the
+# curated-for-Pakistan _CITIES list ever needing to know about non-Pakistani places.
+_CITY_LIST_BEFORE_COUNTRY_RE = re.compile(
+    r"\b((?:[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*)*)"
+    r"(?:\s*(?:,|and)\s*[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*)*)*)"
+    r"\s*,\s*(?i:" + _COUNTRY_PATTERN + r")\b",
 )
 
 
@@ -154,7 +163,17 @@ _SUBJECT_PATTERNS = [
 _STRIP_GEOGRAPHY = re.compile(
     r"\s*\b(?:in|near|around|close\s+to|from)\s+.*$", re.I)
 _STRIP_QUANTIFIER = re.compile(
-    r"^\s*(?:all|top|best|some|any|the|me)\s+", re.I)
+    r"^\s*(?:all|top|best|some|any|the|me|\d+)\s+", re.I)
+
+
+def _strip_quantifiers(text: str) -> str:
+    """Repeatedly strips leading quantifier words/numbers ("top 5 grocery stores" -> "grocery
+    stores") - a single sub() pass only removes one, leaving a leaked digit in combos."""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _STRIP_QUANTIFIER.sub("", text)
+    return text
 
 _EXCLUDE_PATTERNS = [
     re.compile(r"(?:ignore|exclude|skip|remove|drop|no)\s+(?:chains?\s+(?:like|such as)\s+)?(.+?)(?:\.|,|$)", re.I),
@@ -207,6 +226,29 @@ def _extract_cities(text: str) -> list[str]:
         if re.search(rf"\b{re.escape(city.lower())}\b", text_lower):
             if city not in found:
                 found.append(city)
+    return found
+
+
+_CITY_LEAD_STOPWORDS = {
+    "find", "search", "show", "get", "list", "all", "top", "best", "some", "any",
+    "the", "me", "in", "near", "around", "close", "from", "and",
+}
+
+
+def _extract_cities_generic(text: str) -> list[str]:
+    """Capture non-Pakistani city names from "<City[, City...]>, <Country>" patterns.
+
+    Pakistani cities are matched via the curated _CITIES list (_extract_cities); this
+    covers every other country so international NL queries aren't stuck with an empty
+    cities list (which otherwise disables OSM/Overture map discovery entirely)."""
+    found: list[str] = []
+    for m in _CITY_LIST_BEFORE_COUNTRY_RE.finditer(text):
+        for part in re.split(r"\s*,\s*|\s+and\s+", m.group(1)):
+            part = part.strip()
+            if not part or part.lower() in _CITY_LEAD_STOPWORDS:
+                continue
+            if part not in found:
+                found.append(part)
     return found
 
 
@@ -271,7 +313,7 @@ def _extract_subject(text: str) -> list[str]:
         if m:
             raw = m.group(1).strip()
             raw = _STRIP_GEOGRAPHY.sub("", raw).strip()
-            raw = _STRIP_QUANTIFIER.sub("", raw).strip()
+            raw = _strip_quantifiers(raw).strip()
             if len(raw) < 2:
                 continue
             parts = re.split(r"\s+and\s+|\s*,\s*|\s*[––-]\s+|\s+who\s+|\s+that\s+", raw)
@@ -343,6 +385,8 @@ def parse_intent(text: str) -> CampaignDraft:
 
     draft.countries = _extract_countries(text)
     draft.cities = _extract_cities(text)
+    if not draft.cities:
+        draft.cities = _extract_cities_generic(text)
     draft.provinces = _extract_provinces(text)
     draft.areas = _extract_areas(text)
     # Don't treat a word that is part of a recognised city name as a separate area: "Wah Cantt"

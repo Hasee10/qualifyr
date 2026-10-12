@@ -102,7 +102,7 @@ class OSMDiscovery:
         countries = campaign.geography.countries or [None]
         total_elements = 0
         areas_queried = 0
-        for area in campaign.geography.search_areas():
+        for area in campaign.geography.search_areas(include_country_fallback=True):
             bbox, country = await self._geocode_area(area, countries)
             if bbox is None:
                 log.warning("osm: could not geocode %s; skipping", area)

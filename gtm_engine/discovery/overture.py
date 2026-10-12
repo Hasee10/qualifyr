@@ -121,7 +121,7 @@ class OvertureDiscovery:
             log.info("overture: campaign has no overture_categories; skipping")
             return
         countries = campaign.geography.countries or [""]
-        for area in campaign.geography.search_areas():
+        for area in campaign.geography.search_areas(include_country_fallback=True):
             bbox, country = None, countries[0]
             for c in countries:
                 bbox = await self.geocoder.bbox(area, c or None)

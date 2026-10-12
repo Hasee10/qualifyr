@@ -84,21 +84,30 @@ def resolve_entities(companies: Iterable[DiscoveredCompany]) -> list[DiscoveredC
 def _fuzzy_merge_by_name(companies: list[DiscoveredCompany]) -> list[DiscoveredCompany]:
     """Last-resort pass for records with no shared identifier at all (e.g. an SECP record
     and a Wikidata record for the same firm, neither carrying the other's registry ID).
-    Country-scoped on purpose: never merge across different countries on name alone."""
+    Country-scoped on purpose: never merge across different countries on name alone.
+
+    Bucketed by (country, first normalized token) instead of a flat scan: a raw pairwise
+    scan is O(n^2) in SequenceMatcher calls, which is fine for the small registry lists this
+    was designed for but pathological for a bulk map-discovery batch (a single dense city can
+    return tens of thousands of Overture/OSM POIs) - two names that could score >= the fuzzy
+    threshold always share their first word, so the bucket can't miss a real match."""
     out: list[DiscoveredCompany] = []
+    buckets: dict[tuple[str, str], list[int]] = {}
     for c in companies:
         c_norm = normalize_legal_name(c.name)
         c_country = (c.country or "").strip().lower()
+        first_tok = c_norm.split()[0] if c_norm else ""
         match_idx = None
         if c_norm:
-            for idx, existing in enumerate(out):
-                if (existing.country or "").strip().lower() != c_country:
-                    continue
+            for idx in buckets.get((c_country, first_tok), []):
+                existing = out[idx]
                 if _name_similarity(c_norm, normalize_legal_name(existing.name)) >= FUZZY_NAME_THRESHOLD:
                     match_idx = idx
                     break
         if match_idx is None:
             out.append(c)
+            if c_norm:
+                buckets.setdefault((c_country, first_tok), []).append(len(out) - 1)
         else:
             out[match_idx] = _merge(out[match_idx], c)
     return out

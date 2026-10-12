@@ -184,7 +184,7 @@ def _discovery_relevance_filter(
     kept: list[DiscoveredCompany] = []
     dropped = 0
     for c in companies:
-        if c.source in ("web_search", "ppra", "kcci", "seed_csv"):
+        if c.source in ("websearch", "ppra", "kcci", "seed_csv"):
             kept.append(c)
             continue
         if user_configured_categories and c.category and c.category in cats:
@@ -564,9 +564,9 @@ class Pipeline:
         geo_sources: list = []
         other_sources: list = []
         osm_source = None  # kept so run() can propagate all_mirrors_dead to stats.osm_unavailable
-        if campaign.overture_categories and campaign.geography.search_areas():
+        if campaign.overture_categories and campaign.geography.search_areas(include_country_fallback=True):
             geo_sources.append(OvertureDiscovery(self.fetcher, self.settings))
-        if campaign.osm_categories and campaign.geography.search_areas():
+        if campaign.osm_categories and campaign.geography.search_areas(include_country_fallback=True):
             osm_source = OSMDiscovery(self.fetcher, self.settings)
             geo_sources.append(osm_source)
         if self.settings.enable_web_search_discovery and campaign.search_queries:
@@ -852,7 +852,12 @@ class Pipeline:
                     if rel:
                         sig["relevance"] = rel
                     intents.append(sig)
-            if company.source != "ppra" and ("ppra" in campaign.intent_sources or self.settings.enable_intent_signals):
+            # PPRA is Pakistan's own e-procurement portal (epms.ppra.gov.pk) - checking it for a
+            # non-Pakistani company produces a meaningless "signal" (wrong country's tenders).
+            campaign_countries = {c.strip().lower() for c in campaign.geography.countries}
+            is_pakistan_campaign = not campaign_countries or "pakistan" in campaign_countries
+            if (is_pakistan_campaign and company.source != "ppra"
+                    and ("ppra" in campaign.intent_sources or self.settings.enable_intent_signals)):
                 try:
                     intents += [s.model_dump(mode="json") for s in await self.ppra.signals_for(company.name, campaign)]
                 except Exception as exc:  # noqa: BLE001 - intent is additive, never blocking
@@ -1195,7 +1200,7 @@ class Pipeline:
                 user_configured_categories=user_configured_categories)
             target_desc = _relevance_target_desc(campaign.target_industries, stats.discovery_sectors)
             if self.llm and target_desc and discovered:
-                map_sourced = [c for c in discovered if c.source not in ("web_search", "ppra", "kcci", "seed_csv")]
+                map_sourced = [c for c in discovered if c.source not in ("websearch", "ppra", "kcci", "seed_csv")]
                 if map_sourced:
                     batch_dicts = [{"name": c.name, "category": c.category, "address": c.address} for c in map_sourced]
                     verdicts = await check_discovery_relevance(self.llm, target_desc, batch_dicts)
