@@ -252,28 +252,6 @@ def test_no_email_and_no_phone_is_not_outreach_ready(campaign):
     assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)[0]
 
 
-def test_phone_only_buyer_is_outreach_ready(campaign):
-    # Most SMBs publish a phone but no scrapeable email; a qualified buyer reachable by phone
-    # (call / WhatsApp) must count as outreach-ready even without a usable email.
-    from gtm_engine.models import OnlinePresence
-    inputs = _good_inputs(email_status=EmailStatus.NONE)
-    inputs.online_presence = OnlinePresence(google_review_count=150, google_rating=4.5,
-                                            online_gap_score=18, pain_from_reviews=["stockouts"])
-    inputs.contact.email = None
-    inputs.contact.phone = "+92 300 1234567"
-    score = score_lead(inputs, campaign)
-    assert score.priority in (Priority.HIGH, Priority.QUALIFIED)
-    assert is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
-
-
-def test_no_email_and_no_phone_is_not_outreach_ready(campaign):
-    inputs = _good_inputs(email_status=EmailStatus.NONE)
-    inputs.contact.email = None
-    inputs.contact.phone = None
-    score = score_lead(inputs, campaign)
-    assert not is_outreach_ready(inputs.classification, score, inputs.contact, campaign)
-
-
 def test_proximity_tier_scores(campaign):
     inputs = _good_inputs()
     score = score_lead(inputs, campaign)

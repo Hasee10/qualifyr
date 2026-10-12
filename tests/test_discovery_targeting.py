@@ -105,6 +105,23 @@ async def test_derive_targets_niche_uses_fallback_not_general_retail():
     assert "general_retail" not in t.sectors
 
 
+async def test_named_industry_targets_exclude_llm_buyer_sector_guesses():
+    """Regression (2026-10-12 Virginia run): the LLM answers "which sectors would BUY this
+    offer", so for "social media agencies" it guesses restaurants/clinics/retail. Those were
+    merged into the campaign's target categories, and BuyerClassifier substring-matches
+    overture categories - so "store" matched "flowers_and_gifts_store" and "clinic" matched
+    "urgent_care_clinic", qualifying gift shops and urgent-care clinics as social media
+    agencies. A named industry's niche categories must stand alone."""
+    llm = FakeLLM('["food_restaurant", "pharmacy_health", "general_retail"]')
+    t = await derive_discovery_targets("social media management and reporting software",
+                                       industries=["social media agencies"], llm=llm)
+    assert "office=advertising_agency" in t.osm_categories
+    for leaked in ("restaurant", "cafe", "clinic", "doctor", "store", "retail", "shop"):
+        assert leaked not in t.overture_categories, f"LLM buyer-sector guess leaked: {leaked}"
+    for leaked in ("food_restaurant", "pharmacy_health", "general_retail"):
+        assert leaked not in t.sectors, f"LLM buyer-sector guess leaked into sectors: {leaked}"
+
+
 def test_pharmacy_health_overture_is_specific_not_broad():
     """`medical`/`health` LIKE-matched research institutes and generic health orgs into
     doctor/pharmacy searches. The sector must use specific substrings only."""

@@ -339,18 +339,16 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
             for cat in llm_cats.overture_categories:
                 if cat not in targets.overture_categories:
                     targets.overture_categories.append(cat)
-        # LLM-guessed buyer-type sectors (if any) still broaden discovery, just as a supplement
-        # to the industry-specific niche categories rather than a replacement for them.
-        llm_guessed = [k for k in sectors if k not in det_sectors]
-        if llm_guessed:
-            extra = _expand(llm_guessed, taxonomy)
-            for tag in extra.osm_categories:
-                if tag not in targets.osm_categories:
-                    targets.osm_categories.append(tag)
-            for cat in extra.overture_categories:
-                if cat not in targets.overture_categories:
-                    targets.overture_categories.append(cat)
-            targets.sectors += [k for k in llm_guessed if k not in targets.sectors]
+        # The LLM's sector guesses are deliberately NOT merged in here. They answer "which
+        # sectors would BUY this offer", so for a campaign that already names its target
+        # industry they are unrelated buyer-type sectors (restaurants, clinics, general retail
+        # for a "social media agencies" search). Merging them was tried and reverted on
+        # 2026-10-12: these categories do not merely widen discovery, they become campaign
+        # *targets*, and BuyerClassifier matches overture categories by substring - so "store"
+        # matched "flowers_and_gifts_store" and "clinic" matched "urgent_care_clinic",
+        # qualifying gift shops, coffee shops and urgent-care clinics across Virginia as social
+        # media agencies. When an explicit industry resolves to real niche categories, those
+        # categories alone are the target.
         if not targets.empty:
             log.info("niche fallback for industries %s: osm=%s overture=%s",
                      industries, targets.osm_categories, targets.overture_categories)
