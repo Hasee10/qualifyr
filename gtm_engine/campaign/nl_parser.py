@@ -409,6 +409,8 @@ def _name_from_draft(draft: CampaignDraft) -> str:
             loc += f" {draft.cities[0]}"
     elif draft.cities:
         loc = ", ".join(draft.cities[:2])
+    elif draft.countries and draft.countries != ["Pakistan"]:
+        loc = ", ".join(draft.countries[:2])
 
     if subject and loc:
         name = f"{subject} - {loc}"
@@ -441,17 +443,21 @@ def build_campaign_config(
     name = _name_from_draft(draft)
     cid = slugify_campaign_id(name[:60], existing_ids)
 
+    # Cities take priority (most specific); fall back to the named country before
+    # defaulting to Pakistan, so a city-less international query ("marketing agencies
+    # in Spain") doesn't get its offer text mislabelled with the wrong country.
+    offer_location = ", ".join(draft.cities) or ", ".join(draft.countries) or "Pakistan"
+
     if draft.offer:
         offer = draft.offer
     elif draft.target_industries:
         offer = (
             f"Find {', '.join(draft.target_industries[:3])} "
-            f"in {', '.join(draft.cities) or 'Pakistan'}"
+            f"in {offer_location}"
         )
     elif draft.sectors:
         sector_label = ", ".join(s.replace("_", " ") for s in draft.sectors[:3])
-        location = ", ".join(draft.cities) or "Pakistan"
-        offer = f"Find {sector_label} businesses in {location}"
+        offer = f"Find {sector_label} businesses in {offer_location}"
     else:
         offer = draft.raw_text.strip()[:200]
 

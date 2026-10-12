@@ -55,6 +55,17 @@ def test_extract_country_alias():
     assert draft.countries == ["United Arab Emirates"]
 
 
+def test_offer_and_name_use_country_when_no_city_matched():
+    """Regression: the offer/name builders only checked draft.cities, so a
+    city-less international query ("marketing agencies in Spain") fell through
+    to the literal "Pakistan" string even once geography.countries was fixed."""
+    draft = parse_intent("find marketing agencies in Spain")
+    cfg = build_campaign_config(draft)
+    assert "Pakistan" not in cfg.offer
+    assert "Spain" in cfg.offer
+    assert "Spain" in cfg.name
+
+
 # ---------------------------------------------------------------------------
 # Deterministic parser: offer extraction
 # ---------------------------------------------------------------------------
