@@ -190,6 +190,9 @@ export interface CreditStatus {
   daily_used: number
   daily_limit: number
   daily_remaining: number
+  /** Credits held by runs that are dispatched but not yet billed (F3). Already included in
+   *  monthly_used/daily_used - broken out so the UI can say "held" rather than "spent". */
+  reserved?: number
 }
 
 export interface PricingTier {

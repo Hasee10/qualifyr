@@ -593,29 +593,48 @@ def run_campaign(campaign_id: str, req: RunRequest,
     # pessimistic: it blocks a run that COULD cost up to max_companies credits even though the
     # actual run may return fewer outreach_ready leads and cost less. Unlimited/local accounts
     # skip this (tier is None for them).
+    reserved = False
     if tier is not None:
         status = credit_status(db, user_id, tier)
-        db.close()
         if status["monthly_remaining"] < max_companies:
+            db.close()
             raise HTTPException(402, f"not enough credits: {status['monthly_remaining']} left "
                                       f"this month (resets monthly), this run could cost up to "
                                       f"{max_companies}")
         if status["daily_remaining"] < max_companies:
+            db.close()
             raise HTTPException(429, f"daily credit throttle reached: {status['daily_remaining']} "
                                       f"left today, this run could cost up to {max_companies}")
+        # F3 (2026-10-11): hold the budget here, before dispatching. Billing happens in the
+        # Actions runner at run completion, minutes-to-hours from now; without this hold a
+        # second concurrent dispatch on another campaign would read the same balance and pass
+        # a gate only one of the two runs can afford. credit_status counts active reservations
+        # as used, so the next gate sees this run's cost immediately. Released by the runner
+        # at completion/failure (cli.py), or reclaimed by TTL if it never reports back.
+        reserved = db.reserve_credits(user_id, campaign_id, max_companies) is not None
+        db.close()
     # A file-based campaign is dispatched by its repo path; a user-created (DB) one by its
     # id, which the runner resolves from Postgres. Either way the runner's `gtm run` accepts it.
     campaign_input = _workflow_campaign_path(campaign_id) if campaign_id in _campaign_files() else campaign_id
     min_outreach_ready = req.min_outreach_ready if req.min_outreach_ready is not None else campaign.min_outreach_ready
-    dispatch_workflow(
-        "gather-leads.yml",
-        {
-            "campaign": campaign_input,
-            "max_companies": str(max_companies),
-            "min_outreach_ready": "" if min_outreach_ready is None else str(min_outreach_ready),
-            "user_id": user_id or "",
-        },
-    )
+    try:
+        dispatch_workflow(
+            "gather-leads.yml",
+            {
+                "campaign": campaign_input,
+                "max_companies": str(max_companies),
+                "min_outreach_ready": "" if min_outreach_ready is None else str(min_outreach_ready),
+                "user_id": user_id or "",
+            },
+        )
+    except Exception:
+        # Nothing was dispatched, so nothing will ever release the hold we just took. Give the
+        # credits straight back rather than making the user wait out the TTL.
+        if reserved:
+            rdb = _db()
+            rdb.release_reservation(campaign_id, "refunded")
+            rdb.close()
+        raise
     db = _db()
     db.set_run_progress(campaign_id, None, "starting", 0, 0, "dispatched to GitHub Actions")
     ticket = db.get_run_progress(campaign_id)

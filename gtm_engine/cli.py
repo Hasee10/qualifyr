@@ -57,6 +57,9 @@ async def _run(args: argparse.Namespace) -> int:
     except Exception as exc:
         progress_db.set_run_progress(campaign.campaign_id, None, "failed", 0, 0, str(exc))
         progress_db.close()
+        # F3: the run is over and will never be billed, so hand the held credits straight
+        # back instead of making the user wait out the reservation TTL.
+        db.release_reservation(campaign.campaign_id, "refunded")
         db.close()
         raise
     progress_db.set_run_progress(campaign.campaign_id, result.run_id, "completed", 0, 0, "done")
@@ -67,6 +70,10 @@ async def _run(args: argparse.Namespace) -> int:
     owner_id = db.campaign_owner(campaign.campaign_id)
     if owner_id:
         db.consume_credits(owner_id, result.stats.outreach_ready)
+    # F3: bill first, then drop the hold the API took at dispatch. Doing it in this order
+    # means a crash between the two leaves the hold in place (self-healing via TTL) rather
+    # than freeing budget for a run that was already charged.
+    db.release_reservation(campaign.campaign_id, "consumed")
     if getattr(fetcher, "fallbacks", 0):
         print(f"  browser fallback rendered {fetcher.fallbacks} page(s)")
 
@@ -176,6 +183,7 @@ async def _nl(args: argparse.Namespace) -> int:
     except Exception as exc:
         progress_db.set_run_progress(cfg.campaign_id, None, "failed", 0, 0, str(exc))
         progress_db.close()
+        db.release_reservation(cfg.campaign_id, "refunded")  # F3, see _run above
         db.close()
         raise
     progress_db.set_run_progress(cfg.campaign_id, result.run_id, "completed", 0, 0, "done")
@@ -183,6 +191,7 @@ async def _nl(args: argparse.Namespace) -> int:
     owner_id = db.campaign_owner(cfg.campaign_id)
     if owner_id:
         db.consume_credits(owner_id, result.stats.outreach_ready)
+    db.release_reservation(cfg.campaign_id, "consumed")  # F3, see _run above
 
     s = result.stats
     print(f"\nrun {result.run_id} finished")

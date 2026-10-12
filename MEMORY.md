@@ -25,11 +25,16 @@ Last updated: 2026-10-11 (post-ship audit of the 2026-10-10 rehaul; see below)
   = 5` predated the tier system: Enterprise reached 20% of its 2,500 credits, Pro 50% of 500.
   Now derived from the tier's credits at its smallest run size, so runs can never bind before
   credits (all tiers reach 100%). Precedence unchanged: user pref → env → default.
-- **F3 (open) — credits are gated but never reserved.** Gate runs in the API at dispatch,
-  consumption in the Actions runner minutes-to-hours later, so concurrent dispatches across
-  different campaigns all see the same balance. Was masked by the flat runs cap; **F2 removes
-  that mask, so this is now the next thing to fix.** Needs decisions on refund-on-failure and
-  stale-reservation reconciliation.
+- **F3 — credits are now reserved at dispatch (fixed).** New `credit_reservations` table; a
+  hold is written in `run_campaign` after the gate and before `dispatch_workflow`, and
+  `credit_status()` counts active holds as used so the next gate sees in-flight spend
+  immediately. CEO-approved semantics: reserve the requested size, refund on recorded failure,
+  24h TTL (`Database.CREDIT_RESERVATION_TTL_HOURS`) so a killed runner can't strand credits.
+  Released in `cli.py` — `consumed` after billing, `refunded` on the failure path; the API
+  refunds directly if `dispatch_workflow` itself raises. **Keyed by campaign, not by a threaded
+  reservation id** (the one-run-per-campaign guard makes that safe), so `gather-leads.yml` and
+  the `gtm run` signature were left unchanged. Billing happens *before* release on purpose: a
+  crash in between leaves the hold (TTL self-heals) rather than freeing already-charged budget.
 - **F4 (open) —** `outreach_skip_reason` / `NEEDS_CONTACT` exist in the model, DB and CSV but
   have **zero references in `web/src`**; B3's operator visibility stops at the CSV.
 - ⚠️ **No paid account has ever existed** (tier = manual DB write, no admin endpoint/CLI), which

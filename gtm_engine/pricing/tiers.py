@@ -116,16 +116,32 @@ def resolve_user_tier(db: "Database", user_id: str | None) -> Tier:
 # returned (Database.consume_credits, called at run completion). This reads the same
 # "credits" usage_counts row for the pre-run gate in api/main.py's run_campaign.
 def credit_status(db: "Database", user_id: str, tier: Tier) -> dict:
-    """This month's/today's credit consumption against the user's tier allowance."""
+    """This month's/today's credit consumption against the user's tier allowance.
+
+    F3 (2026-10-11): spend that is already dispatched but not yet billed counts as used.
+    Billing happens in the Actions runner at run completion, minutes-to-hours after the API
+    gated the run, so without this a second concurrent dispatch would read the same
+    pre-consumption balance and both runs would pass a gate only one of them could afford.
+    Reservations are released when the run completes or fails, and stop counting after
+    Database.CREDIT_RESERVATION_TTL_HOURS so an abandoned runner can't strand credits.
+
+    Reserved credits count against the daily throttle as well as the monthly allowance: the
+    TTL is 24h, so an active reservation is by definition recent enough to be today's spend.
+    """
     rows = {r["resource"]: r for r in db.get_usage(user_id)}
     credits = rows.get("credits", {"daily_count": 0, "monthly_count": 0})
+    reserved = db.reserved_credits(user_id)
     monthly_limit = resolved_monthly_credits(tier)
     daily_limit = tier.daily_credit_throttle
+    monthly_used = credits["monthly_count"] + reserved
+    daily_used = credits["daily_count"] + reserved
     return {
-        "monthly_used": credits["monthly_count"],
+        "monthly_used": monthly_used,
         "monthly_limit": monthly_limit,
-        "monthly_remaining": max(0, monthly_limit - credits["monthly_count"]),
-        "daily_used": credits["daily_count"],
+        "monthly_remaining": max(0, monthly_limit - monthly_used),
+        "daily_used": daily_used,
         "daily_limit": daily_limit,
-        "daily_remaining": max(0, daily_limit - credits["daily_count"]),
+        "daily_remaining": max(0, daily_limit - daily_used),
+        # Broken out so the UI can distinguish "spent" from "held by a run in flight".
+        "reserved": reserved,
     }

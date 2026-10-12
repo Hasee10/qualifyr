@@ -33,7 +33,7 @@ in-flight.
 | test | End-to-end campaign before/after | ⏳ pending | — |
 | F1 | Bill only for delivered leads (recompute after hard filters) | ✅ done | `(this commit)` |
 | F2 | Tier-aware monthly runs cap (paid tiers were capped at 20–50%) | ✅ done | `(this commit)` |
-| F3 | Reserve credits at dispatch (gate/consume TOCTOU) | ⬜ needs decision | — |
+| F3 | Reserve credits at dispatch (gate/consume TOCTOU) | ✅ done | `(this commit)` |
 | F4 | Surface `NEEDS_CONTACT` / skip reasons in the Leads UI | ⬜ open | — |
 
 ---
@@ -62,13 +62,27 @@ size, so the runs counter can never bind before credits do (all three tiers now 
 Precedence is unchanged: user preference → operator env var → default. The daily runs limit
 and `tier.daily_credit_throttle` remain the burst controls.
 
-**F3 — credits are gated but never reserved (open).** The pre-run gate runs in the API at
-dispatch; consumption happens minutes-to-hours later in the Actions runner. Concurrent
-dispatches across different campaigns each see the same pre-consumption balance, so N
-simultaneous runs can overspend. This was previously *masked* by the flat runs cap — F2
-removes that mask, so F3 should be scheduled next. Design decisions needed before building:
-refund semantics on a failed run, reconciliation for a runner that never reports back
-(stale reservation leak), and whether to reserve the run's full cap or its requested size.
+**F3 — credits are now reserved at dispatch, not just gated.** The pre-run gate ran in the API
+at dispatch while consumption happened minutes-to-hours later in the Actions runner, so
+concurrent dispatches across different campaigns all read the same pre-consumption balance and
+together overspent the tier. This was *masked* by the flat runs cap until F2 removed the mask.
+
+Semantics (CEO, 2026-10-11): **reserve the requested size, refund on a recorded failure, 24h
+TTL reconciliation.** A `credit_reservations` row is written in `run_campaign` after the gate
+passes and before `dispatch_workflow`; `credit_status()` counts active holds as used, so the
+next gate immediately sees the in-flight cost. The runner releases its own hold in `cli.py` —
+`consumed` after billing, `refunded` in the failure path — and the API refunds directly if the
+dispatch call itself raises. `reserved_credits()` ignores holds older than
+`CREDIT_RESERVATION_TTL_HOURS` (24), so a runner that is killed and never reports back cannot
+strand a user's credits; `expire_stale_reservations()` marks those rows for operator
+visibility but correctness does not depend on it running.
+
+Reservations are keyed by **campaign**, not by an id threaded through the Actions workflow:
+`run_campaign` already refuses to dispatch while a run is in progress for that campaign, so
+there is at most one active hold per campaign. That kept `gather-leads.yml` inputs and the
+`gtm run` CLI signature unchanged. Billing is deliberately ordered *before* the release, so a
+crash between the two leaves the hold in place (self-healing via TTL) rather than freeing
+budget for a run that was already charged. 13 tests in `tests/test_credit_reservations.py`.
 
 **F4 — B3's operator visibility stops at the CSV (open).** `outreach_skip_reason` and
 `SequenceStatus.NEEDS_CONTACT` are persisted and exported, but there are zero references to
