@@ -38,9 +38,40 @@ def test_match_sectors_falls_back_to_general_retail():
 
 async def test_derive_targets_deterministic_expands_to_valid_categories():
     t = await derive_discovery_targets("inventory software for clothing and footwear retailers", ["fashion"])
-    assert "shop=clothes" in t.osm_categories and "shop=shoes" in t.osm_categories
+    assert "shop=clothes" in t.osm_categories
     assert "clothing" in t.overture_categories
-    assert set(t.sectors) >= {"clothing_apparel", "footwear"}
+    # The named industry decides the sectors, so "footwear" - which only the offer mentions - is
+    # NOT searched. The offer describes what we sell and who currently has the problem; treating
+    # its nouns as discovery targets is what sent a Karachi restaurant campaign looking for
+    # computer shops. Narrowing to the stated industry is the deliberate trade.
+    assert t.sectors == ["clothing_apparel"]
+
+
+async def test_named_industries_outrank_sectors_the_offer_mentions_in_passing():
+    """The 2026-10-13 Karachi regression: an offer for restaurants "that currently take delivery
+    orders only over the phone" with "card payment links" matched electronics (on "phone") and
+    automotive (on "car" inside "card"), and both became discovery targets - 11 of 15
+    outreach-ready "restaurants" were computer and electronics shops."""
+    offer = ("We set up an online ordering website with card payment links for restaurants "
+             "that currently take delivery orders only over the phone")
+    t = await derive_discovery_targets(offer, ["restaurants"])
+    assert t.sectors == ["food_restaurant"]
+    assert not [c for c in t.overture_categories
+                if c in {"mobile_phone_store", "computer", "car_dealer", "auto_parts"}]
+
+
+def test_match_sectors_requires_whole_words_not_substrings():
+    tax = load_taxonomy()
+    # "car" inside "card", and "pos" inside "position" - short taxonomy terms are all traps.
+    assert "automotive" not in match_sectors("card payment links for cafes", None, tax)
+    assert "automotive" in match_sectors("software for car dealers", None, tax)
+
+
+def test_match_sectors_matches_singular_and_plural():
+    tax = load_taxonomy()
+    # The taxonomy says "pharmacy"/"shop"; campaigns say "pharmacies"/"shops".
+    assert "pharmacy_health" in match_sectors("", ["pharmacies"], tax)
+    assert match_sectors("software for shops and outlets", None, tax) == ["general_retail"]
 
 
 async def test_derive_targets_never_leaves_an_offer_empty():

@@ -14,8 +14,10 @@ When no sector matches, industries are mapped to valid OSM/Overture tags directl
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from difflib import get_close_matches
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -231,6 +233,45 @@ def _expand(sectors: list[str], taxonomy: dict) -> DiscoveryTargets:
     return DiscoveryTargets(osm_categories=osm, overture_categories=overture, sectors=list(sectors))
 
 
+@lru_cache(maxsize=2048)
+def _term_variants(term: str) -> tuple[str, ...]:
+    """A match term plus its singular/plural counterpart.
+
+    Whole-word matching alone is too strict to replace substring matching: the taxonomy says
+    "pharmacy" and "shop" while campaigns say "pharmacies" and "shops", and dropping those
+    matches is just as wrong as the over-matching this is here to prevent."""
+    base = term.strip().lower()
+    out = [base]
+    if base.endswith("ies") and len(base) > 4:
+        out.append(base[:-3] + "y")
+    elif base.endswith("es") and len(base) > 4:
+        out += [base[:-1], base[:-2]]
+    elif base.endswith("s") and len(base) > 3:
+        out.append(base[:-1])
+    else:
+        out.append(base + "s")
+        if base.endswith(("s", "x", "z", "ch", "sh")):
+            out.append(base + "es")
+        if base.endswith("y") and len(base) > 2:
+            out.append(base[:-1] + "ies")
+    return tuple(dict.fromkeys(v for v in out if v))
+
+
+@lru_cache(maxsize=2048)
+def _term_pattern(term: str) -> re.Pattern[str]:
+    alts = "|".join(re.escape(v) for v in _term_variants(term))
+    return re.compile(rf"\b(?:{alts})\b")
+
+
+def _matches_term(text: str, terms: list) -> bool:
+    """Whether any taxonomy match term occurs in `text` as a whole word (either number).
+
+    Plain substring matching sent the 2026-10-13 Karachi run looking for car dealers, because
+    the term "car" sits inside "card payment links". Short terms are common in the taxonomy
+    ("car", "pos", "gym", "spa"), so every one of them is a trap for this."""
+    return any(_term_pattern(str(term)).search(text) for term in terms)
+
+
 def match_sectors(offer: str, industries: list[str] | None, taxonomy: dict) -> list[str]:
     """Sectors whose `match` terms appear in the offer or the campaign's industries. The broad
     `general_retail` fallback is only kept when nothing more specific matched, so a clothing
@@ -240,11 +281,11 @@ def match_sectors(offer: str, industries: list[str] | None, taxonomy: dict) -> l
     for key, spec in taxonomy.items():
         if key == "general_retail":
             continue
-        if any(term.lower() in text for term in spec.get("match", [])):
+        if _matches_term(text, spec.get("match", [])):
             hits.append(key)
     if not hits and "general_retail" in taxonomy:
         general = taxonomy["general_retail"]
-        if any(term.lower() in text for term in general.get("match", [])):
+        if _matches_term(text, general.get("match", [])):
             hits.append("general_retail")
     return hits
 
@@ -322,6 +363,24 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
     # make `sectors` look non-empty and silently block the industry-specific niche fallback that
     # should run instead - so niche fallback is gated on the deterministic match only.
     det_sectors = match_sectors(offer, industries, taxonomy)
+    # When the campaign names its target industries, THOSE decide what to search for. The offer
+    # describes what we sell and the buyer's current situation, so sectors it matches incidentally
+    # are guesses about buyers - the same thing _llm_sectors produces, and just as damaging once
+    # they become discovery targets. The 2026-10-13 Karachi run ("...for restaurants that
+    # currently take delivery orders only over the phone...", industries=["restaurants"]) matched
+    # electronics on "phone" and so searched mobile_phone_store and computer across Karachi:
+    # 11 of its 15 outreach-ready "restaurants" were computer and electronics shops.
+    # Only applied when the industries themselves match something specific - if they are too
+    # vague for the taxonomy, the offer's match is still better than nothing, and an empty
+    # specific match drops through to the niche fallback below.
+    if industries:
+        from_industries = match_sectors("", industries, taxonomy)
+        if [s for s in from_industries if s != "general_retail"]:
+            if set(from_industries) != set(det_sectors):
+                log.info("sectors from named industries %s: %s (offer alone also matched %s)",
+                         industries, from_industries,
+                         [s for s in det_sectors if s not in from_industries])
+            det_sectors = from_industries
     # A deterministic match of ONLY the broad general_retail fallback is not a real match. Its
     # match terms are "retail, store, shop, brand, outlet, seller, merchant", so it fires on any
     # offer that merely contains one of those words in passing - the 2026-10-13 Virginia run hit
