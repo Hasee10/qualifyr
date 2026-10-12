@@ -67,6 +67,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const submitNL = async () => {
     setError(null)
     if (!text.trim()) { setError("Describe what you're looking for."); return }
+    if (!maxCo.trim()) { setError("Enter the number of companies to find."); return }
     setBusy(true)
     try {
       const mc = maxCo.trim() ? parseInt(maxCo, 10) : undefined
@@ -86,6 +87,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
   const submitManual = async () => {
     setError(null)
     if (!name.trim() || !offer.trim()) { setError("Name and offer are required."); return }
+    if (!maxCo.trim()) { setError("Enter the number of companies to find."); return }
     setBusy(true)
     try {
       const body = {
@@ -140,7 +142,7 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && close()}>
-      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "sm:max-w-3xl" : "sm:max-w-lg")}>
+      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "max-w-3xl" : "max-w-lg")}>
         <ExpandButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
         <SheetHeader><SheetTitle>New campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
@@ -219,15 +221,16 @@ function NewCampaign({ open, onClose, onCreated }: { open: boolean; onClose: () 
             </>
           )}
           <div className="flex items-center gap-2">
-            <label htmlFor="max-co" className="text-sm text-muted-foreground whitespace-nowrap">Max companies</label>
+            <label htmlFor="max-co" className="text-sm text-muted-foreground whitespace-nowrap">Max companies *</label>
             <input
               id="max-co"
               type="number"
+              required
               min={1}
               max={maxLeads ?? 500}
               value={maxCo}
               onChange={(e) => setMaxCo(e.target.value)}
-              placeholder={String(maxLeads ?? 30)}
+              placeholder="e.g. 30"
               className="w-20 rounded-md border bg-transparent px-2 py-1 text-sm"
             />
             {maxLeads != null && (
@@ -338,7 +341,7 @@ function EditCampaign({ campaign, open, onClose, onSaved }: { campaign: Campaign
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "sm:max-w-3xl" : "sm:max-w-lg")}>
+      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "max-w-3xl" : "max-w-lg")}>
         <ExpandButton expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
         <SheetHeader><SheetTitle>Edit campaign</SheetTitle></SheetHeader>
         <div className="flex flex-col gap-4 p-4 pt-0">
@@ -538,11 +541,26 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
   // Tier-gated dropdown choices (P1) – the server also validates this, but offering only
   // the caller's actual tier options up front avoids a round-trip 400.
   React.useEffect(() => {
-    api.myLimits().then((l) => {
-      setAllowedLeads(l.allowed_leads_per_run)
-      setMax((cur) => (l.allowed_leads_per_run.includes(Number(cur)) ? cur : String(l.allowed_leads_per_run[0])))
-    }).catch(() => {})
+    api.myLimits().then((l) => setAllowedLeads(l.allowed_leads_per_run)).catch(() => {})
   }, [])
+
+  // Re-sync the run size to the campaign's configured max_companies whenever it changes. This
+  // used to only run once at mount (`useState(String(campaign.max_companies))`), so editing
+  // "Max companies" on an already-rendered card had no effect on what Run actually dispatched
+  // until a full page reload - the dropdown kept using whatever was selected before the edit.
+  React.useEffect(() => {
+    if (running) return
+    setMax(String(campaign.max_companies))
+  }, [campaign.max_companies, running])
+
+  // The tier's preset sizes plus the campaign's own configured max_companies, so an edited
+  // value that isn't one of the presets (e.g. 30) is still a real, selectable, selected option
+  // instead of silently falling back to the nearest preset.
+  const leadOptions = React.useMemo(() => {
+    const opts = new Set(allowedLeads)
+    opts.add(campaign.max_companies)
+    return Array.from(opts).sort((a, b) => a - b)
+  }, [allowedLeads, campaign.max_companies])
 
   // Adopt the server's live status whenever the campaign list refreshes (e.g. after returning
   // to the page) – unless a local poll is already tracking an active run, so finer-grained
@@ -591,7 +609,7 @@ function RunPanel({ campaign, onFinished }: { campaign: Campaign; onFinished: ()
           onChange={(e) => setMax(e.target.value)}
           disabled={!!running}
         >
-          {allowedLeads.map((n) => (
+          {leadOptions.map((n) => (
             <option key={n} value={n}>{n} leads</option>
           ))}
         </select>
@@ -648,6 +666,18 @@ function statusDotClass(status?: string): string {
   if (["running", "dispatched", "pending", "queued"].includes(s)) return "bg-amber-500"
   if (["failed", "error"].includes(s)) return "bg-red-500"
   return "bg-muted-foreground/40"
+}
+
+// How many of a completed run's leads were never seen before in this campaign, so "Last run"
+// can say what actually changed instead of leaving the user to guess from the totals above.
+function newLeadsFromRun(statsJson: string | null | undefined): number | null {
+  if (!statsJson) return null
+  try {
+    const n = JSON.parse(statsJson)?.new_leads
+    return typeof n === "number" ? n : null
+  } catch {
+    return null
+  }
 }
 
 export default function CampaignsPage() {
@@ -767,6 +797,14 @@ export default function CampaignsPage() {
                 {c.last_run
                   ? `Last run ${c.last_run.status} · ${new Date(c.last_run.started_at).toLocaleDateString()}`
                   : "Not run yet"}
+                {c.last_run?.status === "completed" && (() => {
+                  const n = newLeadsFromRun(c.last_run?.stats_json)
+                  return n !== null && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+                      {n > 0 ? `+${n} new lead${n === 1 ? "" : "s"}` : "no new leads"}
+                    </Badge>
+                  )
+                })()}
               </div>
             </CardContent>
           </Card>

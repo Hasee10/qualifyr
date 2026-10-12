@@ -89,6 +89,7 @@ class RunStats:
     outreach_ready: int = 0
     suppressed: int = 0
     duplicates: int = 0
+    new_leads: int = 0  # companies never seen before in this campaign, across any run
     chains_excluded: int = 0
     hard_filtered: int = 0
     places_api_calls: int = 0
@@ -1052,6 +1053,8 @@ class Pipeline:
             lead.lead_id = previous.lead_id
             lead.review_verdict, lead.reviewed_at = previous.review_verdict, previous.reviewed_at
             lead.sequence_status = previous.sequence_status if previous.sequence_status != SequenceStatus.NOT_QUEUED else lead.sequence_status
+        else:
+            stats.new_leads += 1
         await self._db_call(self.db.save_lead, lead, run_id, key)
         return lead
 

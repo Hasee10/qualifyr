@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import urllib.parse
+from datetime import timedelta
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,6 +17,13 @@ from psycopg.rows import dict_row
 from gtm_engine.models import Lead, new_id, utcnow
 
 log = logging.getLogger(__name__)
+
+# How long a credit reservation keeps holding budget before it is treated as abandoned.
+# A dispatched run normally releases its own reservation at completion or failure; this is
+# the backstop for a runner that is killed and never reports back. Deliberately generous -
+# a long campaign may legitimately run for hours, and reclaiming too early would let a user
+# double-spend against a run that is still going.
+CREDIT_RESERVATION_TTL_HOURS = 24
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -42,8 +50,12 @@ CREATE TABLE IF NOT EXISTS runs (
     stats_json TEXT
 );
 
+-- company_key alone used to be the primary key, which made it a GLOBAL identity: if two
+-- different campaigns discovered the same real-world business, the second upsert silently
+-- reassigned the row's campaign_id to itself, stealing it from the first campaign. The PK is
+-- (campaign_id, company_key) so two campaigns finding the same business each get their own row.
 CREATE TABLE IF NOT EXISTS companies (
-    company_key TEXT PRIMARY KEY,
+    company_key TEXT NOT NULL,
     campaign_id TEXT NOT NULL,
     name TEXT NOT NULL,
     domain TEXT,
@@ -53,8 +65,22 @@ CREATE TABLE IF NOT EXISTS companies (
     source TEXT,
     source_url TEXT,
     discovered_at TEXT NOT NULL,
-    raw_json TEXT
+    raw_json TEXT,
+    PRIMARY KEY (campaign_id, company_key)
 );
+-- Migrate pre-existing databases off the old single-column PK, same pattern as the
+-- suppressions migration above. Guarded so it is a no-op once already migrated.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+        WHERE i.indrelid = 'companies'::regclass AND i.indisprimary AND a.attname = 'campaign_id'
+    ) THEN
+        ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_pkey;
+        ALTER TABLE companies ADD PRIMARY KEY (campaign_id, company_key);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS pages (
     url TEXT PRIMARY KEY,
@@ -80,11 +106,19 @@ CREATE TABLE IF NOT EXISTS leads (
     data_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+-- first_seen_at (2026-10-12): updated_at is stamped to now on EVERY save, including a rerun
+-- just reconfirming a company it already knew about - so sorting by it put old, merely-
+-- reconfirmed leads at the top right alongside genuinely new ones, which read as the old
+-- results having been overwritten. first_seen_at is set once at INSERT and never touched
+-- again (see save_lead's ON CONFLICT clause), so it is the one true "discovered" timestamp.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS first_seen_at TEXT;
+UPDATE leads SET first_seen_at = updated_at WHERE first_seen_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_leads_campaign ON leads(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_leads_company ON leads(company_key);
 -- Composite indexes so the paginated Leads list (newest-first) and the dashboard top-buyers
 -- (highest-score-first) both stay fast as a campaign accumulates leads.
 CREATE INDEX IF NOT EXISTS idx_leads_campaign_updated ON leads(campaign_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_campaign_first_seen ON leads(campaign_id, first_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_leads_campaign_score ON leads(campaign_id, total_score DESC);
 
 -- Per-tenant do-not-contact list. owner_id scopes a suppression to the account that created it;
@@ -179,6 +213,25 @@ CREATE TABLE IF NOT EXISTS usage_counts (
 -- as campaigns.owner_id above - existing rows pick up the columns with safe defaults.
 ALTER TABLE usage_counts ADD COLUMN IF NOT EXISTS monthly_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE usage_counts ADD COLUMN IF NOT EXISTS last_reset_month TEXT NOT NULL DEFAULT '';
+
+-- Credit reservations (F3, 2026-10-11). The pre-run credit gate runs in the API at dispatch,
+-- but consumption happens in the GitHub Actions runner minutes-to-hours later. Without a
+-- reservation, two concurrent dispatches on different campaigns both read the same
+-- pre-consumption balance, both pass the gate, and together overspend the tier. A row is
+-- written at dispatch and released at run completion ('consumed') or run failure ('refunded').
+-- Rows older than the TTL stop counting against the balance, so a runner that is killed and
+-- never reports back cannot strand a user's credits permanently.
+CREATE TABLE IF NOT EXISTS credit_reservations (
+    reservation_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active',   -- active | consumed | refunded | expired
+    created_at TEXT NOT NULL,
+    released_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_credit_res_user_state ON credit_reservations(user_id, state);
+CREATE INDEX IF NOT EXISTS idx_credit_res_campaign_state ON credit_reservations(campaign_id, state);
 
 CREATE TABLE IF NOT EXISTS user_preferences (
     user_id TEXT NOT NULL,
@@ -473,12 +526,17 @@ class Database:
         Insert-or-update and the new/existing verdict are one atomic statement: the old
         SELECT-then-INSERT let two concurrent discoveries both read "absent" and both count the
         company as new, inflating discovery stats. `xmax = 0` is true only for the row this
-        statement just inserted, so it distinguishes a fresh insert from a conflict update."""
+        statement just inserted, so it distinguishes a fresh insert from a conflict update.
+
+        The conflict target is (campaign_id, company_key), not company_key alone: the same
+        real-world business discovered by two different campaigns must get two independent
+        rows, not have the second campaign steal the first one's row by reassigning its
+        campaign_id."""
         row = self._execute(
             "INSERT INTO companies (company_key, campaign_id, name, domain, website, "
             "country, city, source, source_url, discovered_at, raw_json) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (company_key) DO UPDATE SET campaign_id = EXCLUDED.campaign_id, "
+            "ON CONFLICT (campaign_id, company_key) DO UPDATE SET "
             "name = EXCLUDED.name, domain = EXCLUDED.domain, website = EXCLUDED.website, "
             "country = EXCLUDED.country, city = EXCLUDED.city, source = EXCLUDED.source, "
             "source_url = EXCLUDED.source_url, discovered_at = EXCLUDED.discovered_at, "
@@ -507,10 +565,16 @@ class Database:
     # -- leads --------------------------------------------------------------
 
     def save_lead(self, lead: Lead, run_id: str | None, company_key: str | None) -> None:
+        """first_seen_at is only ever written on the initial INSERT (deliberately absent from
+        the ON CONFLICT SET list below) so a rerun that just reconfirms an existing lead does
+        not reset its discovery time - that is what lets the Leads list sort new leads to the
+        top without old, merely-reconfirmed ones jumping the queue alongside them."""
+        now = utcnow().isoformat()
         self._execute(
             "INSERT INTO leads (lead_id, campaign_id, run_id, company_key, company_type, "
-            "total_score, priority, outreach_ready, sequence_status, contact_email, data_json, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "total_score, priority, outreach_ready, sequence_status, contact_email, data_json, "
+            "updated_at, first_seen_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (lead_id) DO UPDATE SET campaign_id = EXCLUDED.campaign_id, run_id = EXCLUDED.run_id, "
             "company_key = EXCLUDED.company_key, company_type = EXCLUDED.company_type, "
             "total_score = EXCLUDED.total_score, priority = EXCLUDED.priority, "
@@ -520,7 +584,7 @@ class Database:
             (lead.lead_id, lead.campaign_id, run_id, company_key, lead.company_type.value,
              lead.total_score, lead.priority.value, int(lead.outreach_ready),
              lead.sequence_status.value, lead.contact_email,
-             lead.model_dump_json(), utcnow().isoformat()),
+             lead.model_dump_json(), now, now),
         )
         self._commit()
 
@@ -572,7 +636,10 @@ class Database:
                                                outreach_ready, q)
         # "score" keeps its original single-key sort (ties fall back to physical/insertion order,
         # which existing callers and tests rely on); only "recent" adds the recency key.
-        sql += " ORDER BY updated_at DESC, total_score DESC" if order == "recent" else " ORDER BY total_score DESC"
+        # first_seen_at, not updated_at: updated_at is restamped on every rerun even for a lead
+        # that was merely reconfirmed, which would otherwise bury genuinely new leads under a
+        # wash of old ones touched by the same run.
+        sql += " ORDER BY first_seen_at DESC, total_score DESC" if order == "recent" else " ORDER BY total_score DESC"
         if limit is not None:
             sql += " LIMIT %s OFFSET %s"
             params.extend([limit, offset])
@@ -1005,6 +1072,73 @@ class Database:
             (user_id, amount, today, amount, month, amount, amount, amount, amount),
         )
         self._commit()
+
+    # -- credit reservations (F3) ---------------------------------------------
+
+    def _reservation_cutoff(self) -> str:
+        return (utcnow() - timedelta(hours=CREDIT_RESERVATION_TTL_HOURS)).isoformat()
+
+    def expire_stale_reservations(self) -> int:
+        """Mark abandoned reservations expired. Housekeeping only: `reserved_credits` already
+        ignores anything past the TTL, so correctness does not depend on this running."""
+        cur = self._execute(
+            "UPDATE credit_reservations SET state = 'expired', released_at = %s "
+            "WHERE state = 'active' AND created_at <= %s",
+            (utcnow().isoformat(), self._reservation_cutoff()),
+        )
+        self._commit()
+        return cur.rowcount or 0
+
+    def reserve_credits(self, user_id: str, campaign_id: str, amount: int) -> str | None:
+        """Hold `amount` credits for a run that has been dispatched but not yet billed.
+
+        Returns the reservation id, or None when there is nothing to hold (local operator
+        with no user_id, or a non-positive amount). The held amount counts against the user's
+        balance via `reserved_credits` until the run releases it."""
+        if not user_id or amount <= 0:
+            return None
+        self.expire_stale_reservations()
+        reservation_id = new_id("res")
+        self._execute(
+            "INSERT INTO credit_reservations "
+            "(reservation_id, user_id, campaign_id, amount, state, created_at) "
+            "VALUES (%s, %s, %s, %s, 'active', %s)",
+            (reservation_id, user_id, campaign_id, amount, utcnow().isoformat()),
+        )
+        self._commit()
+        return reservation_id
+
+    def release_reservation(self, campaign_id: str, state: str = "consumed") -> int:
+        """Release the active reservation(s) for a campaign and return how many were released.
+
+        Keyed by campaign rather than by a reservation id threaded through the Actions
+        workflow: `run_campaign` refuses to dispatch while a run is already in progress for
+        the campaign, so there is at most one active reservation per campaign at a time.
+        That keeps the workflow inputs and the `gtm run` CLI signature unchanged.
+
+        `state` is 'consumed' on a completed run and 'refunded' when the run failed - both
+        free the budget; the distinction is for operators reading the table."""
+        if state not in ("consumed", "refunded", "expired"):
+            raise ValueError(f"invalid reservation state: {state}")
+        cur = self._execute(
+            "UPDATE credit_reservations SET state = %s, released_at = %s "
+            "WHERE campaign_id = %s AND state = 'active'",
+            (state, utcnow().isoformat(), campaign_id),
+        )
+        self._commit()
+        return cur.rowcount or 0
+
+    def reserved_credits(self, user_id: str) -> int:
+        """Credits currently held by this user's in-flight runs. Reservations older than
+        CREDIT_RESERVATION_TTL_HOURS are excluded, so an abandoned run self-heals."""
+        if not user_id:
+            return 0
+        row = self._execute(
+            "SELECT COALESCE(SUM(amount), 0) AS held FROM credit_reservations "
+            "WHERE user_id = %s AND state = 'active' AND created_at > %s",
+            (user_id, self._reservation_cutoff()),
+        ).fetchone()
+        return int(row["held"]) if row else 0
 
     # -- user preferences -----------------------------------------------------
 

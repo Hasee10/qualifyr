@@ -118,6 +118,24 @@ async def test_rerun_updates_lead_in_place_and_respects_suppression(campaign, se
 
 
 @respx.mock
+async def test_new_leads_counter_only_counts_genuine_first_sightings(campaign, settings, defaults):
+    """RunStats.new_leads is what the campaign card's "+N new leads" badge reads. The first
+    run should count every lead as new; a rerun over the same companies should count zero,
+    even though every lead gets re-saved (and its updated_at bumped)."""
+    _mock_world(settings)
+    campaign.geography.cities = ["Islamabad"]
+    db = Database(settings.database_url)
+    async with HttpFetcher(settings) as fetcher:
+        pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
+        first = await pipeline.run(campaign)
+        second = await pipeline.run(campaign)
+    assert first.stats.new_leads == len(first.leads)
+    assert first.stats.new_leads > 0
+    assert second.stats.new_leads == 0
+    db.close()
+
+
+@respx.mock
 async def test_search_found_domain_that_duplicates_earlier_company_is_skipped(campaign, settings, defaults):
     """'Super Store' has no OSM website; search resolves it to the same domain as 'Superstore'."""
     settings.enable_search_fallback = True

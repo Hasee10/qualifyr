@@ -47,7 +47,7 @@ function LeadDetail({ leadId, onClose, onChanged }: { leadId: string | null; onC
 
   return (
     <Sheet open={!!leadId} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "sm:max-w-4xl" : "sm:max-w-xl")}>
+      <SheetContent side="right" className={cn("w-full overflow-y-auto transition-[max-width] duration-200", expanded ? "max-w-4xl" : "max-w-xl")}>
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
