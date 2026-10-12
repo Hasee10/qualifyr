@@ -120,8 +120,20 @@ async def judge_intent(llm: LLM | None, offer: str, evidence: str, max_tokens: i
 def _fallback_keywords(offer: str, industries: list[str] | None) -> list[str]:
     import re
 
+    # Function words have to go as well as the generic product nouns. These keywords are reused as
+    # substring matchers against a company's name/category/address by the discovery relevance gate,
+    # where a word like "from", "every" or "into" matches nothing useful and only widens the gate -
+    # the 2026-10-13 Virginia run derived exactly those three from "pulls metrics from every social
+    # platform into one branded report".
     stop = {"the", "and", "for", "our", "your", "with", "that", "this", "software", "solution",
-            "solutions", "platform", "service", "services", "management", "system", "systems", "tool"}
+            "solutions", "platform", "service", "services", "management", "system", "systems", "tool",
+            "from", "into", "onto", "over", "under", "about", "after", "before", "between",
+            "through", "without", "within", "across", "because", "instead", "rather", "also",
+            "just", "every", "each", "they", "them", "their", "there", "then", "than", "when",
+            "what", "which", "while", "where", "will", "would", "should", "could", "have",
+            "been", "being", "were", "more", "most", "much", "some", "both", "other", "others",
+            "such", "same", "many", "like", "make", "makes", "making", "made", "need", "needs",
+            "want", "wants", "stop", "stops", "help", "helps", "using", "used", "uses", "one"}
     words = [w for w in re.findall(r"[a-z]{4,}", (offer or "").lower()) if w not in stop]
     return _dedupe_lower([*(industries or []), *words])
 

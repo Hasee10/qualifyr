@@ -322,13 +322,26 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
     # make `sectors` look non-empty and silently block the industry-specific niche fallback that
     # should run instead - so niche fallback is gated on the deterministic match only.
     det_sectors = match_sectors(offer, industries, taxonomy)
+    # A deterministic match of ONLY the broad general_retail fallback is not a real match. Its
+    # match terms are "retail, store, shop, brand, outlet, seller, merchant", so it fires on any
+    # offer that merely contains one of those words in passing - the 2026-10-13 Virginia run hit
+    # it on "brand" inside "one branded report". When the campaign names its target industries,
+    # that accident must not pre-empt the industry-specific niche fallback below.
+    specific = [s for s in det_sectors if s != "general_retail"]
     sectors = list(det_sectors)
-    if llm is not None:
+    # The LLM is asked "which sectors would BUY this offer", so its answers describe buyer types
+    # and have nothing to do with an industry the user named explicitly. They are only useful for
+    # an offer-only campaign. Merging them when industries ARE named makes those sectors campaign
+    # *targets*, and BuyerClassifier matches overture categories by substring - "store" matches
+    # "flowers_and_gifts_store", "clinic" matches "urgent_care_clinic" - which is how gift shops
+    # and urgent-care clinics qualified as social media agencies. Fixed once on 2026-10-12 for the
+    # empty-deterministic-match path; the general_retail path had exactly the same hole.
+    if llm is not None and not industries:
         for k in await _llm_sectors(llm, offer, taxonomy):
             if k not in sectors:
                 sectors.append(k)
 
-    if not det_sectors and industries:
+    if not specific and industries:
         valid_tags = load_valid_osm_tags()
         targets = _niche_fallback(industries, valid_tags)
         if llm is not None and valid_tags:

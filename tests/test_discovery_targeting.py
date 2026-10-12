@@ -122,6 +122,42 @@ async def test_named_industry_targets_exclude_llm_buyer_sector_guesses():
         assert leaked not in t.sectors, f"LLM buyer-sector guess leaked into sectors: {leaked}"
 
 
+async def test_incidental_general_retail_match_does_not_block_niche_fallback():
+    """Regression (2026-10-13 Virginia run, caught in the first log line). general_retail's match
+    terms include "brand", so the offer phrase "one branded report" made match_sectors return
+    ["general_retail"]. That counted as a deterministic match, which (a) skipped the niche
+    fallback that would have produced office=advertising_agency and (b) let the LLM's buyer-sector
+    guesses through, so the campaign's real targets became
+    general_retail + hospitality + education + clothing_apparel + electronics - i.e. shop=*,
+    hotel, lodging, school, store, retail. Every storefront in Virginia."""
+    llm = FakeLLM('["general_retail", "hospitality", "education", "clothing_apparel"]')
+    t = await derive_discovery_targets(
+        "We sell a white-label client reporting dashboard that pulls metrics from every social "
+        "platform into one branded report.",
+        industries=["social media marketing agencies"], llm=llm)
+    assert "office=advertising_agency" in t.osm_categories, t.osm_categories
+    assert "general_retail" not in t.sectors, t.sectors
+    for leaked in ("hospitality", "education", "clothing_apparel"):
+        assert leaked not in t.sectors, f"LLM buyer-sector guess leaked into sectors: {leaked}"
+    for leaked in ("store", "retail", "shop", "hotel", "lodging", "school"):
+        assert leaked not in t.overture_categories, f"broad category leaked: {leaked}"
+    assert "shop=*" not in t.osm_categories
+
+
+def test_fallback_keywords_drop_function_words():
+    """Regression (2026-10-13 Virginia run): the offer-derived relevance keywords came out as
+    ['white', 'label', 'client', 'reporting', 'analytics', 'dashboard', 'pulls', 'metrics',
+    'from', 'every', 'social', 'into']. These are reused as substring matchers against company
+    names in the discovery relevance gate, where "from"/"every"/"into" are pure noise."""
+    from gtm_engine.llm.tasks import _fallback_keywords
+
+    kws = _fallback_keywords(
+        "a dashboard that pulls metrics from every social platform into one branded report", None)
+    for noise in ("from", "every", "into", "that", "one"):
+        assert noise not in kws, f"function word kept as a relevance keyword: {noise}"
+    assert "metrics" in kws and "dashboard" in kws
+
+
 def test_pharmacy_health_overture_is_specific_not_broad():
     """`medical`/`health` LIKE-matched research institutes and generic health orgs into
     doctor/pharmacy searches. The sector must use specific substrings only."""
