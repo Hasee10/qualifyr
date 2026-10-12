@@ -143,6 +143,17 @@ class BuyerClassifier:
             if category_match:
                 reasons.append(f"discovery category '{bundle.category}' matches campaign target")
 
+        # A category match means discovery already confirmed this business IS the type the
+        # campaign is looking for (e.g. overture=advertising_agency for a "find marketing
+        # agencies" campaign) - stronger, more reliable evidence than word-matching against
+        # generic vendor-phrase lists, which any real agency's own site will trip (it describes
+        # its own services using the same vocabulary those lists are built from: "marketing
+        # services", "consulting", "lead generation"). Folded into buyer_score before the
+        # vendor_id/vendor_score compare below so a confirmed category match isn't overridden by
+        # a target business merely describing itself normally.
+        if category_match:
+            buyer_score += W_IDENTITY
+
         if vendor_name:
             reasons.append("vendor terms in company name: " + ", ".join(vendor_name))
         elif vendor_id:
@@ -192,8 +203,6 @@ class BuyerClassifier:
                                   buyer_hits=[], vendor_hits=vendor_body + phrase_hits)
 
         if buyer_id or category_match or len(buyer_body) >= 2:
-            if category_match:
-                buyer_score += W_IDENTITY
             margin = buyer_score - vendor_score
             conf = max(0.5, min(1.0, 0.5 + margin / 10))
             if vendor_body or phrase_hits:

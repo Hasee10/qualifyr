@@ -143,6 +143,10 @@ _INDUSTRY_SYNONYMS: dict[str, list[str]] = {
     "architect": ["architect"],
     "courier": ["courier"],
     "locksmith": ["locksmith"],
+    "agency": ["advertising_agency"],
+    "agencies": ["advertising_agency"],
+    "advertising": ["advertising_agency"],
+    "marketing": ["advertising_agency"],
 }
 
 
@@ -192,6 +196,13 @@ def _niche_fallback(industries: list[str], valid_tags: dict[str, set[str]]) -> D
         for tag in found_osm[:5]:
             if tag not in osm:
                 osm.append(tag)
+            # The matched OSM tag value (e.g. "advertising_agency") is a far more specific
+            # Overture substring than the raw industry phrase: Overture's own taxonomy tends to
+            # share these OSM-derived value names, while a multi-word phrase like "social media
+            # agencies" rarely appears verbatim in Overture's category strings.
+            value = tag.split("=", 1)[1]
+            if value not in overture:
+                overture.append(value)
 
         overture.append(term)
         if term != term.rstrip("s"):
@@ -302,13 +313,22 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
     if not (offer or "").strip():
         return DiscoveryTargets()
     taxonomy = taxonomy if taxonomy is not None else load_taxonomy()
-    sectors = match_sectors(offer, industries, taxonomy)
+    # Deterministic match against the taxonomy's curated sectors, kept separate from the LLM's
+    # sector guesses below: the LLM is asked "which sectors would BUY this offer", which for a
+    # campaign that already names an explicit target_industries (e.g. "social media agencies")
+    # can surface unrelated buyer-type sectors (e.g. general_retail, hospitality - businesses
+    # that might buy social-media software) having nothing to do with the named industry. If
+    # those guesses were folded into `sectors` before the niche-fallback check below, they would
+    # make `sectors` look non-empty and silently block the industry-specific niche fallback that
+    # should run instead - so niche fallback is gated on the deterministic match only.
+    det_sectors = match_sectors(offer, industries, taxonomy)
+    sectors = list(det_sectors)
     if llm is not None:
         for k in await _llm_sectors(llm, offer, taxonomy):
             if k not in sectors:
                 sectors.append(k)
 
-    if not sectors and industries:
+    if not det_sectors and industries:
         valid_tags = load_valid_osm_tags()
         targets = _niche_fallback(industries, valid_tags)
         if llm is not None and valid_tags:
@@ -319,6 +339,18 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
             for cat in llm_cats.overture_categories:
                 if cat not in targets.overture_categories:
                     targets.overture_categories.append(cat)
+        # LLM-guessed buyer-type sectors (if any) still broaden discovery, just as a supplement
+        # to the industry-specific niche categories rather than a replacement for them.
+        llm_guessed = [k for k in sectors if k not in det_sectors]
+        if llm_guessed:
+            extra = _expand(llm_guessed, taxonomy)
+            for tag in extra.osm_categories:
+                if tag not in targets.osm_categories:
+                    targets.osm_categories.append(tag)
+            for cat in extra.overture_categories:
+                if cat not in targets.overture_categories:
+                    targets.overture_categories.append(cat)
+            targets.sectors += [k for k in llm_guessed if k not in targets.sectors]
         if not targets.empty:
             log.info("niche fallback for industries %s: osm=%s overture=%s",
                      industries, targets.osm_categories, targets.overture_categories)
