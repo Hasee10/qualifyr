@@ -50,6 +50,26 @@ def _client(app) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+# The local/CI dev database is a shared Supabase project whose session-mode pooler caps
+# simultaneous connections at 15 - and the live production app draws from that same pool.
+# These tests intentionally fire many "concurrent" requests to catch isolation/dedup/crash bugs
+# under load, but don't need every one truly in flight at once to do that; throttling how many
+# are ever simultaneously open keeps them from starving production's connections (which is
+# exactly what happened before this existed: a 100-way test run caused live 500s on
+# /campaigns/{id}/progress) while still exercising real overlap.
+_MAX_CONCURRENT_DB_CONNS = 8
+
+
+async def _gather_throttled(coros):
+    sem = asyncio.Semaphore(_MAX_CONCURRENT_DB_CONNS)
+
+    async def _run(coro):
+        async with sem:
+            return await coro
+
+    return await asyncio.gather(*(_run(c) for c in coros))
+
+
 def _seed_leads(dsn: str, campaign_id: str, n: int) -> None:
     db = Database(dsn)
     for i in range(n):
@@ -83,7 +103,7 @@ def test_concurrent_reads_stay_isolated_and_error_free(app, settings):
                     tasks.append(one("user-a", a, b))
                 else:
                     tasks.append(one("user-b", b, a))
-            return await asyncio.gather(*tasks)
+            return await _gather_throttled(tasks)
 
     results = asyncio.run(run())
     assert len(results) == 100 and all(results)
@@ -97,7 +117,7 @@ def test_concurrent_distinct_creates_all_get_unique_ids(app):
         async with _client(app) as c:
             tasks = [c.post("/campaigns", json={"name": f"Camp {i}", "offer": "x"},
                             headers={"x-test-user": "user-a"}) for i in range(50)]
-            resps = await asyncio.gather(*tasks)
+            resps = await _gather_throttled(tasks)
             assert all(r.status_code == 201 for r in resps)
             ids = [r.json()["campaign_id"] for r in resps]
             listed = await c.get("/campaigns", headers={"x-test-user": "user-a"})
@@ -156,7 +176,7 @@ def test_concurrent_bulk_reads_do_not_exhaust_connections(app, settings):
             for _ in range(40):
                 tasks.append(c.get(f"/campaigns/{cid}/stats", headers={"x-test-user": "user-a"}))
                 tasks.append(c.get(f"/campaigns/{cid}/leads", headers={"x-test-user": "user-a"}))
-            return await asyncio.gather(*tasks)
+            return await _gather_throttled(tasks)
 
     resps = asyncio.run(run())
     assert all(r.status_code == 200 for r in resps), [r.status_code for r in resps if r.status_code != 200]
