@@ -209,7 +209,9 @@ def score_lead(inputs: ScoreInputs, campaign: CampaignConfig) -> ScoreBreakdown:
 
 def is_outreach_ready(cls: Classification, score: ScoreBreakdown, contact: Contact,
                       campaign: CampaignConfig) -> tuple[bool, str | None]:
-    """Returns (ready, skip_reason). skip_reason is None when ready=True; otherwise one of:
+    """Whether a qualified buyer is actually reachable.
+
+    Returns (ready, skip_reason). skip_reason is None when ready=True; otherwise one of:
     "not_a_buyer", "score_below_min", "priority_below_qualified", "no_usable_contact".
 
     A usable contact is a deliverable email OR a phone number. Phone matters because most SMBs
