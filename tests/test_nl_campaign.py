@@ -88,6 +88,35 @@ def test_extract_offer_providing():
     assert "erp" in draft.offer.lower()
 
 
+def test_extract_offer_survives_a_verb_the_patterns_do_not_know():
+    """Regression (2026-10-13 Karachi run): _OFFER_PATTERNS only knows sell/offer/provide/make/
+    build/have, so "We set up an online ordering website..." matched nothing and the offer was
+    rebuilt from the query as "Find restaurants in Karachi" - the bare shape that qualifies
+    nobody, because the intent check has no stated need to test against."""
+    text = ("We set up an online ordering website with card payment links for restaurants that "
+            "currently take delivery orders only over the phone or WhatsApp. "
+            "Find restaurants in Karachi, Pakistan.")
+    draft = parse_intent(text)
+    assert draft.offer is not None
+    assert "online ordering" in draft.offer.lower()
+    # The search query is not part of what we sell.
+    assert "find restaurants" not in draft.offer.lower()
+    assert "karachi" not in draft.offer.lower()
+    assert build_campaign_config(draft).offer == draft.offer
+
+    for phrasing in ("We run social media ads for gyms.",
+                     "We help restaurants take card payments online.",
+                     "Our tool lets restaurants take online orders."):
+        assert parse_intent(f"{phrasing} Find them in Karachi.").offer == phrasing
+
+
+def test_self_described_offer_ignores_trailing_constraints():
+    """Only sentences where the user talks about themselves count, or a filter sentence would
+    become the offer and its words would become relevance keywords."""
+    assert parse_intent("Find pharmacies in Lahore. Must have 10+ reviews.").offer is None
+    assert parse_intent("Find pharmacies in Lahore.").offer is None
+
+
 def test_no_offer_uses_sectors_for_offer():
     text = "grocery stores in Islamabad"
     draft = parse_intent(text)

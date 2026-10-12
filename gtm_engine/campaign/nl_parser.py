@@ -272,6 +272,30 @@ def _extract_provinces(text: str) -> list[str]:
     return found
 
 
+# A sentence that asks for companies rather than describing what the user sells.
+_DISCOVERY_SENTENCE_RE = re.compile(r"^\s*(?:find|search|look\s+for|show|get|list)\b", re.I)
+# The user talking about themselves. Requiring this keeps trailing constraints ("Must have 10+
+# reviews.") out of the offer, which would otherwise become relevance keywords.
+_FIRST_PERSON_RE = re.compile(r"\b(?:i|we|our|my|us)\b", re.I)
+
+
+def _self_described_offer(text: str) -> str | None:
+    """The offer as "whatever the user said about themselves that isn't the search query".
+
+    _OFFER_PATTERNS only fires on a verb it already knows - sell, offer, provide, make, build,
+    have - and the 2026-10-13 Karachi run showed how narrow that is: "We set up an online
+    ordering website with card payment links for restaurants..." matched none of them, so the
+    offer was thrown away and rebuilt from the query as "Find restaurants in Karachi". That bare
+    shape is the one known to qualify nobody, because the intent check has no need to test
+    against. "we run", "we help X do Y" and "our tool lets you..." all failed the same way.
+
+    Verb-agnostic by design: extending the verb list would just move the boundary."""
+    kept = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "")
+            if s.strip() and not _DISCOVERY_SENTENCE_RE.match(s) and _FIRST_PERSON_RE.search(s)]
+    offer = " ".join(kept).strip()
+    return offer if len(offer) > 20 else None
+
+
 def _extract_offer(text: str) -> str | None:
     for pat in _OFFER_PATTERNS:
         m = pat.search(text)
@@ -279,7 +303,7 @@ def _extract_offer(text: str) -> str | None:
             offer = m.group(1).strip().rstrip(".")
             if len(offer) > 5:
                 return offer
-    return None
+    return _self_described_offer(text)
 
 
 _GENERIC_SUBJECT_WORDS = {
