@@ -89,7 +89,7 @@ class RunStats:
     outreach_ready: int = 0
     suppressed: int = 0
     duplicates: int = 0
-    new_leads: int = 0  # companies never seen before in this campaign, across any run
+    new_leads: int = 0  # never-seen-before companies that are also qualified or outreach-ready
     chains_excluded: int = 0
     hard_filtered: int = 0
     places_api_calls: int = 0
@@ -1054,7 +1054,13 @@ class Pipeline:
             lead.review_verdict, lead.reviewed_at = previous.review_verdict, previous.reviewed_at
             lead.sequence_status = previous.sequence_status if previous.sequence_status != SequenceStatus.NOT_QUEUED else lead.sequence_status
         else:
-            stats.new_leads += 1
+            # Only count it toward the "+N new leads" badge if it is actually useful - a
+            # qualified buyer or outreach-ready - not every company record that got parsed.
+            # Matches campaign_counts' own "qualified" definition (BUYER + score >= min_score)
+            # so this number never contradicts the Qualified/Outreach stat cells next to it.
+            qualified = lead.company_type == CompanyType.BUYER and lead.total_score >= campaign.min_score
+            if qualified or lead.outreach_ready:
+                stats.new_leads += 1
         await self._db_call(self.db.save_lead, lead, run_id, key)
         return lead
 

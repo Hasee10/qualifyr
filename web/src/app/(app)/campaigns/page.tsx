@@ -668,8 +668,9 @@ function statusDotClass(status?: string): string {
   return "bg-muted-foreground/40"
 }
 
-// How many of a completed run's leads were never seen before in this campaign, so "Last run"
-// can say what actually changed instead of leaving the user to guess from the totals above.
+// How many of a completed run's leads are both never-seen-before AND actually useful (qualified
+// or outreach-ready) - not just newly-parsed company records, which would read as progress when
+// most of them didn't qualify for anything.
 function newLeadsFromRun(statsJson: string | null | undefined): number | null {
   if (!statsJson) return null
   try {

@@ -119,9 +119,10 @@ async def test_rerun_updates_lead_in_place_and_respects_suppression(campaign, se
 
 @respx.mock
 async def test_new_leads_counter_only_counts_genuine_first_sightings(campaign, settings, defaults):
-    """RunStats.new_leads is what the campaign card's "+N new leads" badge reads. The first
-    run should count every lead as new; a rerun over the same companies should count zero,
-    even though every lead gets re-saved (and its updated_at bumped)."""
+    """RunStats.new_leads is what the campaign card's "+N new leads" badge reads. It must only
+    count leads that are actually useful - qualified or outreach-ready - not every company
+    record that got parsed, or the badge would claim "new leads" when most are junk the
+    pipeline correctly filtered out. A rerun over the same companies should count zero."""
     _mock_world(settings)
     campaign.geography.cities = ["Islamabad"]
     db = Database(settings.database_url)
@@ -129,8 +130,13 @@ async def test_new_leads_counter_only_counts_genuine_first_sightings(campaign, s
         pipeline = Pipeline(settings, defaults, db, fetcher, mx=FakeMX())
         first = await pipeline.run(campaign)
         second = await pipeline.run(campaign)
-    assert first.stats.new_leads == len(first.leads)
+
+    useful_first = [l for l in first.leads if l.outreach_ready or
+                    (l.company_type == CompanyType.BUYER and l.total_score >= campaign.min_score)]
+    assert first.stats.new_leads == len(useful_first)
     assert first.stats.new_leads > 0
+    assert first.stats.new_leads < len(first.leads), (
+        "fixture must include a non-qualifying lead for this test to actually exercise the filter")
     assert second.stats.new_leads == 0
     db.close()
 
