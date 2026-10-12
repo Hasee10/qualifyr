@@ -224,4 +224,12 @@
   html {
     font-family: var(--font-sans), system-ui, sans-serif;
   }
+  /* Belt-and-suspenders on top of `color-scheme: dark` above: that's a browser heuristic
+     for native-control theming and isn't honoured consistently everywhere, so force the
+     popup list's colors directly. Without this, unselected <option> rows render with our
+     dark --foreground text on the browser's default white popup background - invisible. */
+  select option {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
 }
