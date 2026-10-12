@@ -115,10 +115,13 @@ def row_to_company(row: dict, city: str, country: str) -> DiscoveredCompany | No
         name=name,
         website=row.get("website") or None,
         country=country,
-        # The place's own locality, not the searched area: a run over "Virginia" was writing
-        # "Virginia" into the city of a Charleston business. Falls back to the area when Overture
-        # has no locality for the place.
-        city=(row.get("city") or "").strip() or city,
+        # The city we searched, same as OSM: Overture's locality is unreliable as a display value.
+        # The 2026-10-13 Lahore run returned Urdu tehsil names for it ("تحصیل ماڈل ٹاؤن"), a
+        # neighbourhood rather than a city, and malformed values like "Bahria TownLahore". The real
+        # locality is kept in extra["addr_city"] for anything that wants it. This used to be able
+        # to assert a flat untruth - a Charleston WV business exported as "Virginia" - but
+        # filter_by_region() now guarantees the place really is in the searched area's region.
+        city=city,
         address=row.get("address") or None,
         phone=row.get("phone") or None,
         email=(row.get("email") or "").lower() or None,

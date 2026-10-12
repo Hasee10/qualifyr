@@ -184,15 +184,17 @@ def test_overture_row_mapping_and_sql():
     assert row_to_company({"name": ""}, "Islamabad", "Pakistan") is None
 
 
-def test_overture_row_prefers_the_places_own_locality_over_the_searched_area():
-    """Regression (2026-10-13 Virginia run): the searched area was written into every place's
-    city, so three Charleston/Huntington West Virginia agencies were exported as "Virginia"."""
+def test_overture_city_is_the_searched_area_not_the_places_locality():
+    """Overture's locality looked like the better value for the city column - the 2026-10-13
+    Virginia run exported Charleston WV businesses as "Virginia" - but switching to it put Urdu
+    tehsil names in the Lahore run's city column and one "Bahria TownLahore". It is kept in
+    extra["addr_city"] instead; filter_by_region is what stops the area label being a lie."""
     from gtm_engine.discovery.overture import row_to_company
 
-    c = row_to_company({"id": "x", "name": "Ahmdigital", "city": "Charleston"}, "Virginia", "US")
-    assert c.city == "Charleston"
-    # No locality in the data: the searched area is still better than nothing.
-    assert row_to_company({"id": "x", "name": "Ahmdigital"}, "Virginia", "US").city == "Virginia"
+    c = row_to_company({"id": "x", "name": "Redwell Pharmacy",
+                        "city": "تحصیل ماڈل ٹاؤن"}, "Lahore", "Pakistan")
+    assert c.city == "Lahore"
+    assert c.extra["addr_city"] == "تحصیل ماڈل ٹاؤن"
 
 
 def test_overture_region_filter_drops_neighbours_a_bbox_cannot_exclude():
