@@ -170,6 +170,11 @@
 }
 
 .dark {
+  /* Tells the browser to render native controls (select dropdown popups,
+     scrollbars) with dark-theme defaults - without this, a <select>'s popup
+     list keeps its light-theme white background while the text still
+     inherits our dark --foreground color, making unselected options unreadable. */
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
