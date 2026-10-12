@@ -30,6 +30,53 @@ _GEO_PATH = DEFAULTS_DIR / "pk_cities.yaml"
 _CITIES: list[str] = []
 _PROVINCES: list[str] = []
 
+# Sovereign states (English short names) plus common aliases, for deterministic country
+# detection in free text. Pakistan stays the default when nothing is mentioned (build_campaign_config
+# falls back to it) - this only fires when the user names a different country explicitly, e.g.
+# "marketing agencies in Madrid and Barcelona, Spain".
+_COUNTRY_ALIASES: dict[str, str] = {
+    name.lower(): name for name in [
+        "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia",
+        "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados",
+        "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina",
+        "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cambodia",
+        "Cameroon", "Canada", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo",
+        "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czechia", "Denmark", "Djibouti", "Dominica",
+        "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Eritrea", "Estonia",
+        "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia",
+        "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guyana", "Haiti",
+        "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland",
+        "Israel", "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati",
+        "Kosovo", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia",
+        "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia",
+        "Maldives", "Mali", "Malta", "Mauritania", "Mauritius", "Mexico", "Moldova", "Monaco",
+        "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru",
+        "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea",
+        "North Macedonia", "Norway", "Oman", "Pakistan", "Palau", "Panama", "Papua New Guinea",
+        "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia",
+        "Rwanda", "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia", "Seychelles",
+        "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia",
+        "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname",
+        "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand",
+        "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey",
+        "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom",
+        "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela",
+        "Vietnam", "Yemen", "Zambia", "Zimbabwe",
+    ]
+}
+_COUNTRY_ALIASES.update({
+    "usa": "United States", "us": "United States", "u.s.": "United States",
+    "u.s.a.": "United States", "america": "United States",
+    "uk": "United Kingdom", "u.k.": "United Kingdom", "england": "United Kingdom",
+    "scotland": "United Kingdom", "wales": "United Kingdom",
+    "uae": "United Arab Emirates", "u.a.e.": "United Arab Emirates",
+})
+# Longest alias first so "United Arab Emirates" matches before a shorter substring could.
+_COUNTRY_RE = re.compile(
+    r"\b(" + "|".join(re.escape(a) for a in sorted(_COUNTRY_ALIASES, key=len, reverse=True)) + r")\b",
+    re.I,
+)
+
 
 def _load_geo() -> None:
     global _CITIES, _PROVINCES  # noqa: PLW0603
@@ -71,7 +118,7 @@ class CampaignDraft:
     cities: list[str] = field(default_factory=list)
     areas: list[str] = field(default_factory=list)
     provinces: list[str] = field(default_factory=list)
-    countries: list[str] = field(default_factory=lambda: ["Pakistan"])
+    countries: list[str] = field(default_factory=list)
     target_industries: list[str] = field(default_factory=list)
     buyer_keywords: list[str] = field(default_factory=list)
     negative_keywords: list[str] = field(default_factory=list)
@@ -160,6 +207,15 @@ def _extract_cities(text: str) -> list[str]:
         if re.search(rf"\b{re.escape(city.lower())}\b", text_lower):
             if city not in found:
                 found.append(city)
+    return found
+
+
+def _extract_countries(text: str) -> list[str]:
+    found: list[str] = []
+    for m in _COUNTRY_RE.finditer(text):
+        name = _COUNTRY_ALIASES[m.group(0).lower()]
+        if name not in found:
+            found.append(name)
     return found
 
 
@@ -285,6 +341,7 @@ def parse_intent(text: str) -> CampaignDraft:
     """Stage 1: deterministic extraction from free-form text."""
     draft = CampaignDraft(raw_text=text)
 
+    draft.countries = _extract_countries(text)
     draft.cities = _extract_cities(text)
     draft.provinces = _extract_provinces(text)
     draft.areas = _extract_areas(text)
@@ -498,6 +555,9 @@ def _merge_llm(draft: CampaignDraft, llm_fields: dict) -> None:
 
     if not draft.offer and llm_fields.get("offer"):
         draft.offer = llm_fields["offer"]
+
+    if not draft.countries and llm_fields.get("countries"):
+        draft.countries = llm_fields["countries"]
 
     if not draft.cities and llm_fields.get("cities"):
         draft.cities = llm_fields["cities"]

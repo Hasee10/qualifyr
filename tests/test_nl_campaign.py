@@ -40,6 +40,21 @@ def test_extract_province():
     assert "Sindh" in draft.provinces
 
 
+def test_extract_country_from_text():
+    """A named country must flow through to geography, not silently default to
+    Pakistan - this was the actual bug: the dataclass defaulted countries to
+    ["Pakistan"] and nothing ever overwrote it for non-PK text."""
+    draft = parse_intent("find marketing agencies in Madrid and Barcelona, Spain")
+    assert draft.countries == ["Spain"]
+    cfg = build_campaign_config(draft)
+    assert cfg.geography.countries == ["Spain"]
+
+
+def test_extract_country_alias():
+    draft = parse_intent("find law firms in Dubai, UAE")
+    assert draft.countries == ["United Arab Emirates"]
+
+
 # ---------------------------------------------------------------------------
 # Deterministic parser: offer extraction
 # ---------------------------------------------------------------------------

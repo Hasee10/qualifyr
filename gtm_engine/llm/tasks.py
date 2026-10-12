@@ -409,7 +409,7 @@ async def parse_campaign_nl(llm: LLM | None, text: str,
                             taxonomy_sectors: list[str]) -> dict:
     """Extract structured campaign fields from free-form user text.
 
-    Returns a dict with optional keys: name, offer, cities, areas,
+    Returns a dict with optional keys: name, offer, countries, cities, areas,
     target_industries, buyer_keywords, negative_keywords, sectors,
     search_queries, exclude_chains, max_companies.
     Deterministic fallback: empty dict (the caller's own regex parse is primary).
@@ -417,16 +417,20 @@ async def parse_campaign_nl(llm: LLM | None, text: str,
     if llm is None or not (text or "").strip():
         return {}
     system = (
-        "You are a campaign configuration assistant for a B2B lead-generation engine "
-        "focused on Pakistan. Given a user's natural-language description of who they "
-        "want to find, extract structured fields.\n\n"
+        "You are a campaign configuration assistant for a B2B lead-generation engine. "
+        "The engine defaults to Pakistan when the user does not name a country, but it "
+        "supports any country the user explicitly mentions. Given a user's natural-language "
+        "description of who they want to find, extract structured fields.\n\n"
         "Choose sectors ONLY from this list: " + str(taxonomy_sectors) + "\n\n"
-        "Cities must be real Pakistani cities. Areas are specific localities, sectors, "
-        "or neighborhoods within a city (e.g. F-11, G-11, DHA, Gulberg, Saddar).\n\n"
+        "Cities must be real cities in whichever country the user mentioned (or real "
+        "Pakistani cities if no country was named). Areas are specific localities, sectors, "
+        "or neighborhoods within a city (e.g. F-11, G-11, DHA, Gulberg, Saddar for Pakistan; "
+        "a borough or district name for other countries).\n\n"
         "Output a single JSON object with these keys (include ALL that apply):\n"
         '  "name" (string): a SHORT campaign title, max 8 words, e.g. "Marts near F-11 G-11 Islamabad"\n'
         '  "offer" (string): what the user is looking for or selling – the core search intent, NOT the raw input\n'
-        '  "cities" (array of strings): Pakistani cities mentioned\n'
+        '  "countries" (array of strings): countries explicitly mentioned (omit if none were named - do NOT default to Pakistan here)\n'
+        '  "cities" (array of strings): real cities mentioned, in whichever country applies\n'
         '  "areas" (array of strings): specific localities/sectors/neighborhoods within the city (e.g. "F-11", "G-11", "DHA Phase 5")\n'
         '  "target_industries" (array of strings): industry terms describing the businesses to find (e.g. "grocery", "supermarket", "mart")\n'
         '  "buyer_keywords" (array of strings): terms that identify a target company (e.g. "mart", "store", "shop", "retailer")\n'
