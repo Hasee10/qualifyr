@@ -16,7 +16,8 @@ from gtm_engine.scraping.fetcher import HttpFetcher
 log = logging.getLogger(__name__)
 
 S3_ROOT = "s3://overturemaps-us-west-2/release"
-COLUMNS = ["id", "name", "category", "website", "email", "phone", "address", "city", "brand", "lat", "lon"]
+COLUMNS = ["id", "name", "category", "website", "email", "phone", "address", "city", "region",
+           "brand", "lat", "lon"]
 
 
 # The struct holding a place's category. Overture renamed it from `categories` to
@@ -54,6 +55,7 @@ def build_sql(release: str, bbox: BBox, categories: list[str], limit: int | None
                CASE WHEN length(emails)>0   THEN emails[1]   END AS email,
                CASE WHEN length(phones)>0   THEN phones[1]   END AS phone,
                addresses[1].freeform AS address, addresses[1].locality AS city,
+               addresses[1].region AS region,
                brand.names['primary'] AS brand, bbox.ymin AS lat, bbox.xmin AS lon
         FROM read_parquet('{S3_ROOT}/{release}/theme=places/type=place/*', hive_partitioning=1)
         WHERE bbox.xmin BETWEEN {bbox.west} AND {bbox.east}
@@ -65,6 +67,46 @@ def build_sql(release: str, bbox: BBox, categories: list[str], limit: int | None
     return sql, params
 
 
+def region_matches(region: str | None, tokens: tuple[str, ...] | list[str]) -> bool:
+    """Whether a place's region field is consistent with the searched area's region tokens.
+
+    Tolerant in both directions because the two vocabularies rarely match exactly: Overture may
+    say "Madrid" where Nominatim says "comunidad de madrid", or "VA" where Nominatim gives both
+    "virginia" and the ISO suffix "va". An empty region or no tokens is never treated as a
+    contradiction - only a region that matches nothing is."""
+    value = (region or "").strip().lower()
+    if not value or not tokens:
+        return True
+    return any(value == t or value in t or t in value for t in tokens)
+
+
+def filter_by_region(rows: list[dict], tokens: tuple[str, ...] | list[str],
+                     area: str) -> list[dict]:
+    """Drop places whose own region contradicts the searched area's.
+
+    A bbox is axis-aligned and so cannot exclude a neighbour that a concave region wraps around:
+    the 2026-10-13 "Virginia" run returned Charleston and Huntington, West Virginia, and all three
+    qualified leads were WV agencies labelled as Virginia. The region field is the only signal in
+    the data that can separate them.
+
+    Fail-safe, same reasoning as the area proximity filter: if almost nothing survives, the two
+    datasets' region vocabularies did not line up rather than the area being genuinely empty, so
+    the results are kept unfiltered and the mismatch logged."""
+    if not rows or not tokens:
+        return rows
+    kept = [r for r in rows if region_matches(r.get("region"), tokens)]
+    if len(kept) < max(1, len(rows) // 10):
+        log.warning("overture: region filter would drop %d/%d places for %s (tokens=%s; regions "
+                    "seen=%s) - treating as a region-vocabulary mismatch and keeping them all",
+                    len(rows) - len(kept), len(rows), area, ",".join(tokens),
+                    ",".join(sorted({(r.get("region") or "?") for r in rows})[:8]))
+        return rows
+    if len(kept) < len(rows):
+        log.info("overture: region filter kept %d, dropped %d outside %s (%s)",
+                 len(kept), len(rows) - len(kept), area, ",".join(tokens))
+    return kept
+
+
 def row_to_company(row: dict, city: str, country: str) -> DiscoveredCompany | None:
     name = (row.get("name") or "").strip()
     if not name:
@@ -73,7 +115,10 @@ def row_to_company(row: dict, city: str, country: str) -> DiscoveredCompany | No
         name=name,
         website=row.get("website") or None,
         country=country,
-        city=city,
+        # The place's own locality, not the searched area: a run over "Virginia" was writing
+        # "Virginia" into the city of a Charleston business. Falls back to the area when Overture
+        # has no locality for the place.
+        city=(row.get("city") or "").strip() or city,
         address=row.get("address") or None,
         phone=row.get("phone") or None,
         email=(row.get("email") or "").lower() or None,
@@ -133,6 +178,7 @@ class OvertureDiscovery:
                 continue
             rows = await asyncio.to_thread(self._query, bbox, campaign.overture_categories)
             log.info("overture: %s -> %d places", area, len(rows))
+            rows = filter_by_region(rows, bbox.region_tokens, area)
             for row in rows:
                 company = row_to_company(row, area, country or "")
                 if company:

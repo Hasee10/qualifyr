@@ -46,6 +46,34 @@ def _mock_nominatim():
 
 
 @respx.mock
+async def test_geocoder_captures_region_tokens(settings, tmp_path):
+    """The bbox alone cannot exclude a neighbouring region, so the region's names and ISO code
+    are carried alongside it for discovery sources that can check them."""
+    respx.get(url__startswith=NOMINATIM_URL).mock(return_value=httpx.Response(200, json=[{
+        "boundingbox": ["36.5", "39.4", "-83.6", "-75.1"],
+        "address": {"state": "Virginia", "country": "United States",
+                    "ISO3166-2-lvl4": "US-VA"}}]))
+    async with HttpFetcher(settings) as fetcher:
+        box = await Geocoder(fetcher, tmp_path / "geo.json").bbox("Virginia", "United States")
+    assert box.region_tokens == ("virginia", "va")
+
+
+@respx.mock
+async def test_geocoder_refetches_cache_entries_written_before_region_tokens(settings, tmp_path):
+    """A pre-existing cache entry has no region tokens; trusting it would silently disable the
+    region filter for exactly the areas that have already been run."""
+    cache = tmp_path / "geo.json"
+    cache.write_text(json.dumps({"virginia|united states": {
+        "south": 36.5, "west": -83.6, "north": 39.4, "east": -75.1}}), encoding="utf-8")
+    route = respx.get(url__startswith=NOMINATIM_URL).mock(return_value=httpx.Response(200, json=[{
+        "boundingbox": ["36.5", "39.4", "-83.6", "-75.1"],
+        "address": {"ISO3166-2-lvl4": "US-VA"}}]))
+    async with HttpFetcher(settings) as fetcher:
+        box = await Geocoder(fetcher, cache).bbox("Virginia", "United States")
+    assert route.call_count == 1 and box.region_tokens == ("va",)
+
+
+@respx.mock
 async def test_geocoder_caches_to_disk(settings, tmp_path):
     route = _mock_nominatim()
     cache = tmp_path / "geo.json"
@@ -154,6 +182,47 @@ def test_overture_row_mapping_and_sql():
     assert c.source == "overture" and c.category == "overture=mobile_phone_store"
     assert c.email == "info@cellstory.pk" and c.city == "Islamabad"
     assert row_to_company({"name": ""}, "Islamabad", "Pakistan") is None
+
+
+def test_overture_row_prefers_the_places_own_locality_over_the_searched_area():
+    """Regression (2026-10-13 Virginia run): the searched area was written into every place's
+    city, so three Charleston/Huntington West Virginia agencies were exported as "Virginia"."""
+    from gtm_engine.discovery.overture import row_to_company
+
+    c = row_to_company({"id": "x", "name": "Ahmdigital", "city": "Charleston"}, "Virginia", "US")
+    assert c.city == "Charleston"
+    # No locality in the data: the searched area is still better than nothing.
+    assert row_to_company({"id": "x", "name": "Ahmdigital"}, "Virginia", "US").city == "Virginia"
+
+
+def test_overture_region_filter_drops_neighbours_a_bbox_cannot_exclude():
+    """Regression (2026-10-13 Virginia run): Virginia's bounding box is axis-aligned, so it
+    contains the whole of West Virginia. All three qualified leads - Digital Relativity,
+    Bulldog Creative Services, Ahmdigital - were WV agencies. Only the region field separates
+    them, and it has to match tolerantly: Nominatim gives "virginia"/"va", Overture says "VA"."""
+    from gtm_engine.discovery.overture import filter_by_region, region_matches
+
+    tokens = ("virginia", "va")
+    assert region_matches("VA", tokens)
+    assert not region_matches("WV", tokens)
+    # Spelled-out vs code, and a wider official name vs the short one.
+    assert region_matches("Madrid", ("comunidad de madrid", "md"))
+    # No region on the place, or no tokens for the area: never a contradiction.
+    assert region_matches(None, tokens) and region_matches("WV", ())
+
+    rows = [{"name": f"va{i}", "region": "VA"} for i in range(9)] + [
+        {"name": "wv1", "region": "WV"}, {"name": "oh1", "region": "OH"}]
+    kept = filter_by_region(rows, tokens, "Virginia")
+    assert [r["name"] for r in kept] == [f"va{i}" for i in range(9)]
+
+
+def test_overture_region_filter_keeps_everything_when_vocabularies_disagree():
+    """If the two datasets name regions differently the filter must not zero the run - same
+    fail-safe as the area proximity filter."""
+    from gtm_engine.discovery.overture import filter_by_region
+
+    rows = [{"name": str(i), "region": "Islamabad Capital Territory"} for i in range(20)]
+    assert filter_by_region(rows, ("federal capital", "zz"), "Islamabad") == rows
 
 
 def test_overture_category_column_follows_the_release_schema():

@@ -28,9 +28,37 @@ class BBox:
     west: float
     north: float
     east: float
+    # Names/codes of the administrative region the area sits in ("virginia", "va"), from
+    # Nominatim's addressdetails. A bounding box is axis-aligned, so for a concave region it
+    # necessarily covers its neighbours: Virginia's box spans -83.7..-75.2 and 36.5..39.5, which
+    # contains the whole of West Virginia. Discovery sources that carry a region field can use
+    # these tokens to drop the neighbours the box could not exclude.
+    region_tokens: tuple[str, ...] = ()
 
     def overpass(self) -> str:
         return f"{self.south},{self.west},{self.north},{self.east}"
+
+
+# Nominatim's addressdetails keys that name the region a place belongs to, broadest-useful first.
+_REGION_KEYS = ("state", "province", "region", "state_district", "county")
+
+
+def _region_tokens(address: dict) -> tuple[str, ...]:
+    """Lowercased region names plus the suffix of any ISO-3166-2 code, e.g.
+    {"virginia", "va"} for Virginia or {"islamabad capital territory", "is"} for Islamabad.
+    Both forms are needed because region vocabularies differ per dataset: Overture stores "VA"
+    for US places but spelled-out names in much of the world."""
+    out: list[str] = []
+    for key in _REGION_KEYS:
+        value = (address.get(key) or "").strip().lower()
+        if value and value not in out:
+            out.append(value)
+    for key, value in address.items():
+        if key.startswith("ISO3166-2") and isinstance(value, str) and "-" in value:
+            code = value.rsplit("-", 1)[1].strip().lower()
+            if code and code not in out:
+                out.append(code)
+    return tuple(out)
 
 
 class Geocoder:
@@ -46,9 +74,13 @@ class Geocoder:
 
     async def bbox(self, city: str, country: str | None) -> BBox | None:
         key = f"{city}|{country or ''}".lower()
-        if key in self._cache:
-            return BBox(**self._cache[key])
-        params = {"q": f"{city}, {country}" if country else city, "format": "json", "limit": 1}
+        cached = self._cache.get(key)
+        # Entries written before region_tokens existed are re-fetched rather than trusted: a box
+        # with no region tokens silently disables the region filter for that area.
+        if cached is not None and "region_tokens" in cached:
+            return BBox(**{**cached, "region_tokens": tuple(cached["region_tokens"])})
+        params = {"q": f"{city}, {country}" if country else city, "format": "json", "limit": 1,
+                  "addressdetails": 1}
         result = await self.fetcher.get(f"{NOMINATIM_URL}?{urlencode(params)}", delay=NOMINATIM_DELAY_S, api=True)
         if not result.ok:
             log.warning("geocode: %s failed (%s %s)", city, result.status_code, result.error)
@@ -61,8 +93,9 @@ class Geocoder:
             log.warning("geocode: no result for %r", params["q"])
             return None
         south, north, west, east = (float(v) for v in hits[0]["boundingbox"])
-        box = BBox(south=south, west=west, north=north, east=east)
-        self._cache[key] = box.__dict__
+        box = BBox(south=south, west=west, north=north, east=east,
+                   region_tokens=_region_tokens(hits[0].get("address") or {}))
+        self._cache[key] = {**box.__dict__, "region_tokens": list(box.region_tokens)}
         if self.cache_path:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             self.cache_path.write_text(json.dumps(self._cache, indent=1), encoding="utf-8")
