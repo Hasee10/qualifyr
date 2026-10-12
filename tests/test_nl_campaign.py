@@ -521,22 +521,81 @@ def test_discovery_relevance_filter_drops_irrelevant():
 
 
 def test_discovery_relevance_filter_passes_matching_category():
-    """User-configured categories bypass keyword check; derived ones do not."""
+    """A trusted target category bypasses the name-keyword check; others don't."""
     from gtm_engine.pipeline import _discovery_relevance_filter
     from gtm_engine.models import DiscoveredCompany
 
     companies = [
         DiscoveredCompany(name="ABC Store", category="shop=tools", source="osm"),
     ]
-    kept, dropped = _discovery_relevance_filter(
-        companies, ["laser"], {"shop=tools"}, user_configured_categories=True)
+    kept, dropped = _discovery_relevance_filter(companies, ["laser"], {"shop=tools"})
     assert dropped == 0
     assert len(kept) == 1
 
-    kept2, dropped2 = _discovery_relevance_filter(
-        companies, ["laser"], {"shop=tools"}, user_configured_categories=False)
+    kept2, dropped2 = _discovery_relevance_filter(companies, ["laser"], set())
     assert dropped2 == 1
     assert len(kept2) == 0
+
+
+def test_discovery_relevance_filter_overture_category_matches_by_substring():
+    """Regression (2026-10-12 Virginia run): "Media Placement Technologies" is an
+    overture=advertising_agency - a confirmed social-media-agency target - but its name carries
+    no "social media" phrase, so only the category bypass can keep it."""
+    from gtm_engine.pipeline import _discovery_relevance_filter
+    from gtm_engine.models import DiscoveredCompany
+
+    companies = [
+        DiscoveredCompany(name="Media Placement Technologies",
+                          category="overture=advertising_agency", source="overture"),
+        DiscoveredCompany(name="MEDIANOCHE", category="overture=flowers_and_gifts_store",
+                          source="overture"),
+        DiscoveredCompany(name="Social House Kitchen & Tap",
+                          category="overture=bar_and_grill_restaurant", source="overture"),
+    ]
+    kept, dropped = _discovery_relevance_filter(
+        companies, ["social media agencies", "social media"], {"overture=advertising_agency"})
+    assert [c.name for c in kept] == ["Media Placement Technologies"]
+    assert dropped == 2
+
+
+def test_industry_relevance_phrases_never_emits_bare_words_for_multiword_industry():
+    """Regression (2026-10-12 Virginia run): unigrams "social"/"media" substring-matched
+    restaurants and gift shops by name. Multi-word industries contribute phrases only."""
+    from gtm_engine.pipeline import _industry_relevance_phrases
+
+    phrases = _industry_relevance_phrases(["social media agencies"])
+    assert "social media agencies" in phrases
+    assert "social media" in phrases
+    for bare in ("social", "media", "agencies"):
+        assert bare not in phrases
+
+    # Single-word industries have no phrase to fall back on, so the word itself is kept.
+    assert _industry_relevance_phrases(["pharmacies"]) == ["pharmacies"]
+    # Two-word industries keep the whole phrase, no bigram split needed.
+    assert _industry_relevance_phrases(["grocery stores"]) == ["grocery stores"]
+
+
+def test_trusted_relevance_categories_excludes_broad_fallback():
+    """general_retail's shop=* / store / retail categories match every storefront, so they are
+    never standalone proof of relevance - but a specific derived sector's are."""
+    from gtm_engine.pipeline import _trusted_relevance_categories
+
+    def cfg(**kw):
+        return CampaignConfig(campaign_id="t", name="t", offer="x", **kw)
+
+    broad = cfg(osm_categories=["shop=*"], overture_categories=["store", "retail"])
+    assert _trusted_relevance_categories(broad, ["general_retail"], False) == set()
+
+    niche = cfg(osm_categories=["office=advertising_agency"],
+                overture_categories=["advertising_agency"])
+    assert _trusted_relevance_categories(niche, ["_niche"], False) == {
+        "office=advertising_agency", "overture=advertising_agency"}
+
+    # Explicit user categories are trusted even with no derived sectors at all.
+    assert _trusted_relevance_categories(niche, [], True) == {
+        "office=advertising_agency", "overture=advertising_agency"}
+    # ...and a wildcard stays untrusted whichever sector contributed it.
+    assert _trusted_relevance_categories(broad, [], True) == {"overture=store", "overture=retail"}
 
 
 def test_discovery_relevance_filter_noop_without_keywords():

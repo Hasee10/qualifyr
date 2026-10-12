@@ -162,32 +162,90 @@ def build_personalization_hook(company: DiscoveredCompany, cls: Classification, 
 INTENT_THRESHOLD = 0.6
 
 
+# The one taxonomy sector whose categories (shop=* / store / retail / shop) match every
+# storefront in the area. match_sectors() only emits it when nothing more specific matched, so
+# a derived sector list of exactly this is the "we had no idea" case - its categories are never
+# trusted as standalone proof that a company is relevant.
+_BROAD_FALLBACK_SECTOR = "general_retail"
+
+
+def _industry_relevance_phrases(industries: list[str]) -> list[str]:
+    """Relevance keywords for the campaign's target industries, as phrases rather than bare words.
+
+    `_discovery_relevance_filter` substring-matches these against name+category+address, so a
+    unigram like "social" or "media" taken from "social media agencies" matches any business with
+    that word in its NAME: the 2026-10-12 Virginia run pulled in "Social House Kitchen & Tap",
+    "MEDIANOCHE" (a gift shop) and "Back to the Media" that way. The full phrase plus its bigrams
+    keep real recall ("social media" still matches a social-media agency's name or category) while
+    being specific enough not to match a restaurant. Single-word industries are kept as-is.
+    """
+    out: list[str] = []
+    for ind in industries:
+        words = [w for w in ind.lower().split() if len(w) > 2]
+        phrases = [ind.lower().strip()] if len(words) > 1 else words
+        if len(words) > 2:
+            phrases += [f"{a} {b}" for a, b in zip(words, words[1:])]
+        for phrase in phrases:
+            if phrase and phrase not in out:
+                out.append(phrase)
+    return out
+
+
+def _category_in(category: str, cats: set[str]) -> bool:
+    """Whether a discovery category matches one the campaign is targeting. Overture categories
+    match by substring, the same way BuyerClassifier does: the campaign asks for
+    `advertising_agency` and Overture may return `marketing_and_advertising_agency`."""
+    if category in cats:
+        return True
+    key, _, value = category.partition("=")
+    if key != "overture" or not value:
+        return False
+    value = value.lower()
+    return any(c.partition("=")[2].lower() in value for c in cats if c.startswith("overture="))
+
+
+def _trusted_relevance_categories(campaign: CampaignConfig, derived_sectors: list[str],
+                                  user_configured: bool) -> set[str]:
+    """Discovery categories specific enough that a match is proof of relevance on its own.
+
+    Explicit user-configured categories always count. Derived ones count too when they are
+    specific - a niche or sector match like `office=advertising_agency` means discovery already
+    confirmed the business type, and the name-keyword gate would otherwise drop genuine targets
+    whose name doesn't happen to repeat the industry (the 2026-10-12 Virginia run would have lost
+    "Media Placement Technologies", an `overture=advertising_agency`, from a social-media-agencies
+    campaign). Only the broad general_retail fallback is excluded.
+    """
+    cats = set(campaign.osm_categories) | {f"overture={c}" for c in campaign.overture_categories}
+    if not user_configured and (not derived_sectors or derived_sectors == [_BROAD_FALLBACK_SECTOR]):
+        return set()
+    # A wildcard tag is broad whichever sector contributed it.
+    return {c for c in cats if not c.endswith("=*")}
+
+
 def _discovery_relevance_filter(
     companies: list[DiscoveredCompany],
     offer_keywords: list[str],
-    campaign_categories: set[str] | None = None,
-    *,
-    user_configured_categories: bool = False,
+    trusted_categories: set[str] | None = None,
 ) -> tuple[list[DiscoveredCompany], int]:
     """Drop map-sourced companies whose name/category/address contain none of the offer keywords.
 
     Web-search results pass automatically (the query already targeted them).  Companies whose
-    discovery category matches one the campaign explicitly requested also pass – but only when
-    those categories were explicitly user-configured, not derived from a fallback sector.
+    discovery category is one of `trusted_categories` also pass – see
+    `_trusted_relevance_categories` for which categories earn that trust.
     When no keywords are available (generic campaign), everything passes – the filter is a no-op.
     Returns (kept, dropped_count).
     """
     terms = [t.strip().lower() for t in offer_keywords if t and t.strip()]
     if not terms:
         return companies, 0
-    cats = campaign_categories or set()
+    cats = trusted_categories or set()
     kept: list[DiscoveredCompany] = []
     dropped = 0
     for c in companies:
         if c.source in ("websearch", "ppra", "kcci", "seed_csv"):
             kept.append(c)
             continue
-        if user_configured_categories and c.category and c.category in cats:
+        if c.category and _category_in(c.category, cats):
             kept.append(c)
             continue
         # A missing category keeps the company: untagged OSM POIs are common and dropping them
@@ -1147,10 +1205,9 @@ class Pipeline:
         # file-based examples and legacy shared campaigns, which use the shared scope.
         self._owner_id = self.db.campaign_owner(campaign.campaign_id)
         self._relevance_keywords = await self._build_relevance_keywords(campaign)
-        for ind in campaign.target_industries:
-            for word in ind.lower().split():
-                if word not in self._relevance_keywords and len(word) > 2:
-                    self._relevance_keywords.append(word)
+        for phrase in _industry_relevance_phrases(campaign.target_industries):
+            if phrase not in self._relevance_keywords:
+                self._relevance_keywords.append(phrase)
         stats.relevance_keywords = self._relevance_keywords
         # Feed the generated keywords into discovery itself, not just the relevance gate: a
         # deep copy (so the caller's config is untouched) whose intent_keywords carry the
@@ -1193,11 +1250,10 @@ class Pipeline:
                 discovered, stats.area_proximity_dropped = await _area_proximity_filter(
                     discovered, campaign.geography.areas, campaign.geography.cities,
                     self.fetcher, self.settings)
-            campaign_cats = (set(campaign.osm_categories)
-                            | {f"overture={c}" for c in campaign.overture_categories})
+            trusted_cats = _trusted_relevance_categories(
+                campaign, stats.discovery_sectors, user_configured_categories)
             discovered, stats.discovery_relevance_dropped = _discovery_relevance_filter(
-                discovered, self._relevance_keywords, campaign_cats,
-                user_configured_categories=user_configured_categories)
+                discovered, self._relevance_keywords, trusted_cats)
             target_desc = _relevance_target_desc(campaign.target_industries, stats.discovery_sectors)
             if self.llm and target_desc and discovered:
                 map_sourced = [c for c in discovered if c.source not in ("websearch", "ppra", "kcci", "seed_csv")]
