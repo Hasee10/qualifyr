@@ -123,6 +123,24 @@ def test_agency_is_still_vendor_when_not_the_campaign_target(campaign, defaults)
     assert cls.company_type == CompanyType.VENDOR
 
 
+def test_spanish_agency_vendor_terms_detected_with_language_hint(campaign, defaults):
+    """Without a language hint, the English-only default keyword lists find nothing in Spanish
+    text and the company falls to UNKNOWN - not wrong, just uninformative. Passing language="es"
+    widens the vendor-term match with the Spanish translations in vendor_rules_i18n.yaml, so a
+    real Spanish-language agency is still caught as a VENDOR instead of staying UNKNOWN forever."""
+    bundle = TextBundle(name="Agencia Creativa Madrid", title="Agencia Creativa Madrid",
+                        description="Somos una agencia de marketing digital",
+                        about_text="Ofrecemos servicios de marketing digital para empresas",
+                        body_text="nuestros clientes incluyen las mejores marcas de espana",
+                        category=None)
+    cls_no_hint = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls_no_hint.company_type != CompanyType.VENDOR  # English keywords don't match Spanish text
+
+    cls_es = BuyerClassifier(campaign, defaults).classify(bundle, language="es")
+    assert cls_es.company_type == CompanyType.VENDOR
+    assert "agencia" in cls_es.vendor_hits
+
+
 # --- enrichment ------------------------------------------------------------------
 
 def test_role_rank_blacklists_sales(campaign, defaults):

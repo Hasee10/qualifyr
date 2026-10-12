@@ -8,12 +8,31 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import quote_plus
+
+import yaml
 
 from gtm_engine.models import OnlinePresence
 from gtm_engine.scraping.site_crawler import SiteSnapshot
 
 log = logging.getLogger(__name__)
+
+_DELIVERY_PLATFORMS_PATH = Path(__file__).resolve().parents[2] / "config" / "defaults" / "delivery_platforms.yaml"
+
+
+@lru_cache(maxsize=1)
+def _load_delivery_platforms() -> dict[str, dict[str, re.Pattern]]:
+    """{"_global": {...}, "pakistan": {...}, ...} -> compiled regex per platform per country,
+    cached since the file never changes at runtime."""
+    try:
+        data = yaml.safe_load(_DELIVERY_PLATFORMS_PATH.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        log.warning("delivery_platforms.yaml not found at %s", _DELIVERY_PLATFORMS_PATH)
+        return {}
+    return {country: {name: re.compile(pattern, re.I) for name, pattern in platforms.items()}
+            for country, platforms in data.items()}
 
 # ── e-commerce detection ────────────────────────────────────────────────
 
@@ -33,17 +52,9 @@ _ECOMMERCE_PLATFORMS: dict[str, re.Pattern] = {
     "prestashop": re.compile(r"prestashop|modules/ps_", re.I),
 }
 
-# ── delivery platforms (Pakistan-focused) ────────────────────────────────
-
-DELIVERY_PLATFORMS = {
-    "foodpanda": re.compile(r"foodpanda\.pk", re.I),
-    "daraz": re.compile(r"daraz\.pk", re.I),
-    "bykea": re.compile(r"bykea\.com", re.I),
-    "careem": re.compile(r"careem\.com", re.I),
-    "yango": re.compile(r"yango\.(com|pk)", re.I),
-    "cheetay": re.compile(r"cheetay\.pk", re.I),
-    "golootlo": re.compile(r"golootlo\.com", re.I),
-}
+# ── delivery platforms ────────────────────────────────────────────────────
+# See config/defaults/delivery_platforms.yaml: "_global" platforms are checked for every
+# country, country-specific ones (Daraz, Foodpanda, ...) only for that country.
 
 
 def _detect_ecommerce(snapshot: SiteSnapshot) -> tuple[bool, bool, str | None]:
@@ -84,15 +95,22 @@ def _detect_social(snapshot: SiteSnapshot) -> dict[str, str | None]:
     return social
 
 
-def _detect_delivery_platforms(snapshot: SiteSnapshot) -> list[str]:
-    """Check if the site links to or mentions known delivery platforms."""
+def _detect_delivery_platforms(snapshot: SiteSnapshot, country: str | None) -> list[str]:
+    """Check if the site links to or mentions known delivery platforms: global players
+    always, plus the country's own local platforms when the company's country is known."""
     if not snapshot.reachable:
         return []
     text = snapshot.all_text.lower()
     html_blob = " ".join(snapshot.raw_html.values()).lower()
     combined = text + " " + html_blob
+    platforms_by_country = _load_delivery_platforms()
+    patterns = dict(platforms_by_country.get("_global", {}))
+    # No country on the record (callers that never pass one, legacy campaigns before this field
+    # was threaded through) defaults to Pakistan - today's only real market - rather than
+    # silently dropping local-platform detection.
+    patterns.update(platforms_by_country.get((country or "pakistan").strip().lower(), {}))
     found: list[str] = []
-    for name, pattern in DELIVERY_PLATFORMS.items():
+    for name, pattern in patterns.items():
         if pattern.search(combined):
             found.append(name)
     return found
@@ -151,6 +169,7 @@ def audit_online_presence(
     snapshot: SiteSnapshot,
     company_name: str | None = None,
     technologies: list[str] | None = None,
+    country: str | None = None,
 ) -> OnlinePresence:
     """Run the full online-presence audit from a crawled site snapshot."""
     has_ecommerce, has_cart, ecommerce_platform = _detect_ecommerce(snapshot)
@@ -165,7 +184,7 @@ def audit_online_presence(
 
     has_whatsapp, whatsapp_number = _detect_whatsapp(snapshot)
     social = _detect_social(snapshot)
-    delivery_platforms = _detect_delivery_platforms(snapshot)
+    delivery_platforms = _detect_delivery_platforms(snapshot, country)
     delivery_model = _infer_delivery_model(has_ecommerce, delivery_platforms, has_whatsapp, snapshot)
 
     notes: list[str] = []

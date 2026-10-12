@@ -47,6 +47,7 @@ from gtm_engine.models import (
     Classification, CompanyQuality, CompanyType, Contact, DiscoveredCompany, EmailStatus, Lead,
     OnlinePresence, SequenceStatus, Signals, new_id, score_contact_confidence,
 )
+from gtm_engine.enrichment.language import detect_language
 from gtm_engine.qualification.buyer_classifier import BuyerClassifier, TextBundle
 from gtm_engine.scoring.proximity import haversine_km
 from gtm_engine.personalization.features import extract_features_from_score
@@ -719,10 +720,12 @@ class Pipeline:
             site_reachable=snapshot.reachable,
             tender_terms=(company.extra.get("intent") or {}).get("matched_terms") or None,
         )
-        cls = classifier.classify(bundle)
+        page_language = detect_language(bundle.body_text) if snapshot.reachable else None
+        cls = classifier.classify(bundle, language=page_language)
         quality = assess_quality(snapshot, company.name, domain)
         signals = detect_signals(snapshot, self.defaults) if snapshot.reachable else Signals()
-        online_presence = audit_online_presence(snapshot, company.name, signals.technologies)
+        online_presence = audit_online_presence(snapshot, company.name, signals.technologies,
+                                                 country=company.country)
 
         # Opening hours from OSM discovery tags
         osm_hours = company.extra.get("opening_hours")

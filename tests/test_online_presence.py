@@ -122,6 +122,25 @@ def test_multiple_delivery_platforms():
     assert "bykea" in op.delivery_platforms
 
 
+def test_pakistani_platform_not_claimed_as_gap_for_spain():
+    """A Spanish company using Glovo (a real international platform) must be detected; it must
+    never be penalised for lacking Daraz/Foodpanda, which don't operate in Spain - checking for
+    a platform that structurally cannot exist there isn't a real online-gap signal."""
+    html = '<html><body><p>Pide ya en glovo.es</p></body></html>'
+    op = audit_online_presence(_snapshot_with_html(html), country="Spain")
+    assert "glovo" in op.delivery_platforms
+    assert "foodpanda" not in op.delivery_platforms
+    assert "daraz" not in op.delivery_platforms
+
+
+def test_global_platform_detected_regardless_of_country():
+    html = '<html><body><p>Order via ubereats.com</p></body></html>'
+    op_pk = audit_online_presence(_snapshot_with_html(html), country="Pakistan")
+    op_es = audit_online_presence(_snapshot_with_html(html), country="Spain")
+    assert "ubereats" in op_pk.delivery_platforms
+    assert "ubereats" in op_es.delivery_platforms
+
+
 # ── delivery model inference ────────────────────────────────────────────
 
 def test_own_delivery_inferred():
