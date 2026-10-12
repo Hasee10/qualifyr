@@ -96,6 +96,33 @@ def test_allowed_vendor_keyword_is_not_negative(campaign, defaults):
     assert cls.company_type == CompanyType.BUYER
 
 
+def test_campaign_targeting_agencies_does_not_self_reject(campaign, defaults):
+    """A campaign whose own target_industries IS an agency/consultancy type ("find marketing
+    agencies") must not have every real marketing agency auto-rejected as a VENDOR just because
+    "agency" and "marketing services" are generic default negative_keywords - without this, such
+    a campaign could never qualify anything it finds, in any country."""
+    campaign.target_industries = ["marketing agency"]
+    bundle = TextBundle(name="Acme Digital Marketing Agency", title="Acme Digital Marketing Agency",
+                        description="A full-service digital marketing agency",
+                        about_text="We are a creative agency offering marketing services to brands",
+                        body_text="we are a marketing agency serving small business owners",
+                        category="office=marketing")
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.BUYER
+
+
+def test_agency_is_still_vendor_when_not_the_campaign_target(campaign, defaults):
+    """The auto-whitelist in test_campaign_targeting_agencies_does_not_self_reject only applies
+    when the campaign's own target_industries names that business type - an unrelated campaign
+    (here: retail/clothing/fashion, per the `campaign` fixture) must keep rejecting agencies
+    exactly as before."""
+    home = parse_page("https://pixeldigital.pk/", fixture("agency_home.html"))
+    bundle = TextBundle(name="Pixel Digital", title=home.title, description=home.description,
+                        about_text=home.text, body_text=home.text, category=None)
+    cls = BuyerClassifier(campaign, defaults).classify(bundle)
+    assert cls.company_type == CompanyType.VENDOR
+
+
 # --- enrichment ------------------------------------------------------------------
 
 def test_role_rank_blacklists_sales(campaign, defaults):

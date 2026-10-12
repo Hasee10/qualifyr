@@ -50,25 +50,79 @@ def _find_terms(text: str, terms: list[str]) -> list[str]:
     return hits
 
 
+_STOPWORDS = {"the", "a", "an", "of", "for", "and", "in", "to", "services", "service", "company", "companies"}
+_STEM_LEN = 5  # common-prefix length treated as "same word" (agency/agencies, consult/consulting)
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if w not in _STOPWORDS and len(w) > 2}
+
+
+def _stem(word: str) -> str:
+    return word[:_STEM_LEN] if len(word) >= _STEM_LEN else word
+
+
+def _terms_matching(candidates: list[str], target_stems: set[str]) -> set[str]:
+    """Candidate vendor terms (negative_keywords / vendor_phrases / vendor_categories) that
+    share a word stem with the campaign's own target_industries/buyer_keywords."""
+    if not target_stems:
+        return set()
+    matched = set()
+    for term in candidates:
+        if any(_stem(w) in target_stems for w in _words(term)):
+            matched.add(term)
+    return matched
+
+
 class BuyerClassifier:
     def __init__(self, campaign: CampaignConfig, defaults: DefaultRules):
-        allowed = set(campaign.allowed_vendor_keywords)
+        # A campaign whose own target_industries/buyer_keywords names an agency/consultancy-type
+        # business ("find marketing agencies") is deliberately searching for that business type
+        # as its BUYER - but defaults.negative_keywords/vendor_phrases/vendor_categories reject
+        # agencies/consultancies by default (they usually sell services rather than buy them).
+        # Without this, any such campaign auto-rejects almost everything it finds, since a real
+        # marketing agency's own name/site will say "agency" and "marketing services" about
+        # itself. Stem-matching (common 5-char prefix) catches agency/agencies, consult/consulting
+        # etc. without needing exact-string overlap. This mirrors allowed_vendor_keywords exactly -
+        # it just derives the list automatically from what the campaign already says it wants,
+        # instead of requiring the user to repeat it by hand.
+        target_stems = {_stem(w) for w in _words(" ".join(campaign.target_industries + campaign.buyer_keywords))}
+        auto_allowed = (_terms_matching(defaults.negative_keywords, target_stems)
+                        | _terms_matching(defaults.vendor_phrases, target_stems)
+                        | _terms_matching(defaults.vendor_categories, target_stems))
+        allowed = set(campaign.allowed_vendor_keywords) | auto_allowed
+        self._allowed = allowed
         self.vendor_terms = [t for t in dict.fromkeys(defaults.negative_keywords + campaign.negative_keywords)
                              if t not in allowed]
         self.vendor_phrases = [t for t in defaults.vendor_phrases if t not in allowed]
+        self._negative_i18n = defaults.negative_keywords_i18n
+        self._phrases_i18n = defaults.vendor_phrases_i18n
         self.buyer_terms = list(dict.fromkeys(campaign.buyer_keywords + campaign.target_industries))
         self.osm_categories = set(campaign.osm_categories)
         self.overture_categories = list(campaign.overture_categories)
         self.vendor_categories = {c for c in defaults.vendor_categories if c not in allowed}
 
-    def classify(self, bundle: TextBundle) -> Classification:
+    def _vendor_terms_for(self, language: str | None) -> tuple[list[str], list[str]]:
+        """Vendor negative-keywords and self-description phrases to match against, widened
+        with the detected page language's translated lists (if we maintain one for it).
+        English pages (or undetected language) use the base lists unchanged."""
+        if not language or language == "en":
+            return self.vendor_terms, self.vendor_phrases
+        extra_terms = [t for t in self._negative_i18n.get(language, []) if t not in self._allowed]
+        extra_phrases = [t for t in self._phrases_i18n.get(language, []) if t not in self._allowed]
+        terms = self.vendor_terms + [t for t in extra_terms if t not in self.vendor_terms]
+        phrases = self.vendor_phrases + [t for t in extra_phrases if t not in self.vendor_phrases]
+        return terms, phrases
+
+    def classify(self, bundle: TextBundle, language: str | None = None) -> Classification:
         identity, body = bundle.identity, bundle.body
         reasons: list[str] = []
+        vendor_terms, vendor_phrases = self._vendor_terms_for(language)
 
-        vendor_name = _find_terms(bundle.name.lower(), self.vendor_terms)
-        vendor_id = _find_terms(identity, self.vendor_terms)
-        vendor_body = [t for t in _find_terms(body, self.vendor_terms) if t not in vendor_id]
-        phrase_hits = _find_terms(body, self.vendor_phrases)
+        vendor_name = _find_terms(bundle.name.lower(), vendor_terms)
+        vendor_id = _find_terms(identity, vendor_terms)
+        vendor_body = [t for t in _find_terms(body, vendor_terms) if t not in vendor_id]
+        phrase_hits = _find_terms(body, vendor_phrases)
         buyer_id = _find_terms(identity, self.buyer_terms)
         buyer_body = [t for t in _find_terms(body, self.buyer_terms) if t not in buyer_id]
 

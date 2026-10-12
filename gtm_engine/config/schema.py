@@ -168,6 +168,12 @@ class DefaultRules(BaseModel):
     negative_keywords: list[str] = Field(default_factory=list)
     # Self-descriptions typical of service sellers ("our clients include", "hire us").
     vendor_phrases: list[str] = Field(default_factory=list)
+    # Non-English translations of the two lists above, keyed by ISO 639-1 language code.
+    # Applied on top of the English lists when the crawled page's detected language has an
+    # entry here; campaign-specific buyer terms are not pre-translatable this way and use
+    # the LLM grounded fallback in llm/tasks.py instead. See vendor_rules_i18n.yaml.
+    negative_keywords_i18n: dict[str, list[str]] = Field(default_factory=dict)
+    vendor_phrases_i18n: dict[str, list[str]] = Field(default_factory=dict)
     # Discovery categories (OSM tags) that describe sellers of services by definition.
     vendor_categories: list[str] = Field(default_factory=list)
     buyer_role_whitelist: list[str] = Field(default_factory=list)
