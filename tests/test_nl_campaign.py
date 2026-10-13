@@ -10,6 +10,7 @@ from gtm_engine.campaign.nl_parser import (
     parse_intent,
 )
 from gtm_engine.config.schema import CampaignConfig
+from gtm_engine.discovery.targeting import derive_discovery_targets
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,20 @@ def test_self_described_offer_ignores_trailing_constraints():
     become the offer and its words would become relevance keywords."""
     assert parse_intent("Find pharmacies in Lahore. Must have 10+ reviews.").offer is None
     assert parse_intent("Find pharmacies in Lahore.").offer is None
+
+
+async def test_prompt_sectors_are_the_sectors_discovery_will_search():
+    """The confirmation prompt must not advertise a sector the run won't search. These were
+    computed in two places, so the 2026-10-13 Karachi campaign printed
+    "sectors: ['electronics', 'food_restaurant']" while searching food_restaurant alone."""
+    text = ("We set up an online ordering website with card payment links for restaurants "
+            "that currently take delivery orders only over the phone. Find restaurants in Karachi.")
+    draft = parse_intent(text)
+    cfg = build_campaign_config(draft)
+    targets = await derive_discovery_targets(cfg.offer, cfg.target_industries,
+                                             cities=cfg.geography.cities)
+    assert draft.sectors == ["food_restaurant"]
+    assert draft.sectors == targets.sectors
 
 
 def test_no_offer_uses_sectors_for_offer():

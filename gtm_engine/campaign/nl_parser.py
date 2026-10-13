@@ -21,7 +21,7 @@ import yaml
 
 from gtm_engine.config.loader import DEFAULTS_DIR, slugify_campaign_id
 from gtm_engine.config.schema import CampaignConfig, GeographyConfig
-from gtm_engine.discovery.targeting import load_taxonomy, match_sectors
+from gtm_engine.discovery.targeting import load_taxonomy, resolve_sectors
 
 log = logging.getLogger(__name__)
 
@@ -425,7 +425,11 @@ def parse_intent(text: str) -> CampaignDraft:
     full_text = text
     if draft.offer:
         full_text = f"{text} {draft.offer}"
-    draft.sectors = match_sectors(full_text, draft.target_industries or None, taxonomy)
+    # resolve_sectors, not match_sectors: discovery applies the named-industries precedence rule,
+    # and computing these independently let the confirmation prompt advertise sectors the run
+    # never searched - the 2026-10-13 Karachi campaign printed "sectors: ['electronics',
+    # 'food_restaurant']" while actually searching food_restaurant alone.
+    draft.sectors = resolve_sectors(full_text, draft.target_industries or None, taxonomy)
 
     neg, chains = _extract_exclusions(text)
     draft.negative_keywords = neg

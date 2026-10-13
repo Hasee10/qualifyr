@@ -290,6 +290,37 @@ def match_sectors(offer: str, industries: list[str] | None, taxonomy: dict) -> l
     return hits
 
 
+def resolve_sectors(offer: str, industries: list[str] | None, taxonomy: dict) -> list[str]:
+    """The sectors a campaign actually targets.
+
+    When the campaign names its target industries, THOSE decide what to search for. The offer
+    describes what we sell and the buyer's current situation, so sectors it matches incidentally
+    are guesses about buyers - the same thing _llm_sectors produces, and just as damaging once
+    they become discovery targets. The 2026-10-13 Karachi run ("...for restaurants that currently
+    take delivery orders only over the phone...", industries=["restaurants"]) matched electronics
+    on "phone" and so searched mobile_phone_store and computer across Karachi: 11 of its 15
+    outreach-ready "restaurants" were computer and electronics shops.
+
+    Only applied when the industries themselves match something specific - if they are too vague
+    for the taxonomy, the offer's match is still better than nothing, and an empty specific match
+    drops through to the niche fallback in derive_discovery_targets().
+
+    Shared with the NL parser so the sectors shown at the confirmation prompt are the sectors the
+    run will really use; computing them in two places let the prompt advertise `electronics` for a
+    restaurant campaign that never searched it."""
+    det_sectors = match_sectors(offer, industries, taxonomy)
+    if not industries:
+        return det_sectors
+    from_industries = match_sectors("", industries, taxonomy)
+    if not [s for s in from_industries if s != "general_retail"]:
+        return det_sectors
+    if set(from_industries) != set(det_sectors):
+        log.info("sectors from named industries %s: %s (offer alone also matched %s)",
+                 industries, from_industries,
+                 [s for s in det_sectors if s not in from_industries])
+    return from_industries
+
+
 async def _llm_sectors(llm: LLM, offer: str, taxonomy: dict) -> list[str]:
     keys = list(taxonomy.keys())
     system = ("You select which business sectors would BUY the seller's offer, choosing ONLY "
@@ -362,25 +393,7 @@ async def derive_discovery_targets(offer: str, industries: list[str] | None = No
     # those guesses were folded into `sectors` before the niche-fallback check below, they would
     # make `sectors` look non-empty and silently block the industry-specific niche fallback that
     # should run instead - so niche fallback is gated on the deterministic match only.
-    det_sectors = match_sectors(offer, industries, taxonomy)
-    # When the campaign names its target industries, THOSE decide what to search for. The offer
-    # describes what we sell and the buyer's current situation, so sectors it matches incidentally
-    # are guesses about buyers - the same thing _llm_sectors produces, and just as damaging once
-    # they become discovery targets. The 2026-10-13 Karachi run ("...for restaurants that
-    # currently take delivery orders only over the phone...", industries=["restaurants"]) matched
-    # electronics on "phone" and so searched mobile_phone_store and computer across Karachi:
-    # 11 of its 15 outreach-ready "restaurants" were computer and electronics shops.
-    # Only applied when the industries themselves match something specific - if they are too
-    # vague for the taxonomy, the offer's match is still better than nothing, and an empty
-    # specific match drops through to the niche fallback below.
-    if industries:
-        from_industries = match_sectors("", industries, taxonomy)
-        if [s for s in from_industries if s != "general_retail"]:
-            if set(from_industries) != set(det_sectors):
-                log.info("sectors from named industries %s: %s (offer alone also matched %s)",
-                         industries, from_industries,
-                         [s for s in det_sectors if s not in from_industries])
-            det_sectors = from_industries
+    det_sectors = resolve_sectors(offer, industries, taxonomy)
     # A deterministic match of ONLY the broad general_retail fallback is not a real match. Its
     # match terms are "retail, store, shop, brand, outlet, seller, merchant", so it fires on any
     # offer that merely contains one of those words in passing - the 2026-10-13 Virginia run hit
