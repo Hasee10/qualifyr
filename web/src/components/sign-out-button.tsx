@@ -17,7 +17,7 @@ export function SignOutButton() {
   async function signOut() {
     await createClient().auth.signOut()
     // replace(), not push(): the dashboard must not be reachable with the back button
-    // after signing out. refresh() then re-runs the middleware against the cleared cookie.
+    // after signing out. refresh() then re-runs the proxy against the cleared cookie.
     router.replace("/sign-in")
     router.refresh()
   }

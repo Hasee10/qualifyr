@@ -57,7 +57,7 @@ export function SignInForm() {
         setError(error.message)
         return
       }
-      // refresh() so the middleware re-runs with the new session cookie before we land.
+      // refresh() so the proxy re-runs with the new session cookie before we land.
       router.replace(params.get("next") || "/dashboard")
       router.refresh()
     } catch (err) {

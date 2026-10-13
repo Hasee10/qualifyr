@@ -7,7 +7,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseConfigured } from "@/lib/supab
  *  assets - is public. */
 const PROTECTED = ["/dashboard", "/campaigns", "/leads", "/outreach", "/settings"]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 

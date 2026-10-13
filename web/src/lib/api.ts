@@ -250,7 +250,7 @@ async function accessToken(): Promise<string | null> {
  * redirects on every call and loops. */
 async function handleUnauthorized(): Promise<void> {
   if (typeof window === "undefined") return
-  // Sign out the stale local session so the middleware stops thinking we're
+  // Sign out the stale local session so the proxy stops thinking we're
   // authenticated (which would bounce /sign-in back to /dashboard → loop).
   try { const sb = (await import("@/lib/supabase/client")).createClient(); await sb.auth.signOut() } catch { /* best effort */ }
   const key = "__qualifyr_401_redirect"
